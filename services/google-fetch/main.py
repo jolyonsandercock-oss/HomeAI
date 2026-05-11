@@ -399,6 +399,97 @@ def _walk_attachments(part: dict, out: list):
         _walk_attachments(sub, out)
 
 
+# ─── /send/{account} — RFC 2822 → Gmail users.messages.send ─────
+from pydantic import BaseModel as _BaseModel  # local alias so this is self-contained
+
+
+class SendEmailRequest(_BaseModel):
+    to: str | list[str]
+    subject: str
+    body_text: str | None = None
+    body_html: str | None = None
+    cc: str | list[str] | None = None
+    bcc: str | list[str] | None = None
+    reply_to: str | None = None
+    in_reply_to: str | None = None        # for threading replies
+    references: str | None = None         # for threading replies
+
+
+def _as_list(v):
+    if v is None: return []
+    return v if isinstance(v, list) else [v]
+
+
+def _build_rfc822(from_addr: str, req: SendEmailRequest) -> bytes:
+    """Build a minimal multipart/alternative RFC 2822 message."""
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.utils import formatdate, make_msgid
+
+    if req.body_html:
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(req.body_text or "", "plain", "utf-8"))
+        msg.attach(MIMEText(req.body_html, "html", "utf-8"))
+    else:
+        msg = MIMEText(req.body_text or "", "plain", "utf-8")
+
+    msg["From"]    = from_addr
+    msg["To"]      = ", ".join(_as_list(req.to))
+    msg["Subject"] = req.subject
+    if req.cc:        msg["Cc"]  = ", ".join(_as_list(req.cc))
+    if req.bcc:       msg["Bcc"] = ", ".join(_as_list(req.bcc))
+    if req.reply_to:  msg["Reply-To"] = req.reply_to
+    if req.in_reply_to: msg["In-Reply-To"] = req.in_reply_to
+    if req.references: msg["References"]  = req.references
+    msg["Date"]      = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain="malthousetintagel.com")
+    return msg.as_bytes()
+
+
+@app.post("/send/{account}")
+async def send_email(account: str, req: SendEmailRequest):
+    """Send an email via Gmail API as `account`. Requires gmail.send (covered
+    by the gmail.modify scope already in DEFAULT_SCOPES). Returns the sent
+    message id + thread id."""
+    import base64
+    acc = await find_account(account)
+    tok = await access_token(acc)
+
+    raw = _build_rfc822(acc["email"], req)
+    encoded = base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+    t0 = time.time()
+    body: dict[str, Any] = {"raw": encoded}
+    if req.in_reply_to:
+        # Best-effort threading — if the original message id matches a thread
+        # we'd want to set threadId here. Gmail finds the thread by header
+        # most of the time, so leaving threadId off is usually fine.
+        pass
+
+    r = await app.state.http.post(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        json=body,
+        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+    )
+    dur = int((time.time() - t0) * 1000)
+    await log_call(account, "gmail", "messages.send", r.status_code, dur,
+                   None if r.status_code == 200 else r.text[:300])
+
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, r.text)
+
+    body = r.json()
+    return {
+        "account":     account,
+        "from":        acc["email"],
+        "to":          _as_list(req.to),
+        "message_id":  body.get("id"),
+        "thread_id":   body.get("threadId"),
+        "label_ids":   body.get("labelIds", []),
+        "size":        len(raw),
+    }
+
+
 # ─── /poll-and-emit ─────────────────────────────────────────────
 @app.post("/poll-and-emit")
 async def poll_and_emit(newer_than: str = Query("1d"), max_per_account: int = Query(50, ge=1, le=200)):
