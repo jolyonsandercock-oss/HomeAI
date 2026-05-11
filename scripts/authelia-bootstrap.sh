@@ -46,12 +46,31 @@ vault_put() {
     vault kv put "$1" "$2=$3" >/dev/null
 }
 
+# Helper — if Vault is empty, import the value from the live rendered config
+# rather than generating fresh (which would invalidate cookies + sessions).
+import_or_generate() {  # vault_path field grep_pattern var_name
+  local vpath="$1" field="$2" pat="$3" name="$4" existing=""
+  if [[ -r "$CONFIG" ]]; then
+    existing=$(grep -oP "$pat" "$CONFIG" || true)
+  fi
+  if [[ -n "$existing" ]]; then
+    echo -e "${YEL}→${NC} found existing $name in $CONFIG"
+    read -rp "Import into Vault? [Y/n] (N = generate fresh, invalidates sessions): " imp
+    if [[ ! "${imp:-Y}" =~ ^[Nn] ]]; then
+      printf '%s' "$existing"
+      return
+    fi
+  fi
+  openssl rand -hex 32
+}
+
 # ── 1. Encryption key ──────────────────────────────────────────
 ENC=$(vault_get secret/authelia/encryption secret) || ENC=""
 if [[ -z "$ENC" ]]; then
-  ENC=$(openssl rand -hex 32)
+  ENC=$(import_or_generate secret/authelia/encryption secret \
+        "^\s*encryption_key:\s*'\K[a-f0-9]{32,}" "encryption_key")
   vault_put secret/authelia/encryption secret "$ENC"
-  echo -e "${YEL}→${NC} generated + stored secret/authelia/encryption"
+  echo -e "${YEL}→${NC} stored to secret/authelia/encryption"
 else
   echo -e "${GREEN}✓${NC} encryption key from Vault"
 fi
@@ -59,9 +78,10 @@ fi
 # ── 2. JWT secret ──────────────────────────────────────────────
 JWT=$(vault_get secret/authelia/jwt secret) || JWT=""
 if [[ -z "$JWT" ]]; then
-  JWT=$(openssl rand -hex 32)
+  JWT=$(import_or_generate secret/authelia/jwt secret \
+        "^\s*jwt_secret:\s*'\K[a-f0-9]{32,}" "jwt_secret")
   vault_put secret/authelia/jwt secret "$JWT"
-  echo -e "${YEL}→${NC} generated + stored secret/authelia/jwt"
+  echo -e "${YEL}→${NC} stored to secret/authelia/jwt"
 else
   echo -e "${GREEN}✓${NC} jwt secret from Vault"
 fi

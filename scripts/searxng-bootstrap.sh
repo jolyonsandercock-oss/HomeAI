@@ -40,10 +40,27 @@ KEY=$(docker exec -e VAULT_TOKEN="$VAULT_TOKEN" "$VAULT" \
         vault kv get -field=secret_key secret/searxng 2>/dev/null) || KEY=""
 
 if [[ -z "$KEY" ]]; then
-  KEY=$(openssl rand -hex 32)
+  # Vault is empty. Prefer importing any pre-existing key from the live config
+  # over generating a fresh one — avoids invalidating SearXNG sessions on a
+  # re-render of an already-running instance.
+  existing=""
+  if [[ -r "$RENDERED" ]]; then
+    existing=$(grep -oP '^\s*secret_key:\s*"\K[a-f0-9]{32,}' "$RENDERED" || true)
+  fi
+  if [[ -n "$existing" ]]; then
+    echo -e "${YEL}→${NC} found existing secret_key in $RENDERED"
+    read -rp "Import into Vault? [Y/n] (N = generate fresh, will invalidate sessions): " imp
+    if [[ ! "${imp:-Y}" =~ ^[Nn] ]]; then
+      KEY="$existing"
+    fi
+  fi
+  if [[ -z "$KEY" ]]; then
+    KEY=$(openssl rand -hex 32)
+    echo -e "${YEL}→${NC} generated fresh secret_key"
+  fi
   docker exec -e VAULT_TOKEN="$VAULT_TOKEN" "$VAULT" \
     vault kv put secret/searxng secret_key="$KEY" >/dev/null
-  echo -e "${YEL}→${NC} generated + stored secret/searxng"
+  echo -e "${YEL}→${NC} stored to secret/searxng"
 else
   echo -e "${GREEN}✓${NC} secret_key from Vault"
 fi
