@@ -1,0 +1,79 @@
+groups:
+  - name: home-ai-pipelines
+    interval: 30s
+    rules:
+      # Catastrophic — must always be 0
+      - alert: EventsOverflowNonZero
+        expr: events_overflow_count > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "events_overflow has rows — partition for current month is missing"
+          description: "{{ $value }} rows in events_overflow. Run partition-maintenance-v1 immediately and verify the current month's partition exists."
+
+      # Dead letter spike — per SPEC §4.6 dead-letter flood detection
+      - alert: DeadLetterFlood
+        expr: increase(dead_letter_count[1h]) > 10
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Dead letter flood: {{ $value | humanize }} new rows in the last hour"
+          description: "More than 10 dead-letter rows added in 1h. SPEC §4.6 mandates pausing affected pipelines. Investigate dead_letter table for pattern."
+
+      - alert: DeadLetterGrowing
+        expr: increase(dead_letter_count[10m]) > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Dead letter table is growing"
+          description: "{{ $value | humanize }} dead-letter rows added in 10m. Check the most recent rows."
+
+      # Stuck processing leases — recover_stale_leases() should keep this bounded
+      - alert: StuckProcessingLease
+        expr: events_processing_lease_age_oldest_seconds > 1800
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Oldest processing lease is {{ $value | humanize }}s old"
+          description: "An event has been in 'processing' state for >30 minutes. Stale-lease recovery should have kicked in (5-min lease per SPEC). Master Router may not be running, or recover_stale_leases() is broken."
+
+      # Pending events backing up
+      - alert: PendingEventsBackup
+        expr: sum(events_pending_count) > 100
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value | humanize }} events pending"
+          description: "Master Router is not draining the queue fast enough. Check if it's active and not killed by system_state='paused'."
+
+  - name: home-ai-infra
+    interval: 30s
+    rules:
+      # Postgres connections approaching saturation
+      - alert: PostgresConnectionSaturation
+        expr: |
+          sum(pg_stat_activity_count{datname="homeai"})
+            / on() group_left() pg_settings_max_connections > 0.80
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Postgres connections at {{ $value | humanizePercentage }} of max_connections"
+          description: "Connection pool saturation imminent. Check for leaked connections in n8n workflows or long-held transactions."
+
+      # Prometheus can't scrape a target
+      - alert: ScrapeTargetDown
+        expr: up == 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Scrape target {{ $labels.job }} is DOWN"
+          description: "Prometheus has been unable to scrape {{ $labels.instance }} for 5 minutes."
+
+      # n8n event loop lag (signals overload)
+      - alert: N8nEventLoopLag
+        expr: n8n_nodejs_eventloop_lag_p50_seconds > 0.5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "n8n event loop p50 lag is {{ $value | humanizeDuration }}"
+          description: "Sustained event loop lag indicates n8n is overloaded. Check active workflow count and execution rate."

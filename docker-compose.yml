@@ -1,0 +1,429 @@
+version: "3.9"
+
+networks:
+  ai-internal:
+    driver: bridge
+    internal: true
+  ai-services:
+    driver: bridge
+    internal: true
+  ai-monitoring:
+    driver: bridge
+  ai-proxy:
+    driver: bridge
+  ai-egress:
+    driver: bridge
+
+x-postgres-env: &postgres-env
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: "homeai_pipeline"
+  POSTGRES_PASSWORD: "${N8N_DB_PASSWORD}"
+  POSTGRES_DB: "homeai"
+
+services:
+
+  postgres:
+    image: postgres:16.13
+    container_name: homeai-postgres
+    networks: [ai-internal]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./postgres/rls-policies.sql:/docker-entrypoint-initdb.d/02-rls.sql
+      - ./postgres/seed-data.sql:/docker-entrypoint-initdb.d/03-seed.sql
+    environment:
+      POSTGRES_DB: homeai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d homeai"]
+      interval: 10s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.8-alpine
+    container_name: homeai-redis
+    networks: [ai-internal]
+    command: redis-server --requirepass "${REDIS_PASSWORD}"
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: homeai-postgres-exporter
+    networks: [ai-internal, ai-monitoring]
+    volumes:
+      - ./monitoring/postgres-exporter-queries.yaml:/etc/postgres_exporter/queries.yaml:ro
+    command: ["--extend.query-path=/etc/postgres_exporter/queries.yaml"]
+    environment:
+      DATA_SOURCE_NAME: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai?sslmode=disable"
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.17.1
+    container_name: homeai-qdrant
+    networks: [ai-internal]
+    volumes: [qdrant_data:/qdrant/storage]
+    restart: unless-stopped
+
+  # SearXNG — self-hosted meta-search, exposed via Caddy at /search.
+  # Tailscale-only (no public binding). Used as a private search engine + as a
+  # search backend for Open WebUI / future research workflows.
+  searxng:
+    image: searxng/searxng:2026.5.10-df1f24fb7
+    container_name: homeai-searxng
+    networks: [ai-internal, ai-egress]
+    volumes:
+      - ./config/searxng:/etc/searxng:rw
+    environment:
+      BASE_URL: "http://100.104.82.53/search/"
+      INSTANCE_NAME: "Home AI"
+    restart: unless-stopped
+
+  vault:
+    image: hashicorp/vault:1.15.6
+    container_name: homeai-vault
+    networks: [ai-internal, ai-services]
+    cap_add:
+      - IPC_LOCK
+    security_opt:
+      - no-new-privileges:false
+      - seccomp:unconfined
+    command: vault server -config=/vault/config/vault.hcl
+    volumes:
+      - vault_data:/vault/data
+      - ./security/vault-policies:/vault/policies
+      - ./security/vault-config:/vault/config
+    environment:
+      VAULT_ADDR: "http://0.0.0.0:8200"
+    ports: ["8200:8200"]
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:2.18.5
+    container_name: homeai-n8n
+    networks: [ai-internal, ai-services, ai-egress]
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./storage:/data/storage
+    environment:
+      N8N_HOST: "0.0.0.0"
+      N8N_PORT: "5678"
+      N8N_SECURE_COOKIE: "false"
+      DB_TYPE: "postgresdb"
+      DB_POSTGRESDB_HOST: "postgres"
+      DB_POSTGRESDB_DATABASE: "homeai"
+      DB_POSTGRESDB_USER: "homeai_pipeline"
+      DB_POSTGRESDB_PASSWORD: "${N8N_DB_PASSWORD}"
+      VAULT_ADDR: "http://vault:8200"
+      VAULT_TOKEN: "${VAULT_N8N_TOKEN}"
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: "all"
+      EXECUTIONS_DATA_SAVE_ON_ERROR: "all"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      NODE_FUNCTION_ALLOW_BUILTIN: "crypto"
+      # Cron expressions are authored as UTC. Without this, n8n defaults to
+      # America/New_York and fires 4-5h late depending on DST. Discovered
+      # 2026-05-10 — daily-digest cron `0 5,22 * * *` was firing at 02:00 UTC
+      # because EDT 22:00 = UTC 02:00 next day.
+      GENERIC_TIMEZONE: "UTC"
+      TZ: "UTC"
+      N8N_METRICS: "true"
+      N8N_METRICS_PREFIX: "n8n_"
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.22.1
+    container_name: homeai-ollama
+    networks: [ai-internal]
+    volumes: [ollama_data:/root/.ollama]
+    environment:
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_NUM_PARALLEL: "2"
+    ports: ["0.0.0.0:11434:11434"]
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
+    restart: unless-stopped
+
+  metabase:
+    image: metabase/metabase:v0.60.3.3
+    container_name: homeai-metabase
+    networks: [ai-internal]
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: postgres
+      MB_DB_PORT: "5432"
+      MB_DB_DBNAME: metabase_app
+      MB_DB_USER: metabase_app
+      MB_DB_PASS: "${METABASE_APP_PASSWORD}"
+      MB_AI_FEATURES_ENABLED: "false"
+    depends_on:
+      postgres: {condition: service_healthy}
+    ports: ["3000:3000"]
+    restart: unless-stopped
+
+  authelia:
+    image: authelia/authelia:4.39.19
+    container_name: homeai-authelia
+    networks: [ai-services]
+    volumes: [./security/authelia:/config]
+    profiles: ["phase2"]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.11.2-alpine
+    container_name: homeai-caddy
+    networks: [ai-proxy, ai-internal]
+    volumes:
+      - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "100.104.82.53:80:80"
+      - "100.104.82.53:5678:5678"
+      - "100.104.82.53:3000:3000"
+      - "100.104.82.53:8080:8080"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.0.1
+    container_name: homeai-grafana
+    networks: [ai-monitoring]
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    depends_on: [prometheus]
+    ports: ["3001:3000"]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.11.3
+    container_name: homeai-prometheus
+    networks: [ai-monitoring, ai-internal]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus-rules:/etc/prometheus/rules
+    restart: unless-stopped
+
+  # ── Authelia (Phase 2 SSO — DISABLED until ./scripts/authelia-bootstrap.sh runs) ──
+  # Uncomment the block below after running authelia-bootstrap.sh.
+  # The bootstrap script populates secrets in security/authelia-v2/configuration.yml
+  # and creates users_database.yml from the template.
+  #
+  # authelia:
+  #   image: authelia/authelia:4.39
+  #   container_name: homeai-authelia
+  #   networks: [ai-internal, ai-proxy]
+  #   volumes:
+  #     - ./security/authelia-v2:/config
+  #   environment:
+  #     TZ: "Europe/London"
+  #   ports:
+  #     - "100.104.82.53:9091:9091"
+  #   restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: homeai-alertmanager
+    networks: [ai-monitoring, ai-internal]
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    restart: unless-stopped
+
+  build-dashboard:
+    build: ./services/build-dashboard
+    image: homeai-build-dashboard:2.0
+    container_name: homeai-build-dashboard
+    networks: [ai-internal, ai-monitoring]
+    volumes:
+      - ./services/build-dashboard/data:/app/data:ro
+      - ./postgres/migrations:/home_ai/postgres/migrations:ro
+      - ./backups:/home_ai/backups:ro
+      - ./storage/dreaming:/home_ai/storage/dreaming:ro
+      - ./SPEC.md:/home_ai/SPEC.md:ro
+      - ./AGENTS.md:/home_ai/AGENTS.md:ro
+      - ./HOME-AI-STRETCH.md:/home_ai/HOME-AI-STRETCH.md:ro
+      - /proc:/host/proc:ro
+      # Docker socket so /api/benchmark/stream can `docker exec` the
+      # benchmark runner inside homeai-model-evaluator and tail stdout.
+      # Read-write because docker exec needs to attach a session.
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
+      PROM_URL: "http://homeai-prometheus:9090"
+      VAULT_URL: "http://homeai-vault:8200"
+      OLLAMA_URL: "http://homeai-ollama:11434"
+      N8N_BASE_URL: "http://100.104.82.53:5678"
+      MONTHLY_BUDGET_GBP: "15.0"
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "utility"
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
+    ports:
+      - "100.104.82.53:8090:8090"
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+
+  netdata:
+    image: netdata/netdata:v2.10.3
+    container_name: homeai-netdata
+    pid: host
+    network_mode: host
+    cap_add: [SYS_PTRACE]
+    security_opt: [apparmor:unconfined]
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:0.9.2
+    container_name: homeai-open-webui
+    # ai-internal is `internal: true` so port publishing is silently dropped
+    # for containers attached only to it. Mirroring build-dashboard's pattern,
+    # we also attach to ai-monitoring (non-internal) so the host port maps
+    # onto the Tailscale interface. — discovered U8-S2 2026-05-09.
+    networks: [ai-internal, ai-monitoring]
+    volumes: [open_webui_data:/app/backend/data]
+    environment:
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      WEBUI_SECRET_KEY: "${OPEN_WEBUI_SECRET}"
+      # Signup locked down post-U8-S2 (admin account exists at jolyon.sandercock@gmail.com).
+      # If you ever need to add a teammate: temporarily set ENABLE_SIGNUP=true,
+      # have them sign up, then revert to false. DEFAULT_USER_ROLE stays admin so
+      # any future bootstrap user lands as admin.
+      ENABLE_SIGNUP: "false"
+      DEFAULT_USER_ROLE: "admin"
+    depends_on: [ollama]
+    ports:
+      - "100.104.82.53:8088:8080"
+    restart: unless-stopped
+
+  pdfplumber-service:
+    build: ./services/pdfplumber
+    container_name: homeai-pdfplumber
+    networks: [ai-internal]
+    ports: ["8003:8003"]
+    restart: unless-stopped
+
+  markitdown:
+    build: ./services/markitdown
+    container_name: homeai-markitdown
+    networks: [ai-internal]
+    ports: ["8004:8004"]
+    restart: unless-stopped
+
+  model-evaluator:
+    build: ./services/model-evaluator
+    container_name: homeai-model-evaluator
+    networks: [ai-internal]
+    environment:
+      <<: *postgres-env
+      OLLAMA_HOST: "http://ollama:11434"
+      PAYLOAD_HMAC_KEY: "${PAYLOAD_HMAC_KEY}"
+    depends_on:
+      postgres: {condition: service_healthy}
+      ollama:   {condition: service_started}
+    ports: ["8008:8008"]
+    restart: unless-stopped
+
+  google-fetch:
+    build: ./services/google-fetch
+    container_name: homeai-google-fetch
+    # ai-internal for postgres + vault; ai-egress for googleapis.com.
+    # NOT on ai-monitoring/ai-proxy — internal-only consumer (n8n hits it).
+    networks: [ai-internal, ai-egress]
+    environment:
+      PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
+      VAULT_ADDR: "http://vault:8200"
+      VAULT_TOKEN: "${VAULT_TOKEN}"
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+
+  llm-router:
+    build: ./services/llm-router
+    container_name: homeai-llm-router
+    networks: [ai-internal]
+    environment:
+      <<: *postgres-env
+      OLLAMA_HOST: "http://ollama:11434"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      REDIS_HOST: "redis"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      PAYLOAD_HMAC_KEY: "${PAYLOAD_HMAC_KEY}"
+    depends_on:
+      postgres: {condition: service_healthy}
+      ollama:   {condition: service_started}
+      redis:    {condition: service_started}
+    ports: ["8001:8001"]
+    restart: unless-stopped
+
+  garmin-service:
+    build: ./services/garmin
+    container_name: homeai-garmin
+    networks: [ai-internal, ai-services]
+    environment:
+      VAULT_ADDR: "http://vault:8200"
+      VAULT_TOKEN: "${VAULT_SERVICES_TOKEN}"
+    ports: ["8002:8002"]
+    profiles: ["phase2"]
+    restart: unless-stopped
+
+  markitdown-service:
+    build: ./services/markitdown
+    container_name: homeai-markitdown
+    networks: [ai-internal]
+    ports: ["8006:8006"]
+    profiles: ["phase3"]
+    restart: unless-stopped
+
+  vault-mcp:
+    build: ./services/vault-mcp
+    container_name: homeai-vault-mcp
+    networks: [ai-internal, ai-services]
+    volumes:
+      - /mnt/ssd/obsidian-vault:/vault:ro
+    environment:
+      VAULT_PATH: "/vault"
+    ports: ["8007:8007"]
+    profiles: ["phase3"]
+    restart: unless-stopped
+
+  playwright-service:
+    build: ./services/playwright
+    container_name: homeai-playwright
+    networks: [ai-internal, ai-services]
+    ports: ["8001:8001"]
+    profiles: ["phase3"]
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  n8n_data:
+  ollama_data:
+  vault_data:
+  grafana_data:
+  open_webui_data:
+  caddy_data:
+  alertmanager_data:
+  caddy_config:

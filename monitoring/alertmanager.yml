@@ -1,0 +1,26 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  # All alerts go to the n8n sink for now. Phase 2 will add Telegram routing
+  # by severity (critical → immediate; warning → digest).
+  receiver: n8n-sink
+  group_by: ['alertname', 'severity']
+  group_wait: 30s          # wait this long before sending notification for new group
+  group_interval: 5m       # wait between sending notifications for new alerts in existing group
+  repeat_interval: 4h      # re-send if still firing
+
+receivers:
+  - name: n8n-sink
+    webhook_configs:
+      - url: http://homeai-n8n:5678/webhook/prom-alert
+        send_resolved: true
+        max_alerts: 50
+
+inhibit_rules:
+  # If a target is down, suppress its noisy downstream rules.
+  - source_match:
+      alertname: ScrapeTargetDown
+    target_match_re:
+      alertname: 'Postgres.*|N8n.*'
+    equal: ['job']

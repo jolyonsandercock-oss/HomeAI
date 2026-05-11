@@ -1,0 +1,1927 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home AI · Mission Control</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root { color-scheme: light; --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace; }
+  body {
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    background:
+      radial-gradient(at 12% 6%,  rgba(56,189,248,0.10) 0px, transparent 45%),
+      radial-gradient(at 88% 8%,  rgba(168,85,247,0.10) 0px, transparent 45%),
+      radial-gradient(at 50% 96%, rgba(16,185,129,0.08) 0px, transparent 50%),
+      #f1f3f8;
+    min-height: 100vh;
+  }
+  .mono { font-family: var(--mono); font-size: 0.85em; }
+
+  /* Glassmorphism v2 — bigger blur, darker borders */
+  .glass {
+    background: rgba(255,255,255,0.55);
+    backdrop-filter: blur(20px) saturate(170%);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    border: 1px solid rgba(15,23,42,0.10);
+    box-shadow:
+      0 1px 2px rgba(15,23,42,0.04),
+      0 8px 24px -10px rgba(15,23,42,0.10);
+    border-radius: 16px;
+  }
+  .glass-tight {
+    background: rgba(255,255,255,0.46);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(15,23,42,0.08);
+    border-radius: 10px;
+  }
+
+  .stat-num { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  /* Apply tabular-nums to mono blocks too — stops digit jitter on heartbeat refresh */
+  .mono, .num-stable { font-variant-numeric: tabular-nums; }
+
+  /* ── Traffic-light colour tokens (strict 4-state palette) ─── */
+  :root {
+    --tl-done:    rgb(16,185,129);   /* emerald */
+    --tl-done-bg: rgba(16,185,129,0.12);
+    --tl-active:  rgb(245,158,11);   /* amber */
+    --tl-active-bg: rgba(245,158,11,0.14);
+    --tl-error:   rgb(244, 63, 94);  /* rose */
+    --tl-error-bg: rgba(244,63,94,0.12);
+    --tl-backlog: rgb(148,163,184);  /* slate */
+    --tl-backlog-bg: rgba(148,163,184,0.18);
+  }
+  .tl-done    { color: var(--tl-done);    }
+  .tl-active  { color: var(--tl-active);  }
+  .tl-error   { color: var(--tl-error);   }
+  .tl-backlog { color: var(--tl-backlog); }
+  .tl-bg-done    { background: var(--tl-done-bg);    }
+  .tl-bg-active  { background: var(--tl-active-bg);  }
+  .tl-bg-error   { background: var(--tl-error-bg);   }
+  .tl-bg-backlog { background: var(--tl-backlog-bg); }
+  .tl-fill-done    { background: var(--tl-done);    }
+  .tl-fill-active  { background: var(--tl-active);  }
+  .tl-fill-error   { background: var(--tl-error);   }
+  .tl-fill-backlog { background: var(--tl-backlog); }
+
+  /* ── Tier hierarchy wrappers ──────────────────────────────── */
+  /* Three vertical tiers with progressively larger gutters between, smaller within. */
+  .tier      { display: flex; flex-direction: column; gap: 16px; }
+  .tier + .tier { margin-top: 32px; }
+  .tier-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: rgb(100,116,139); font-weight: 600;
+    padding-left: 4px; padding-bottom: 4px;
+    border-bottom: 1px solid rgba(15,23,42,0.06);
+    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .tier-label::before {
+    content: ""; display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%; background: rgb(15,23,42);
+  }
+
+  /* ── Master Progress phase-gate bar ───────────────────────── */
+  .phase-bar {
+    display: grid; gap: 4px;
+    grid-template-columns: repeat(var(--phase-count, 3), 1fr);
+  }
+  .phase-seg {
+    position: relative;
+    border-radius: 10px;
+    background: rgba(15,23,42,0.06);
+    overflow: hidden;
+    cursor: default;
+    transition: transform 0.15s ease;
+  }
+  .phase-seg:hover { transform: translateY(-1px); }
+  .phase-seg-fill {
+    position: absolute; inset: 0;
+    border-radius: 10px;
+    transition: width 0.5s ease;
+  }
+  .phase-seg-content {
+    position: relative; padding: 12px 14px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .phase-seg-name {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: rgb(15,23,42); font-weight: 600;
+  }
+  .phase-seg-pct {
+    font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums;
+    line-height: 1; letter-spacing: -0.02em;
+  }
+  .phase-seg-meta {
+    font-size: 10px; color: rgb(71,85,105);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Connection indicator dot (top-right of header) */
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .conn-dot.ok       { background: var(--tl-done);   box-shadow: 0 0 0 3px var(--tl-done-bg); }
+  .conn-dot.degraded { background: var(--tl-active); box-shadow: 0 0 0 3px var(--tl-active-bg); }
+  .conn-dot.down     { background: var(--tl-error);  box-shadow: 0 0 0 3px var(--tl-error-bg); }
+
+  /* Pagination controls */
+  .pgn-btn {
+    padding: 4px 10px; font-size: 12px; border-radius: 6px;
+    background: rgba(255,255,255,0.6); border: 1px solid rgba(15,23,42,0.10);
+    cursor: pointer; user-select: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .pgn-btn:hover { background: rgba(255,255,255,0.9); }
+  .pgn-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .pgn-btn.active { background: rgb(15,23,42); color: white; border-color: transparent; }
+
+  /* Debt cost-of-delay badge */
+  .cod-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 600; padding: 2px 8px;
+    border-radius: 999px; font-variant-numeric: tabular-nums;
+  }
+
+  /* Heartbeat bar — top of viewport */
+  .heartbeat {
+    position: fixed; left: 0; right: 0; top: 0; z-index: 50;
+    height: 2px;
+    background: linear-gradient(90deg, rgba(16,185,129,0.0), rgba(16,185,129,0.0));
+    transition: background 0.3s ease, height 0.3s ease;
+  }
+  .heartbeat.alive { background: rgb(16,185,129); }
+  .heartbeat.lost  { background: rgb(225,29,72); height: 4px; }
+
+  /* Connection-lost overlay */
+  .conn-overlay {
+    position: fixed; inset: 0; z-index: 40;
+    background: rgba(225,29,72,0.04);
+    backdrop-filter: blur(2px);
+    display: none;
+    pointer-events: none;
+  }
+  .conn-overlay.show { display: block; }
+  .conn-banner {
+    position: fixed; left: 50%; top: 64px; transform: translateX(-50%);
+    background: rgba(225,29,72,0.96); color: white;
+    padding: 8px 16px; border-radius: 8px; z-index: 60;
+    font-size: 13px; font-weight: 500;
+    box-shadow: 0 8px 32px rgba(225,29,72,0.45);
+  }
+
+  /* Pulses */
+  .pulse-dot { animation: pulse 2s infinite; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.45; }
+  }
+  .pulse-brain { animation: brain 1.6s ease-in-out infinite; }
+  @keyframes brain {
+    0%, 100% { transform: scale(1.0); opacity: 0.85; }
+    50%      { transform: scale(1.12); opacity: 1.0; }
+  }
+
+  /* Situational pulse */
+  .situ-amber { animation: situAmber 2s ease-in-out infinite; }
+  .situ-red   { animation: situRed 1.4s ease-in-out infinite; }
+  @keyframes situAmber {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.0); }
+    50%      { box-shadow: 0 0 0 8px rgba(245,158,11,0.18); }
+  }
+  @keyframes situRed {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(244,63,94,0.0); }
+    50%      { box-shadow: 0 0 0 12px rgba(244,63,94,0.28); }
+  }
+
+  /* Active glow */
+  .glow-emerald { animation: glowE 2.6s ease-in-out infinite; }
+  @keyframes glowE {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.0); }
+    50%      { box-shadow: 0 0 12px 1px rgba(16,185,129,0.32); }
+  }
+
+  /* Tooltips */
+  .tooltip-host { position: relative; }
+  .tooltip-host > .tip {
+    position: absolute; bottom: calc(100% + 6px); right: 0;
+    min-width: 320px; max-width: 520px;
+    padding: 10px 12px;
+    background: rgba(15,23,42,0.96); color: #f1f5f9;
+    font-size: 12px; line-height: 1.45;
+    border-radius: 8px;
+    opacity: 0; pointer-events: none;
+    transform: translateY(-2px);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    z-index: 30;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .tooltip-host:hover > .tip { opacity: 1; transform: translateY(0); }
+
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  .chev { transition: transform 0.15s ease; }
+  details[open] .chev { transform: rotate(90deg); }
+
+  /* Outcome chips */
+  .chip { font-size: 11px; padding: 2px 8px; border-radius: 6px; line-height: 1.3; font-weight: 500; }
+  .chip-validated     { background: #d1fae5; color: #047857; }
+  .chip-escalated     { background: #fef3c7; color: #b45309; }
+  .chip-hallucination { background: #ffe4e6; color: #be185d; }
+  .chip-human         { background: #e0e7ff; color: #3730a3; }
+  .chip-other         { background: #e2e8f0; color: #475569; }
+
+  /* Severity dots */
+  .sev-high   { background: #f43f5e; }
+  .sev-medium { background: #f59e0b; }
+  .sev-low    { background: #94a3b8; }
+
+  /* Mini bars */
+  .bar-track { background: rgba(15,23,42,0.08); border-radius: 999px; overflow: hidden; }
+  .bar-fill  { transition: width 0.3s ease; }
+
+  /* Sparkline (rendered by <svg>) */
+  .spark { width: 100%; height: 28px; }
+
+  /* Stream cards in outcome registry */
+  .stream-card {
+    background: rgba(255,255,255,0.40);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(15,23,42,0.06);
+    border-left-width: 3px;
+    border-radius: 10px;
+    transition: background 0.15s ease;
+  }
+  .stream-card:hover { background: rgba(255,255,255,0.65); }
+  .stream-validated     { border-left-color: rgb(16,185,129); }
+  .stream-escalated     { border-left-color: rgb(245,158,11); }
+  .stream-hallucination { border-left-color: rgb(225,29,72); }
+  .stream-human         { border-left-color: rgb(99,102,241); }
+  .stream-other         { border-left-color: rgb(148,163,184); }
+
+  /* Vault badge */
+  .vault-ok { background: rgba(16,185,129,0.12); color: rgb(6,95,70); border-color: rgba(16,185,129,0.45); }
+  .vault-warn { background: rgba(245,158,11,0.12); color: rgb(146,64,14); border-color: rgba(245,158,11,0.55); }
+  .vault-err { background: rgba(225,29,72,0.18); color: white; border-color: rgba(225,29,72,1); animation: situRed 1.4s ease-in-out infinite; }
+
+  /* Lockdown screen for sealed Vault */
+  .lockdown {
+    position: fixed; inset: 0; z-index: 35;
+    background: rgba(15,23,42,0.65);
+    display: none;
+    pointer-events: none;
+  }
+  .lockdown.show { display: block; }
+
+  /* Shadow Run button (placeholder) */
+  .btn-shadow {
+    font-size: 11px; padding: 2px 6px; border-radius: 6px;
+    background: rgba(99,102,241,0.10); color: rgb(67,56,202);
+    border: 1px solid rgba(99,102,241,0.25);
+    cursor: not-allowed;
+  }
+  .btn-shadow:hover { background: rgba(99,102,241,0.18); }
+
+  /* Compute split bar */
+  .split-wrap   { position: relative; }
+  .split-bar    { display: flex; height: 22px; border-radius: 999px; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(15,23,42,0.10); position: relative; z-index: 1; }
+  .split-local  { background: rgb(16,185,129); }
+  .split-cloud  { background: rgb(15,23,42); }
+  .sov-sparkline {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none; opacity: 0.55; z-index: 0;
+  }
+
+  /* Leaderboard gold border */
+  .leader-gold {
+    box-shadow: 0 0 0 2px rgb(234,179,8), 0 0 12px rgba(234,179,8,0.3);
+    background: linear-gradient(90deg, rgba(234,179,8,0.06), transparent);
+  }
+
+  /* Stress pulse — applied to GPU widget when benchmark active */
+  .stress-pulse { animation: stressPulse 1s ease-in-out infinite; }
+  @keyframes stressPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.0); }
+    50%      { box-shadow: 0 0 0 6px rgba(245,158,11,0.32); }
+  }
+
+  /* Live log pane (benchmark stream) */
+  .log-pane {
+    background: rgba(15,23,42,0.92); color: #e2e8f0;
+    font-family: var(--mono); font-size: 11px;
+    padding: 12px; border-radius: 8px;
+    max-height: 280px; overflow: auto; white-space: pre-wrap;
+    line-height: 1.55;
+  }
+
+  [x-cloak] { display: none !important; }
+
+  /* ── Card header strip (drag handle + minimize) ─── */
+  .card-shell { position: relative; }
+  .card-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px 6px 14px;
+    margin: -16px -20px 8px;             /* pull flush with .glass padding */
+    border-bottom: 1px solid rgba(15,23,42,0.05);
+    border-radius: 16px 16px 0 0;
+    user-select: none;
+  }
+  .card-head .grip {
+    color: rgb(148,163,184); font-size: 12px; line-height: 1;
+    cursor: grab;
+  }
+  .card-shell.is-locked .card-head .grip { display: none; }
+  .card-head .grip:active { cursor: grabbing; }
+  .card-head .title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: rgb(71,85,105); font-weight: 500;
+  }
+  .card-head .min-btn {
+    margin-left: auto;
+    width: 22px; height: 22px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 6px; font-size: 14px; line-height: 1;
+    color: rgb(100,116,139); cursor: pointer;
+  }
+  .card-head .min-btn:hover { background: rgba(15,23,42,0.06); color: rgb(15,23,42); }
+  /* Hide everything except the card-head when minimized */
+  .card-shell.minimized > *:not(.card-head) { display: none !important; }
+  .card-shell.minimized.glass { box-shadow: 0 1px 2px rgba(15,23,42,0.04); padding-bottom: 0; }
+  .card-shell.minimized .card-head { margin-bottom: -16px; border-bottom: none; }
+
+  /* Drag-over insertion preview */
+  .card-shell.drag-target { box-shadow: 0 0 0 2px rgb(59,130,246), 0 8px 24px -10px rgba(59,130,246,0.4); }
+  .card-shell.dragging    { opacity: 0.55; }
+
+  /* Lock toggle button */
+  .lock-btn {
+    font-size: 11px; padding: 4px 10px; border-radius: 8px;
+    background: rgba(255,255,255,0.7); border: 1px solid rgba(15,23,42,0.10);
+    cursor: pointer; user-select: none;
+  }
+  .lock-btn.locked { background: rgba(15,23,42,0.92); color: #e2e8f0; border-color: transparent; }
+
+  /* Resize handle on log-pane (bench stream) */
+  .log-pane.resizable { resize: vertical; overflow: auto; min-height: 140px; max-height: 800px; }
+</style>
+</head>
+<body class="text-slate-800">
+<div x-data="dashboard()" x-init="boot()">
+
+  <!-- Heartbeat progress bar -->
+  <div class="heartbeat" :class="{
+        'alive': data && !connectionLost,
+        'lost':  connectionLost
+       }"
+       :style="`width:${connectionLost ? 100 : (heartbeatPct * 100)}%`"></div>
+
+  <!-- Connection-lost overlay + banner -->
+  <div class="conn-overlay" :class="{ 'show': connectionLost }"></div>
+  <div class="conn-banner" x-show="connectionLost" x-cloak>
+    ⛔ CONNECTION LOST — <span class="mono" x-text="lastEndpoint"></span>
+    <span class="ml-2 opacity-90">retrying…</span>
+  </div>
+
+  <!-- Vault lockdown overlay (when sealed) -->
+  <div class="lockdown" :class="{ 'show': hardware?.vault?.sealed === true }"></div>
+
+  <div class="max-w-7xl mx-auto p-4 lg:p-8 pt-6">
+
+    <!-- ── Top bar ────────────────────────────────────────── -->
+    <header class="mb-5 glass p-4 lg:p-5"
+            :class="{ 'situ-amber': data?.situational?.severity === 'amber',
+                      'situ-red':   data?.situational?.severity === 'red' }">
+      <div class="flex items-center justify-between gap-4 flex-wrap">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg flex items-center justify-center font-bold text-white"
+               :class="{
+                 'bg-emerald-500': data?.situational?.severity === 'ok',
+                 'bg-amber-500':   data?.situational?.severity === 'amber',
+                 'bg-rose-500':    data?.situational?.severity === 'red',
+                 'bg-slate-300':   !data
+               }">
+            <span x-text="data?.situational?.severity === 'red' ? '!' : data?.situational?.severity === 'amber' ? '◑' : '●'"></span>
+          </div>
+          <div>
+            <h1 class="text-xl lg:text-2xl font-semibold tracking-tight">Home AI · Mission Control</h1>
+            <div class="text-xs text-slate-500" x-show="data" x-cloak>
+              <span x-text="situationalLine()"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hardware mini-tray -->
+        <div class="flex items-center gap-2 flex-wrap" x-show="hardware" x-cloak>
+          <!-- Vault badge — impossible to miss -->
+          <div class="px-2 py-1 rounded-md border text-xs flex items-center gap-1.5"
+               :class="{
+                 'vault-err':  hardware?.vault?.sealed === true,
+                 'vault-warn': hardware?.vault?.reachable === false,
+                 'vault-ok':   hardware?.vault?.sealed === false
+               }">
+            <span class="w-1.5 h-1.5 rounded-full bg-current"></span>
+            VAULT <span class="mono uppercase">
+              <template x-if="hardware?.vault?.sealed === true">SEALED</template>
+              <template x-if="hardware?.vault?.reachable === false">UNREACHABLE</template>
+              <template x-if="hardware?.vault?.sealed === false">UNSEALED</template>
+            </span>
+          </div>
+
+          <!-- Tiny CPU/RAM/Disk widgets -->
+          <div class="glass-tight px-2 py-1 text-xs flex items-center gap-1">
+            <span class="text-slate-500">CPU</span>
+            <span class="stat-num font-medium" x-text="(hardware?.cpu_pct ?? 0).toFixed(0) + '%'"></span>
+          </div>
+          <div class="glass-tight px-2 py-1 text-xs flex items-center gap-1">
+            <span class="text-slate-500">RAM</span>
+            <span class="stat-num font-medium" x-text="(hardware?.mem_pct ?? 0).toFixed(0) + '%'"></span>
+          </div>
+          <div class="glass-tight px-2 py-1 text-xs flex items-center gap-1">
+            <span class="text-slate-500">Disk</span>
+            <span class="stat-num font-medium" x-text="(hardware?.disk_pct ?? 0).toFixed(0) + '%'"></span>
+          </div>
+
+          <!-- Live health pill (postgres + n8n + google-fetch from /api/healthz-deep) -->
+          <div class="glass-tight px-2 py-1 text-xs flex items-center gap-1.5"
+               :title="healthDetail()">
+            <span class="conn-dot" :class="healthOverallClass()"></span>
+            <span class="text-slate-600 font-medium"
+                  x-text="healthOverallClass() === 'ok' ? 'healthy' :
+                          healthOverallClass() === 'degraded' ? 'degraded' : 'down'"></span>
+          </div>
+
+          <!-- Layout lock toggle -->
+          <button @click="toggleLayoutLock()" class="lock-btn"
+                  :class="layoutLocked ? 'locked' : ''"
+                  :title="layoutLocked ? 'Unlock layout to drag/resize cards' : 'Lock layout (no dragging)'">
+            <span x-text="layoutLocked ? '🔒 locked' : '✥ unlocked'"></span>
+          </button>
+          <button @click="resetLayout()" class="lock-btn" x-show="!layoutLocked"
+                  title="Reset card layout to default">↺</button>
+
+          <!-- Refresh -->
+          <button @click="refresh()" class="px-3 py-1.5 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-700">↻</button>
+        </div>
+      </div>
+    </header>
+
+    <template x-if="!data">
+      <div class="glass p-8 text-center text-slate-500">Loading…</div>
+    </template>
+
+    <template x-if="data">
+      <div class="flex flex-col" style="gap:16px">
+
+        <!-- ════════════════════════════════════════════════════════ -->
+        <!-- TIER 1 — EXECUTIVE PROGRESS                              -->
+        <!-- ════════════════════════════════════════════════════════ -->
+        <div class="tier" style="order:-3">
+          <div class="tier-label">Executive · phase progress</div>
+
+          <!-- Master Progress: phase-gate bar -->
+          <div class="glass p-5">
+            <div class="flex items-center justify-between mb-3">
+              <div class="text-sm font-medium">Project Gates · Phase Progress</div>
+              <div class="text-xs text-slate-500" x-show="phasesData?.phases?.length">
+                <span class="num-stable"
+                      x-text="phasesData.phases.reduce((a,p) => a + (p.counts?.done||0), 0)"></span>
+                /
+                <span class="num-stable"
+                      x-text="phasesData.phases.reduce((a,p) => a + (p.counts?.total||0), 0)"></span>
+                gates complete
+              </div>
+            </div>
+            <div class="phase-bar"
+                 :style="`--phase-count:${phasesData?.phases?.length||3}`"
+                 x-show="phasesData?.phases?.length">
+              <template x-for="ph in (phasesData?.phases || [])" :key="ph.id">
+                <div class="phase-seg" :title="ph.description">
+                  <div class="phase-seg-fill"
+                       :class="phaseFillClass(ph)"
+                       :style="`width:${ph.percent}%; opacity:${ph.status==='done'?0.18:ph.status==='in_progress'?0.16:ph.status==='blocked'?0.18:0.10}`"></div>
+                  <div class="phase-seg-content">
+                    <div class="flex items-center gap-2">
+                      <span class="phase-seg-name">Phase <span x-text="ph.id"></span> · <span x-text="ph.name"></span></span>
+                      <span class="ml-auto text-xs num-stable"
+                            :class="phaseTextClass(ph)"
+                            x-text="ph.status === 'blocked' ? 'BLOCKED' :
+                                    ph.status === 'done' ? 'DONE' :
+                                    ph.status === 'in_progress' ? 'ACTIVE' : 'BACKLOG'"></span>
+                    </div>
+                    <div class="phase-seg-pct" :class="phaseTextClass(ph)" x-text="ph.percent + '%'"></div>
+                    <div class="phase-seg-meta" x-text="phaseStatusLabel(ph)"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Hero strip — KPI tiles -->
+          <div class="grid grid-cols-2 lg:grid-cols-5"
+               style="gap:8px">
+          <!-- Phase 1 -->
+          <div class="glass p-5">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Phase 1</div>
+            <div class="flex items-baseline gap-2 mt-1">
+              <div class="stat-num text-3xl font-semibold" x-text="data.phase1.percent + '%'"></div>
+              <div class="text-xs text-slate-500">complete</div>
+            </div>
+            <div class="mt-3 h-1.5 bar-track">
+              <div class="h-1.5 bar-fill bg-emerald-500" :style="`width:${data.phase1.percent}%`"></div>
+            </div>
+            <div class="mt-2 text-xs text-slate-500">
+              <span x-text="data.phase1.counts.done"></span>✓ ·
+              <span x-text="data.phase1.counts.todo"></span> todo ·
+              <span x-text="data.phase1.counts.blocked"></span> ⏳
+            </div>
+          </div>
+
+          <!-- Spend -->
+          <div class="glass p-5">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Spend (mtd)</div>
+            <div class="flex items-baseline gap-2 mt-1">
+              <div class="stat-num text-3xl font-semibold mono">£<span x-text="data.spend.month_total_gbp.toFixed(2)"></span></div>
+              <div class="text-xs text-slate-500">/£<span x-text="data.spend.monthly_budget_gbp.toFixed(0)"></span></div>
+            </div>
+            <div class="mt-3 h-1.5 bar-track">
+              <div class="h-1.5 bar-fill"
+                   :class="data.spend.pct_of_budget < 75 ? 'bg-emerald-500' : data.spend.pct_of_budget < 100 ? 'bg-amber-500' : 'bg-rose-500'"
+                   :style="`width:${Math.min(data.spend.pct_of_budget, 100)}%`"></div>
+            </div>
+            <div class="mt-2 text-xs text-slate-500"><span x-text="data.spend.month_calls"></span> AI calls</div>
+          </div>
+
+          <!-- Velocity + sparkline -->
+          <div class="glass p-5">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Velocity (£ saved · 7d)</div>
+            <div class="flex items-baseline gap-2 mt-1">
+              <div class="stat-num text-3xl font-semibold mono">£<span x-text="data.spend.velocity_gbp_saved.toFixed(0)"></span></div>
+              <div class="text-xs text-slate-500" x-show="velocityTotal7d() > 0">
+                +£<span x-text="velocityTotal7d()"></span> last 7d
+              </div>
+            </div>
+            <svg class="spark mt-2" viewBox="0 0 100 28" preserveAspectRatio="none" x-show="velocity?.length">
+              <path :d="velocityPath()" fill="rgba(16,185,129,0.20)" stroke="rgb(16,185,129)" stroke-width="1.2" />
+            </svg>
+            <div class="mt-1 text-[11px] text-slate-400">3min × £20/hr per success</div>
+          </div>
+
+          <!-- Pipelines -->
+          <div class="glass p-5">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Pipelines</div>
+            <div class="flex items-baseline gap-2 mt-1">
+              <div class="stat-num text-3xl font-semibold" x-text="data.counts.active_workflows"></div>
+              <div class="text-xs text-slate-500">active</div>
+            </div>
+            <div class="mt-3 text-xs text-slate-500">
+              <span class="mono" x-text="data.counts.events_total"></span> evts ·
+              <span class="mono" x-text="data.counts.events_pending"></span> pending
+            </div>
+            <div class="mt-1 text-xs text-slate-500">
+              <span class="mono" x-text="data.counts.event_partitions"></span> parts ·
+              <span class="mono" x-text="data.counts.alerts_firing"></span> alerts firing
+            </div>
+          </div>
+
+          <!-- Context Pressure -->
+          <div class="glass p-5">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Context (sovereign mem)</div>
+            <div class="flex items-baseline gap-2 mt-1">
+              <div class="stat-num text-3xl font-semibold mono"
+                   :class="ctx?.pct > 85 ? 'text-rose-600' : ctx?.pct > 60 ? 'text-amber-600' : ''"
+                   x-text="(ctx?.pct ?? 0).toFixed(0) + '%'"></div>
+              <div class="text-xs text-slate-500">of 200k</div>
+            </div>
+            <div class="mt-3 h-1.5 bar-track">
+              <div class="h-1.5 bar-fill"
+                   :class="ctx?.pct < 60 ? 'bg-emerald-500' : ctx?.pct < 85 ? 'bg-amber-500' : 'bg-rose-500'"
+                   :style="`width:${Math.min(ctx?.pct ?? 0, 100)}%`"></div>
+            </div>
+            <div class="mt-2 text-xs text-slate-500" x-show="ctx?.files">
+              <template x-for="f in ctx.files" :key="f.name">
+                <div class="flex justify-between mono">
+                  <span x-text="f.name"></span>
+                  <span x-text="(f.est_tokens/1000).toFixed(1) + 'k'"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div> <!-- end hero strip -->
+        </div> <!-- end TIER 1 -->
+
+        <!-- ════════════════════════════════════════════════════════ -->
+        <!-- TIER 2 — LIVE OPS (GPU, sovereignty, intelligence)       -->
+        <!-- ════════════════════════════════════════════════════════ -->
+        <div class="tier" style="order:-2">
+          <div class="tier-label">Live ops · compute · sovereignty</div>
+
+        <!-- ── INTELLIGENCE ACTIVITY (Build vs Production) ── -->
+        <div class="glass p-5 card-shell" x-bind="cardShell('intelligence')">
+          <div class="card-head">
+            <span class="grip" title="drag to reorder">⋮⋮</span>
+            <span class="title">Intelligence activity</span>
+            <button class="min-btn" @click="toggleMin('intelligence')"
+                    x-text="cardMin.intelligence ? '＋' : '−'"
+                    :title="cardMin.intelligence ? 'Expand' : 'Minimize'"></button>
+          </div>
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-sm font-medium">Intelligence activity · build vs production</div>
+            <div class="text-xs text-slate-400" x-show="lifecycle">last <span x-text="lifecycle?.window_days || 7"></span> days</div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- Build (Claude Code) -->
+            <div class="glass-tight p-3">
+              <div class="flex items-center justify-between mb-2">
+                <div class="text-xs uppercase tracking-wide text-indigo-700">Build · Claude Code</div>
+                <div class="text-xs text-slate-500 mono">
+                  <span x-text="layerSummary('build').calls"></span> calls ·
+                  £<span x-text="layerSummary('build').cost_gbp.toFixed(4)"></span>
+                </div>
+              </div>
+              <div class="space-y-1.5">
+                <template x-for="m in (lifecycle?.by_layer?.build || [])" :key="m.model">
+                  <div class="flex items-center gap-2 text-xs">
+                    <span class="chip mono"
+                          :class="m.provider === 'local' ? 'chip-validated' : 'chip-human'"
+                          x-text="m.model"></span>
+                    <span class="text-slate-500" x-text="m.calls + ' calls'"></span>
+                    <span class="text-slate-400 mono" x-text="(m.tok_in + m.tok_out).toLocaleString() + ' tok'"></span>
+                    <span class="ml-auto mono" x-text="'£' + m.cost_gbp.toFixed(4)"></span>
+                  </div>
+                </template>
+                <div x-show="!(lifecycle?.by_layer?.build?.length)" class="text-xs text-slate-400 italic">no build activity logged in the last 7d</div>
+              </div>
+            </div>
+
+            <!-- Production (n8n) -->
+            <div class="glass-tight p-3">
+              <div class="flex items-center justify-between mb-2">
+                <div class="text-xs uppercase tracking-wide text-emerald-700">Production · n8n</div>
+                <div class="text-xs text-slate-500 mono">
+                  <span x-text="layerSummary('production').calls"></span> calls ·
+                  £<span x-text="layerSummary('production').cost_gbp.toFixed(4)"></span>
+                </div>
+              </div>
+              <div class="space-y-1.5">
+                <template x-for="m in (lifecycle?.by_layer?.production || [])" :key="m.actor + m.model">
+                  <div class="flex items-center gap-2 text-xs">
+                    <span class="chip mono"
+                          :class="m.provider === 'local' ? 'chip-validated' : 'chip-human'"
+                          x-text="m.model"></span>
+                    <span class="text-slate-500" x-text="m.actor"></span>
+                    <span class="ml-auto text-slate-400 mono" x-text="m.calls + ' × · £' + m.cost_gbp.toFixed(4)"></span>
+                  </div>
+                </template>
+                <div x-show="!(lifecycle?.by_layer?.production?.length)" class="text-xs text-slate-400 italic">no production activity in the last 7d</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 5-TIER STATUS LIST ────────────────────────── -->
+        <div class="glass p-5 card-shell" x-bind="cardShell('tier')">
+          <div class="card-head">
+            <span class="grip" title="drag to reorder">⋮⋮</span>
+            <span class="title">5-Tier Hierarchy</span>
+            <button class="min-btn" @click="toggleMin('tier')"
+                    x-text="cardMin.tier ? '＋' : '−'"
+                    :title="cardMin.tier ? 'Expand' : 'Minimize'"></button>
+          </div>
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-sm font-medium">5-Tier Intelligence Hierarchy · MTD</div>
+            <div class="text-xs text-slate-400">cost / savings month-to-date</div>
+          </div>
+          <div class="space-y-2">
+            <template x-for="t in tiers" :key="t.tier">
+              <div class="glass-tight p-3 flex items-center gap-3 flex-wrap">
+                <span class="text-xs uppercase tracking-wide font-semibold w-24"
+                      :class="{
+                        'text-rose-700':    t.tier === 'apex',
+                        'text-amber-700':   t.tier === 'legacy_apex',
+                        'text-emerald-700': t.tier === 'local_logic' || t.tier === 'local_fast',
+                        'text-indigo-700':  t.tier === 'cloud_speed',
+                      }"
+                      x-text="(t.tier || '').replace('_', ' ')"></span>
+
+                <span class="mono text-sm font-medium" x-text="t.model"></span>
+
+                <span class="chip mono"
+                      :class="t.provider === 'local' ? 'chip-validated' : 'chip-human'"
+                      x-text="t.provider"></span>
+
+                <span class="text-xs text-slate-500 truncate flex-1" x-text="t.use_for"></span>
+
+                <div class="text-xs flex items-center gap-3 mono">
+                  <span class="text-slate-500">
+                    <span x-text="t.calls_mtd"></span> calls
+                  </span>
+                  <span x-show="t.provider === 'anthropic'" class="text-rose-600">
+                    -£<span x-text="t.cost_mtd.toFixed(4)"></span>
+                  </span>
+                  <span x-show="t.provider === 'local'" class="text-emerald-600">
+                    +£<span x-text="(t.calls_mtd * 0.001).toFixed(4)"></span> saved
+                  </span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- ── COMPUTE DISTRIBUTION (sovereignty + ROI) ── -->
+        <div class="glass p-5 card-shell" x-bind="cardShell('compute')">
+          <div class="card-head">
+            <span class="grip" title="drag to reorder">⋮⋮</span>
+            <span class="title">Compute distribution</span>
+            <button class="min-btn" @click="toggleMin('compute')"
+                    x-text="cardMin.compute ? '＋' : '−'"
+                    :title="cardMin.compute ? 'Expand' : 'Minimize'"></button>
+          </div>
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-sm font-medium">Compute distribution · sovereignty score</div>
+            <div class="text-xs text-slate-400">last <span x-text="sovereignty?.window_days || 30"></span> days</div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-3">
+            <div class="glass-tight p-3">
+              <div class="text-[11px] uppercase tracking-wide text-slate-500">Sovereignty</div>
+              <div class="flex items-baseline gap-2 mt-1">
+                <div class="stat-num text-3xl font-semibold mono"
+                     :class="(sovereignty?.sovereignty_pct ?? 0) >= 70 ? 'text-emerald-600' : (sovereignty?.sovereignty_pct ?? 0) >= 30 ? 'text-amber-600' : 'text-rose-600'"
+                     x-text="(sovereignty?.sovereignty_pct ?? 0).toFixed(1) + '%'"></div>
+                <div class="text-xs text-slate-500">on-prem</div>
+              </div>
+              <div class="text-[11px] text-slate-500 mt-1">
+                <span class="mono" x-text="sovereignty?.local_calls || 0"></span> local /
+                <span class="mono" x-text="sovereignty?.cloud_calls || 0"></span> cloud
+              </div>
+            </div>
+
+            <div class="glass-tight p-3">
+              <div class="text-[11px] uppercase tracking-wide text-slate-500">£ saved (est)</div>
+              <div class="flex items-baseline gap-2 mt-1">
+                <div class="stat-num text-3xl font-semibold mono">
+                  £<span x-text="(sovereignty?.saved_gbp_estimate ?? 0).toFixed(2)"></span>
+                </div>
+                <div class="text-xs text-slate-500">vs cloud-only</div>
+              </div>
+              <div class="text-[11px] text-slate-500 mt-1">
+                <span class="mono" x-text="sovereignty?.local_tokens?.toLocaleString() || 0"></span> local tokens × £0.01/1k
+              </div>
+            </div>
+
+            <div class="glass-tight p-3">
+              <div class="text-[11px] uppercase tracking-wide text-slate-500">MTD cloud spend</div>
+              <div class="flex items-baseline gap-2 mt-1">
+                <div class="stat-num text-3xl font-semibold mono">£<span x-text="(data?.spend?.month_total_gbp ?? 0).toFixed(2)"></span></div>
+                <div class="text-xs text-slate-500">/ £<span x-text="(data?.spend?.monthly_budget_gbp ?? 15).toFixed(0)"></span> budget</div>
+              </div>
+              <div class="text-[11px] text-slate-500 mt-1">
+                <span class="mono" x-text="sovereignty?.cloud_tokens?.toLocaleString() || 0"></span> cloud tokens
+              </div>
+            </div>
+          </div>
+
+          <!-- Split bar with 24h sovereignty sparkline behind -->
+          <div class="split-wrap" x-show="sovereignty?.total_calls > 0">
+            <svg class="sov-sparkline" viewBox="0 0 100 22" preserveAspectRatio="none"
+                 x-show="sovTrend?.length">
+              <path :d="sovTrendPath()" fill="none" stroke="rgb(16,185,129)" stroke-width="0.6"
+                    stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <div class="split-bar">
+              <div class="split-local"  :style="`flex:${sovereignty.local_calls};`"
+                   :title="`${sovereignty.local_calls} local`"></div>
+              <div class="split-cloud"  :style="`flex:${sovereignty.cloud_calls};`"
+                   :title="`${sovereignty.cloud_calls} cloud`"></div>
+            </div>
+          </div>
+          <div class="flex justify-between text-[11px] text-slate-500 mt-1.5" x-show="sovereignty?.total_calls > 0">
+            <span>● <span class="text-emerald-700 font-medium">Local (P620)</span></span>
+            <span x-show="sovTrend?.length" class="text-slate-400 mono"
+                  x-text="`24h sov: ${sovTrendSummary()}`"></span>
+            <span><span class="text-slate-700 font-medium">Cloud (Anthropic)</span> ●</span>
+          </div>
+          <div class="text-xs text-slate-400 mt-2" x-show="!sovereignty?.total_calls">
+            no AI calls logged yet — sovereignty score will populate once gmail-ingest, P2, P8, or P9 fires
+          </div>
+        </div>
+
+        <!-- ── PERFORMANCE TUNING STATION ─────────────── -->
+        <div class="glass p-5 card-shell" x-bind="cardShell('performance')">
+          <div class="card-head">
+            <span class="grip" title="drag to reorder">⋮⋮</span>
+            <span class="title">Performance tuning</span>
+            <button class="min-btn" @click="toggleMin('performance')"
+                    x-text="cardMin.performance ? '＋' : '−'"
+                    :title="cardMin.performance ? 'Expand' : 'Minimize'"></button>
+          </div>
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <div class="text-sm font-medium">Performance tuning · model leaderboard</div>
+              <div class="text-xs text-slate-400" x-show="leaderboardFreshnessAmber()">
+                ⚠ <span x-text="leaderboardFreshness()"></span> — re-test recommended
+              </div>
+              <div class="text-xs text-slate-400" x-show="!leaderboardFreshnessAmber() && leaderboard?.length">
+                last benchmark <span x-text="leaderboardFreshness()"></span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <select x-model="benchModel" class="text-xs border border-slate-200 rounded px-2 py-1 mono"
+                      :disabled="benchActive">
+                <option value="qwen2.5:7b">qwen2.5:7b (hot)</option>
+                <option value="phi4:14b">phi4:14b (medium)</option>
+                <option value="llama3.3:70b">llama3.3:70b (heavy)</option>
+              </select>
+              <select x-model="benchTier" class="text-xs border border-slate-200 rounded px-2 py-1 mono"
+                      :disabled="benchActive">
+                <option value="hot">hot</option>
+                <option value="medium">medium</option>
+                <option value="heavy">heavy</option>
+              </select>
+              <button @click="runQuickBenchmark()" :disabled="benchActive"
+                      class="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-xs hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-wait">
+                ⚡ Quick sweep
+              </button>
+              <button @click="runDeepBenchmark()" :disabled="benchActive"
+                      class="px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs hover:bg-slate-700 disabled:opacity-50 disabled:cursor-wait">
+                🔬 Deep bench
+              </button>
+            </div>
+          </div>
+
+          <!-- Leaderboard table -->
+          <div class="overflow-x-auto" x-show="leaderboard?.length > 0">
+            <table class="w-full text-sm mono">
+              <thead class="text-[11px] uppercase tracking-wide text-slate-500 border-b border-white/40">
+                <tr>
+                  <th class="text-left font-normal px-2 py-1">Model</th>
+                  <th class="text-left font-normal px-2 py-1">Tier</th>
+                  <th class="text-right font-normal px-2 py-1">Speed (t/s)</th>
+                  <th class="text-right font-normal px-2 py-1">Latency (ms)</th>
+                  <th class="text-right font-normal px-2 py-1">Accuracy</th>
+                  <th class="text-right font-normal px-2 py-1">Composite</th>
+                  <th class="text-right font-normal px-2 py-1" title="Change vs previous benchmark of the same model+tier">Δ</th>
+                  <th class="text-left font-normal px-2 py-1">When</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(m, idx) in leaderboard" :key="m.model_name + m.tier">
+                  <tr class="border-b border-white/40"
+                      :class="idx === 0 ? 'leader-gold' : ''">
+                    <td class="px-2 py-1.5 font-medium" x-text="m.model_name"></td>
+                    <td class="px-2 py-1.5"><span class="chip chip-other" x-text="m.tier"></span></td>
+                    <td class="px-2 py-1.5 text-right" x-text="(m.avg_speed_tps || 0).toFixed(1)"></td>
+                    <td class="px-2 py-1.5 text-right" x-text="m.avg_latency_ms"></td>
+                    <td class="px-2 py-1.5 text-right" x-text="(m.accuracy_score || 0).toFixed(0) + '%'"></td>
+                    <td class="px-2 py-1.5 text-right font-semibold"
+                        :class="(m.composite_score || 0) >= 80 ? 'text-emerald-700' : (m.composite_score || 0) >= 50 ? 'text-amber-700' : 'text-rose-700'"
+                        x-text="(m.composite_score || 0).toFixed(0) + '%'"></td>
+                    <td class="px-2 py-1.5 text-right text-xs">
+                      <template x-if="m.previous_composite_score != null">
+                        <span :class="(m.delta_composite || 0) > 0 ? 'text-emerald-600' : (m.delta_composite || 0) < 0 ? 'text-rose-600' : 'text-slate-400'"
+                              :title="`prev: ${m.previous_composite_score.toFixed(1)}% (${formatRel(m.previous_scored_at)})`"
+                              x-text="(m.delta_composite > 0 ? '▲ +' : m.delta_composite < 0 ? '▼ ' : '·') + (m.delta_composite ? Math.abs(m.delta_composite).toFixed(1) + '%' : '')"></span>
+                      </template>
+                      <template x-if="m.previous_composite_score == null">
+                        <span class="text-slate-300">—</span>
+                      </template>
+                    </td>
+                    <td class="px-2 py-1.5 text-xs text-slate-500" x-text="formatRel(m.scored_at)"></td>
+                  </tr>
+                </template>
+                <!-- Cloud baseline static row -->
+                <tr class="border-b border-white/40 opacity-70">
+                  <td class="px-2 py-1.5 font-medium">claude-haiku-4-5</td>
+                  <td class="px-2 py-1.5"><span class="chip chip-other">cloud</span></td>
+                  <td class="px-2 py-1.5 text-right">— external</td>
+                  <td class="px-2 py-1.5 text-right">~600</td>
+                  <td class="px-2 py-1.5 text-right">~95%</td>
+                  <td class="px-2 py-1.5 text-right">baseline</td>
+                  <td class="px-2 py-1.5 text-right text-slate-300">—</td>
+                  <td class="px-2 py-1.5 text-xs text-slate-500">Anthropic</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="text-xs text-slate-400" x-show="!leaderboard?.length">
+            no benchmark data — click ⚡ Quick sweep to populate
+          </div>
+
+          <!-- Live log pane -->
+          <div class="mt-3" x-show="benchActive || benchLog.length > 0">
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-xs text-slate-500">
+                <span x-show="benchActive" class="text-amber-600 font-medium">⚡ Benchmark running…</span>
+                <span x-show="!benchActive" class="text-slate-500">Last benchmark output</span>
+              </div>
+              <button @click="benchLog = []" class="text-[11px] text-slate-400 hover:text-slate-700"
+                      x-show="!benchActive && benchLog.length > 0">clear</button>
+            </div>
+            <pre class="log-pane resizable" x-text="benchLog.join('\n')"
+                 title="Drag the bottom-right corner to resize"></pre>
+          </div>
+        </div>
+
+        <!-- ── VRAM HEATMAP + AGENT TRAY ────────────── -->
+        <div class="glass p-5 card-shell" :class="benchActive ? 'stress-pulse' : ''" x-bind="cardShell('gpu')">
+          <div class="card-head">
+            <span class="grip" title="drag to reorder">⋮⋮</span>
+            <span class="title">GPU · Agents</span>
+            <button class="min-btn" @click="toggleMin('gpu')"
+                    x-text="cardMin.gpu ? '＋' : '−'"
+                    :title="cardMin.gpu ? 'Expand' : 'Minimize'"></button>
+          </div>
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-sm font-medium">GPU · Agents
+              <span x-show="benchActive" class="ml-2 chip chip-escalated">⚡ stress</span>
+            </div>
+            <div class="text-xs text-slate-400">
+              <template x-if="dreaming?.active">
+                <span class="text-indigo-600 font-medium pulse-brain inline-block">🧠 Dreaming…</span>
+              </template>
+              <template x-if="!dreaming?.active && dreaming?.last_run">
+                <span>last dream <span x-text="formatRel(dreaming.last_run)"></span></span>
+              </template>
+            </div>
+          </div>
+
+          <!-- VRAM heatmap (one row per GPU) -->
+          <template x-if="hardware?.gpu?.length > 0">
+            <div class="space-y-2">
+              <template x-for="g in hardware.gpu" :key="g.name">
+                <div class="rounded-md p-3 border"
+                     :class="g.vram_pct > 90 ? 'bg-rose-50/70 border-rose-300' : g.vram_pct > 75 ? 'bg-amber-50/70 border-amber-300' : 'bg-emerald-50/40 border-emerald-200/70'">
+                  <div class="flex items-center justify-between mb-1">
+                    <div class="font-medium mono" x-text="g.name.replace('NVIDIA ','')"></div>
+                    <div class="text-xs">
+                      <span class="mono" x-text="g.vram_used_mb"></span> /
+                      <span class="mono" x-text="g.vram_total_mb"></span> MB ·
+                      <span class="mono" x-text="g.temp_c"></span>°C ·
+                      <span class="mono" x-text="g.gpu_pct"></span>% util
+                    </div>
+                  </div>
+                  <div class="h-2 bar-track">
+                    <div class="h-2 bar-fill"
+                         :class="g.vram_pct > 90 ? 'bg-rose-500' : g.vram_pct > 75 ? 'bg-amber-500' : 'bg-emerald-500'"
+                         :style="`width:${g.vram_pct}%`"></div>
+                  </div>
+                  <div class="mt-1 text-[11px]" :class="g.vram_pct > 90 ? 'text-rose-700 font-medium' : 'text-slate-500'">
+                    <template x-if="g.vram_pct > 90">⚠ VRAM near OOM — consider unloading idle models</template>
+                    <template x-if="g.vram_pct <= 90"><span class="mono" x-text="g.vram_pct.toFixed(0)"></span>% VRAM</template>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- VRAM Residency — which model is hot / cached / available -->
+          <template x-if="vramResident?.models?.length > 0">
+            <div class="space-y-1.5 mt-3">
+              <div class="text-[11px] uppercase tracking-wide text-slate-500 mb-1">VRAM residency</div>
+              <template x-for="m in vramResident.models" :key="m.name">
+                <div class="flex items-center gap-2 glass-tight p-2"
+                     :class="m.status === 'active' ? 'glow-emerald' : ''">
+                  <span class="w-2 h-2 rounded-full flex-none"
+                        :class="{
+                          'bg-emerald-500 pulse-dot': m.status === 'active',
+                          'bg-sky-400':                m.status === 'cached',
+                          'bg-slate-300':              m.status === 'available',
+                        }"></span>
+                  <span class="mono text-sm font-medium" x-text="m.name"></span>
+
+                  <span class="text-[11px] mono"
+                        :class="m.status === 'active' ? 'text-emerald-700' : 'text-slate-500'">
+                    <template x-if="m.status === 'active' || m.status === 'cached'">
+                      <span>[<span x-text="(m.size_vram_mb/1024).toFixed(1)"></span>GB VRAM]</span>
+                    </template>
+                    <template x-if="m.status === 'available'">
+                      <span>[<span x-text="(m.size_disk_mb/1024).toFixed(1)"></span>GB disk · not loaded]</span>
+                    </template>
+                  </span>
+
+                  <span class="ml-auto chip"
+                        :class="{
+                          'chip-validated':   m.status === 'active',
+                          'chip-human':       m.status === 'cached',
+                          'chip-other':       m.status === 'available',
+                        }"
+                        x-text="m.status === 'active' ? 'Active · Hot' : m.status === 'cached' ? 'Cached · Idle' : 'Available'"></span>
+                </div>
+              </template>
+              <div class="text-[11px] text-slate-400 mt-1" x-show="benchActive && benchModel">
+                ⚡ stress source: <span class="mono" x-text="benchModel"></span> (<span x-text="benchTier"></span> tier benchmark)
+              </div>
+            </div>
+          </template>
+          <template x-if="!vramResident?.models?.length && !hardware?.gpu?.length">
+            <div class="text-xs text-slate-400">no GPU/agent data</div>
+          </template>
+        </div>
+
+        </div> <!-- end TIER 2 -->
+
+        <!-- ════════════════════════════════════════════════════════ -->
+        <!-- TIER 3 — DETAILED REGISTRIES (tasks, debt, logs)         -->
+        <!-- ════════════════════════════════════════════════════════ -->
+        <div class="tier" style="order:-1">
+          <div class="tier-label">Detailed registries · tasks · debt · logs</div>
+
+        <!-- ── TECHNICAL DEBT (standalone widget — extracted from System Registry tabs) ── -->
+        <div class="glass p-5 card-shell" x-bind="cardShell('debt')">
+          <div class="card-head">
+            <span class="grip" title="drag to reorder">⋮⋮</span>
+            <span class="title">Technical Debt · Cost of Delay</span>
+            <button class="min-btn" @click="toggleMin('debt')"
+                    x-text="cardMin.debt ? '＋' : '−'"
+                    :title="cardMin.debt ? 'Expand' : 'Minimize'"></button>
+          </div>
+          <div class="flex items-baseline gap-3 mb-3">
+            <div class="stat-num text-3xl font-semibold tl-error" x-text="totalCostOfDelay()"></div>
+            <div class="text-sm text-slate-500">total cost-of-delay points</div>
+            <div class="ml-auto text-xs text-slate-400">
+              <span class="num-stable" x-text="(data.debt || []).length"></span> open items
+            </div>
+          </div>
+          <div class="text-[11px] text-slate-500 mb-3">
+            Cost = severity × age × impact. Highest first. Address top items to reduce risk.
+          </div>
+          <ul class="space-y-2 text-sm">
+            <template x-for="d in sortedDebt()" :key="d.title">
+              <li class="glass-tight p-3">
+                <div class="flex items-center gap-2 mb-1 flex-wrap">
+                  <span class="cod-badge tl-bg-error tl-error num-stable"
+                        x-text="debtCostOfDelay(d) + ' CoD'"></span>
+                  <span class="font-medium" x-text="d.title"></span>
+                  <span class="chip ml-1"
+                        :class="{
+                          'tl-bg-error tl-error': d.severity === 'high',
+                          'tl-bg-active tl-active': d.severity === 'medium',
+                          'tl-bg-backlog tl-backlog': d.severity === 'low',
+                        }"
+                        x-text="d.severity + ' impact'"></span>
+                  <span class="chip chip-other ml-auto mono num-stable" x-text="d.estimate"></span>
+                </div>
+                <div class="text-xs text-slate-500" x-text="d.detail"></div>
+                <div class="text-xs text-slate-400 mt-0.5" x-show="d.unblocks">
+                  <span class="text-slate-600">unblocks:</span> <span x-text="d.unblocks"></span>
+                </div>
+              </li>
+            </template>
+            <li x-show="!(data.debt?.length)" class="text-xs text-slate-400 text-center py-2">
+              No open debt items 🎉
+            </li>
+          </ul>
+        </div>
+
+        <!-- ── SYSTEM REGISTRY — tabbed (tasks | debt | all) ─────────────── -->
+        <div class="glass p-5 card-shell" x-bind="cardShell('registry')">
+          <div class="card-head">
+            <span class="grip" title="drag to reorder">⋮⋮</span>
+            <span class="title">System Registry</span>
+            <button class="min-btn" @click="toggleMin('registry')"
+                    x-text="cardMin.registry ? '＋' : '−'"
+                    :title="cardMin.registry ? 'Expand' : 'Minimize'"></button>
+          </div>
+          <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div class="text-sm font-medium">System Registry</div>
+            <div class="flex items-center gap-1 text-xs">
+              <button @click="registryTab = 'tasks'"
+                      class="px-2.5 py-1 rounded-md transition"
+                      :class="registryTab === 'tasks' ? 'bg-slate-900 text-white' : 'bg-white/40 text-slate-600 hover:bg-white/70'">
+                Tasks <span class="ml-1 mono opacity-70" x-text="(data.tasks?.hands_off?.length || 0) + (data.tasks?.needs_user?.length || 0)"></span>
+              </button>
+              <button @click="registryTab = 'debt'"
+                      class="px-2.5 py-1 rounded-md transition"
+                      :class="registryTab === 'debt' ? 'bg-slate-900 text-white' : 'bg-white/40 text-slate-600 hover:bg-white/70'">
+                Debt <span class="ml-1 mono opacity-70" x-text="(data.debt || []).length"></span>
+              </button>
+              <button @click="registryTab = 'all'"
+                      class="px-2.5 py-1 rounded-md transition"
+                      :class="registryTab === 'all' ? 'bg-slate-900 text-white' : 'bg-white/40 text-slate-600 hover:bg-white/70'">
+                All
+              </button>
+            </div>
+          </div>
+
+          <!-- Tasks pane -->
+          <div x-show="registryTab === 'tasks' || registryTab === 'all'"
+               :class="registryTab === 'all' ? 'mb-5 pb-5 border-b border-white/40' : ''">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-1">
+              <div>
+                <div class="text-xs uppercase tracking-wide text-emerald-700 mb-1">Hands-off (I can do)</div>
+                <ul class="text-sm space-y-1.5">
+                  <template x-for="t in (data.tasks?.hands_off || [])" :key="t.id">
+                    <li>
+                      <details>
+                        <summary class="flex items-center gap-1 hover:bg-white/40 rounded px-1 py-0.5">
+                          <span class="chev text-slate-400 text-xs">▶</span>
+                          <span x-text="t.title"></span>
+                          <span class="ml-auto text-xs text-slate-400" x-text="t.estimate"></span>
+                        </summary>
+                        <div class="ml-4 mt-1 text-xs text-slate-500" x-text="t.detail"></div>
+                      </details>
+                    </li>
+                  </template>
+                </ul>
+              </div>
+              <div>
+                <div class="text-xs uppercase tracking-wide text-amber-700 mb-1">Needs you · sorted by impact</div>
+                <ul class="text-sm space-y-1.5">
+                  <template x-for="(t, idx) in rankedNeedsUser()" :key="t.id">
+                    <li class="flex items-start gap-2">
+                      <span class="text-[10px] uppercase tracking-wide font-bold mt-0.5"
+                            :class="idx < 3 ? 'text-rose-600' : 'text-slate-400'"
+                            x-text="idx < 3 ? `#${idx+1} unblocks` : ''"></span>
+                      <details class="flex-1">
+                        <summary class="flex items-center gap-1 hover:bg-white/40 rounded px-1 py-0.5"
+                                 :class="idx < 3 ? 'font-medium' : ''">
+                          <span class="chev text-slate-400 text-xs">▶</span>
+                          <span x-text="t.title"></span>
+                          <span class="ml-auto text-xs text-slate-400 mono" x-text="t.estimate"></span>
+                        </summary>
+                        <div class="ml-4 mt-1 text-xs text-slate-500" x-text="t.detail"></div>
+                      </details>
+                    </li>
+                  </template>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Debt pane -->
+          <div x-show="registryTab === 'debt' || registryTab === 'all'">
+            <div class="text-xs uppercase tracking-wide text-slate-500 mb-2"
+                 x-show="registryTab === 'all'">Technical debt · impact × effort</div>
+            <ul class="space-y-2 text-sm">
+              <template x-for="d in data.debt" :key="d.title">
+                <li class="glass-tight p-3">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="inline-block w-2 h-2 rounded-full"
+                          :class="{ 'sev-high': d.severity === 'high', 'sev-medium': d.severity === 'medium', 'sev-low': d.severity === 'low' }"></span>
+                    <span class="font-medium" x-text="d.title"></span>
+                    <span class="chip ml-1"
+                          :class="{
+                            'chip-hallucination': d.severity === 'high',
+                            'chip-escalated':     d.severity === 'medium',
+                            'chip-other':         d.severity === 'low',
+                          }"
+                          x-text="d.severity === 'high' ? 'high impact' : d.severity === 'medium' ? 'med impact' : 'low impact'"></span>
+                    <span class="chip chip-other ml-auto mono" x-text="d.estimate"></span>
+                  </div>
+                  <div class="text-xs text-slate-500" x-text="d.detail"></div>
+                  <div class="text-xs text-slate-400 mt-0.5" x-show="d.unblocks">
+                    <span class="text-slate-600">unblocks:</span> <span x-text="d.unblocks"></span>
+                  </div>
+                </li>
+              </template>
+            </ul>
+          </div>
+        </div>
+
+        <!-- ── ACHIEVEMENTS ─────────────────── -->
+        <div class="glass p-5 card-shell" x-bind="cardShell('achievements')">
+          <div class="card-head">
+            <span class="grip" title="drag to reorder">⋮⋮</span>
+            <span class="title">Achievements</span>
+            <button class="min-btn" @click="toggleMin('achievements')"
+                    x-text="cardMin.achievements ? '＋' : '−'"
+                    :title="cardMin.achievements ? 'Expand' : 'Minimize'"></button>
+          </div>
+          <div>
+            <div class="text-sm font-medium mb-3">Achievements</div>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+              <div class="glass-tight p-2.5">
+                <div class="stat-num text-xl font-semibold mono" x-text="data.counts.migrations"></div>
+                <div class="text-xs text-slate-500">migrations</div>
+              </div>
+              <div class="glass-tight p-2.5">
+                <div class="stat-num text-xl font-semibold mono" x-text="data.counts.alert_rules"></div>
+                <div class="text-xs text-slate-500">alert rules</div>
+              </div>
+              <div class="glass-tight p-2.5">
+                <div class="stat-num text-xl font-semibold mono" x-text="data.counts.invoices || 0"></div>
+                <div class="text-xs text-slate-500">invoices extracted</div>
+              </div>
+              <div class="glass-tight p-2.5">
+                <div class="stat-num text-xl font-semibold mono" x-text="data.counts.audit_24h"></div>
+                <div class="text-xs text-slate-500">audit_log / 24h</div>
+              </div>
+              <div class="glass-tight p-2.5">
+                <div class="stat-num text-xl font-semibold mono" x-text="data.counts.bank_transactions"></div>
+                <div class="text-xs text-slate-500">bank transactions</div>
+              </div>
+              <div class="glass-tight p-2.5">
+                <div class="stat-num text-xl font-semibold mono" x-text="data.counts.email_attachments"></div>
+                <div class="text-xs text-slate-500">attachments</div>
+              </div>
+            </div>
+
+            <div class="mt-5 space-y-3">
+              <template x-for="cat in data.phase1.categories" :key="cat.name">
+                <details>
+                  <summary class="flex items-center gap-1 text-xs uppercase tracking-wide text-slate-500 hover:text-slate-700">
+                    <span class="chev">▶</span>
+                    <span x-text="cat.name"></span>
+                    <span class="ml-auto text-slate-400 mono">
+                      <span x-text="cat.items.filter(i => i.status === 'done').length"></span>/<span x-text="cat.items.length"></span>
+                    </span>
+                  </summary>
+                  <ul class="ml-5 mt-1 space-y-0.5 text-sm">
+                    <template x-for="it in cat.items" :key="it.id">
+                      <li class="flex items-start gap-2">
+                        <span class="mt-1 inline-block w-2 h-2 rounded-full flex-none"
+                              :class="{
+                                'bg-emerald-500': it.status === 'done',
+                                'bg-sky-400':     it.status === 'in_progress',
+                                'bg-slate-300':   it.status === 'todo',
+                                'bg-amber-400':   it.status === 'blocked',
+                              }"></span>
+                        <span :class="it.status === 'done' ? 'text-slate-400 line-through' : ''" x-text="it.title"></span>
+                        <span x-show="it.blocker" class="text-xs text-amber-600 ml-auto" x-text="'⏳ ' + it.blocker"></span>
+                      </li>
+                    </template>
+                  </ul>
+                </details>
+              </template>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ── MIGRATION LOG (lifecycle stream) ────────── -->
+        <div class="glass p-5 card-shell" x-bind="cardShell('migration')">
+          <div class="card-head">
+            <span class="grip" title="drag to reorder">⋮⋮</span>
+            <span class="title">Migration log</span>
+            <button class="min-btn" @click="toggleMin('migration')"
+                    x-text="cardMin.migration ? '＋' : '−'"
+                    :title="cardMin.migration ? 'Expand' : 'Minimize'"></button>
+          </div>
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-sm font-medium">Migration log · model lineage</div>
+            <div class="text-xs text-slate-400">most recent 50 build/production/migration entries</div>
+          </div>
+          <div class="space-y-1 max-h-[280px] overflow-y-auto pr-1">
+            <template x-for="r in (lifecycle?.recent || [])" :key="r.ts + r.actor + r.model">
+              <div class="flex items-center gap-2 text-xs py-1 border-b border-white/30">
+                <span class="chip mono w-20 text-center"
+                      :class="{
+                        'chip-human':       r.context_layer === 'build',
+                        'chip-validated':   r.context_layer === 'production' && r.provider === 'local',
+                        'chip-escalated':   r.context_layer === 'production' && r.provider === 'anthropic',
+                        'chip-other':       r.context_layer === 'migration',
+                      }"
+                      x-text="r.context_layer"></span>
+                <span class="mono font-medium" x-text="r.model"></span>
+                <span class="text-slate-500 mono" x-text="r.actor"></span>
+                <span class="text-slate-600 truncate flex-1" x-text="r.task_summary || ''"></span>
+                <span class="text-slate-400 mono whitespace-nowrap" x-text="formatRel(r.ts)"></span>
+                <span x-show="r.cost_gbp > 0" class="mono text-rose-600 whitespace-nowrap"
+                      x-text="'£' + r.cost_gbp.toFixed(4)"></span>
+              </div>
+            </template>
+            <div x-show="!(lifecycle?.recent?.length)" class="text-center text-xs text-slate-400 py-3">no entries yet</div>
+          </div>
+        </div>
+
+        <!-- ── OUTCOME REGISTRY (log-stream) ─────────── -->
+        <div class="glass p-5 card-shell" x-bind="cardShell('outcome')">
+          <div class="card-head">
+            <span class="grip" title="drag to reorder">⋮⋮</span>
+            <span class="title">Outcome registry</span>
+            <button class="min-btn" @click="toggleMin('outcome')"
+                    x-text="cardMin.outcome ? '＋' : '−'"
+                    :title="cardMin.outcome ? 'Expand' : 'Minimize'"></button>
+          </div>
+          <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div class="text-sm font-medium">Outcome registry</div>
+            <div class="flex items-center gap-2 text-xs">
+              <span class="text-slate-500">
+                <span class="num-stable" x-text="recent.length"></span> entries ·
+                <span x-show="!outcomeLiveStream">page <span class="num-stable" x-text="outcomePage + 1"></span> of <span class="num-stable" x-text="outcomePageCount()"></span></span>
+                <span x-show="outcomeLiveStream" class="tl-active">live</span>
+              </span>
+              <label class="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" x-model="outcomeLiveStream" class="cursor-pointer">
+                <span class="text-slate-600">Live stream</span>
+              </label>
+              <button @click="loadRecent()" class="pgn-btn">↻</button>
+            </div>
+          </div>
+
+          <!-- Pagination controls -->
+          <div class="flex items-center gap-1 mb-3 flex-wrap" x-show="!outcomeLiveStream && outcomePageCount() > 1">
+            <button class="pgn-btn" @click="outcomePage = 0"
+                    :disabled="outcomePage === 0">«</button>
+            <button class="pgn-btn" @click="outcomePage = Math.max(0, outcomePage - 1)"
+                    :disabled="outcomePage === 0">‹</button>
+            <template x-for="i in Math.min(outcomePageCount(), 7)" :key="i">
+              <button class="pgn-btn" :class="i-1 === outcomePage ? 'active' : ''"
+                      @click="outcomePage = i-1" x-text="i"></button>
+            </template>
+            <button class="pgn-btn" @click="outcomePage = Math.min(outcomePageCount()-1, outcomePage + 1)"
+                    :disabled="outcomePage >= outcomePageCount()-1">›</button>
+            <button class="pgn-btn" @click="outcomePage = outcomePageCount()-1"
+                    :disabled="outcomePage >= outcomePageCount()-1">»</button>
+          </div>
+
+          <div class="space-y-2 pr-1" :class="outcomeLiveStream ? 'max-h-[640px] overflow-y-auto' : ''">
+            <template x-for="r in paginatedOutcomes()" :key="r.id">
+              <div class="stream-card p-3"
+                   :class="streamClassFor(r)">
+                <div class="flex items-center gap-3 flex-wrap">
+                  <span class="chip" :class="badgeClassFor(r)" x-text="badgeLabelFor(r)"></span>
+                  <span class="mono text-sm font-medium" x-text="r.pipeline"></span>
+                  <span class="text-slate-400 text-sm">→</span>
+                  <span class="mono text-sm" x-text="r.outcome?.worker || r.ai_worker || '(no worker)'"></span>
+                  <a x-show="r.pipeline" :href="`${data.n8n_base}/workflow/${pipelineToWorkflowId(r.pipeline)}`"
+                     target="_blank" rel="noopener"
+                     class="text-slate-400 hover:text-slate-700 text-sm" title="Open workflow">↗</a>
+
+                  <!-- Confidence -->
+                  <span x-show="r.outcome?.confidence != null"
+                        class="ml-auto text-xs mono"
+                        :class="(r.outcome?.confidence || 0) >= 0.85 ? 'text-emerald-600' : (r.outcome?.confidence || 0) >= 0.70 ? 'text-amber-600' : 'text-rose-600'"
+                        x-text="((r.outcome?.confidence || 0) * 100).toFixed(0) + '%'"></span>
+
+                  <!-- Tier + model -->
+                  <span class="text-[11px] text-slate-500 flex items-center gap-1" x-show="r.outcome?.tier_used || r.ai_model">
+                    <span class="chip chip-other mono" x-show="r.outcome?.tier_used" x-text="r.outcome?.tier_used"></span>
+                    <span class="mono" x-show="r.ai_model" x-text="r.ai_model"></span>
+                    <!-- Tier rationale tooltip -->
+                    <span x-show="r.outcome?.tier_used || r.outcome?.worker || r.ai_worker"
+                          class="tooltip-host text-slate-400 hover:text-slate-700 cursor-help"
+                          aria-label="Why this tier?">
+                      <span class="text-[12px]">ⓘ</span>
+                      <div class="tip" x-text="tierRationale(r)"></div>
+                    </span>
+                  </span>
+
+                  <!-- Shadow Run -->
+                  <span x-show="isShadowable(r)" class="tooltip-host">
+                    <button class="btn-shadow mono">⟳ shadow</button>
+                    <div class="tip">
+                      Shadow Run — replay with heavy tier (llama3.3:70b) to see if the outcome was small-model bound.
+                      <br><br>
+                      <span class="opacity-70">Not yet wired — needs heavy tier model pulled + a debug webhook.</span>
+                    </div>
+                  </span>
+                </div>
+
+                <!-- Action + reasoning preview -->
+                <div class="mt-1 text-xs text-slate-500 flex items-baseline gap-2">
+                  <span class="text-slate-400 mono" x-text="r.action"></span>
+                  <span x-show="r.outcome?.reasoning || r.error_msg"
+                        class="truncate"
+                        x-text="r.outcome?.reasoning || r.error_msg"></span>
+                  <span class="ml-auto text-slate-400 mono whitespace-nowrap" x-text="formatRel(r.created_at)"></span>
+                </div>
+              </div>
+            </template>
+            <div x-show="recent.length === 0" class="text-center text-xs text-slate-400 py-3">no activity yet</div>
+          </div>
+        </div>
+
+        </div> <!-- end TIER 3 -->
+
+        <footer class="text-xs text-slate-400 pt-4 mono">
+          edit data/{phase1,phases,debt,tasks}.yaml to change curated content · 30s heartbeat · /api/healthz-deep for live probe
+        </footer>
+      </div>
+    </template>
+  </div>
+</div>
+
+<script>
+function dashboard() {
+  return {
+    data: null,
+    recent: [],
+    hardware: null,
+    agents: null,
+    velocity: null,
+    ctx: null,
+    dreaming: null,
+    sovereignty: null,
+    leaderboard: [],
+    lifecycle: null,
+    tiers: [],
+    vramResident: null,
+    sovTrend: [],
+    registryTab: 'tasks',
+
+    // ── New: phase-gate progress + deep health + outcome registry pagination
+    phasesData: null,
+    healthDeep: null,         // { status, checks: {postgres, n8n, google_fetch} }
+    outcomePage: 0,           // page index (0-based)
+    outcomePageSize: 10,
+    outcomeLiveStream: false, // toggle for "show all latest" vs "paginate"
+
+    benchActive: false,
+    benchLog: [],
+    benchModel: 'qwen2.5:7b',
+    benchTier: 'hot',
+    timer: null,
+    heartbeatTimer: null,
+    heartbeatStart: 0,
+    heartbeatPct: 1,
+    connectionLost: false,
+    lastEndpoint: '',
+    REFRESH_MS: 30000,
+
+    // ── Layout state (persisted to localStorage) ──
+    LAYOUT_KEY: 'homeai-dash-layout-v1',
+    DEFAULT_ORDER: ['intelligence','tier','compute','performance','gpu','registry','achievements','migration','outcome'],
+    cardOrder: [],
+    cardMin: {},
+    layoutLocked: true,
+    dragId: '',
+    dragOver: '',
+
+    async boot() {
+      this.loadLayout();
+      await this.refresh();
+      // 30s refresh + 100ms heartbeat tick
+      this.timer = setInterval(() => this.refresh(), this.REFRESH_MS);
+      this.heartbeatStart = Date.now();
+      this.heartbeatTimer = setInterval(() => this.tickHeartbeat(), 100);
+    },
+
+    // ── Layout helpers ─────────────────────────────
+    loadLayout() {
+      this.cardOrder = [...this.DEFAULT_ORDER];
+      try {
+        const raw = localStorage.getItem(this.LAYOUT_KEY);
+        if (raw) {
+          const saved = JSON.parse(raw);
+          if (Array.isArray(saved.order)) {
+            // Keep saved order, append any new cards that didn't exist when saved
+            const seen = new Set(saved.order.filter(id => this.DEFAULT_ORDER.includes(id)));
+            const missing = this.DEFAULT_ORDER.filter(id => !seen.has(id));
+            this.cardOrder = saved.order.filter(id => this.DEFAULT_ORDER.includes(id)).concat(missing);
+          }
+          if (saved.min && typeof saved.min === 'object') this.cardMin = saved.min;
+          if (typeof saved.locked === 'boolean') this.layoutLocked = saved.locked;
+        }
+      } catch (e) { /* corrupt storage — fall back to defaults */ }
+    },
+
+    saveLayout() {
+      try {
+        localStorage.setItem(this.LAYOUT_KEY, JSON.stringify({
+          order: this.cardOrder, min: this.cardMin, locked: this.layoutLocked,
+        }));
+      } catch (e) { /* quota exhausted — ignore, layout still works in-memory */ }
+    },
+
+    cardOrderIndex(id) {
+      const i = this.cardOrder.indexOf(id);
+      return i < 0 ? this.DEFAULT_ORDER.indexOf(id) : i;
+    },
+
+    cardShell(id) {
+      return {
+        [':class']: {
+          'is-locked': this.layoutLocked,
+          'minimized': !!this.cardMin[id],
+          'dragging':  this.dragId === id,
+          'drag-target': this.dragOver === id && !!this.dragId && this.dragId !== id,
+        },
+        [':style']: `order:${this.cardOrderIndex(id)}`,
+        [':draggable']: !this.layoutLocked,
+        '@dragstart': (event) => {
+          if (this.layoutLocked) return;
+          this.dragId = id;
+          if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'move';
+            try { event.dataTransfer.setData('text/plain', id); } catch (e) {}
+          }
+        },
+        '@dragover.prevent': () => { if (this.dragId && this.dragId !== id) this.dragOver = id; },
+        '@dragleave': () => { if (this.dragOver === id) this.dragOver = ''; },
+        '@drop.prevent': () => {
+          if (!this.dragId || this.dragId === id) { this.endDrag(); return; }
+          const from = this.cardOrder.indexOf(this.dragId);
+          const to   = this.cardOrder.indexOf(id);
+          if (from < 0 || to < 0) { this.endDrag(); return; }
+          const next = [...this.cardOrder];
+          next.splice(to, 0, next.splice(from, 1)[0]);
+          this.cardOrder = next;
+          this.saveLayout();
+          this.endDrag();
+        },
+        '@dragend': () => this.endDrag(),
+      };
+    },
+
+    endDrag() { this.dragId = ''; this.dragOver = ''; },
+
+    toggleMin(id) {
+      this.cardMin = { ...this.cardMin, [id]: !this.cardMin[id] };
+      this.saveLayout();
+    },
+
+    toggleLayoutLock() {
+      this.layoutLocked = !this.layoutLocked;
+      this.saveLayout();
+    },
+
+    resetLayout() {
+      if (!confirm('Reset all card positions and minimised state?')) return;
+      this.cardOrder = [...this.DEFAULT_ORDER];
+      this.cardMin = {};
+      this.saveLayout();
+    },
+
+    tickHeartbeat() {
+      const elapsed = Date.now() - this.heartbeatStart;
+      const remaining = Math.max(0, this.REFRESH_MS - elapsed);
+      this.heartbeatPct = remaining / this.REFRESH_MS;
+    },
+
+    async refresh() {
+      this.heartbeatStart = Date.now();
+      try {
+        const [snap, rec, hw, ag, vel, cx, dr, sov, lb, lc, ti, vr, st, ph, hd] = await Promise.all([
+          this.fetchOr('/api/snapshot'),
+          this.fetchOr('/api/recent'),
+          this.fetchOr('/api/hardware'),
+          this.fetchOr('/api/agents'),
+          this.fetchOr('/api/spend?days=7'),
+          this.fetchOr('/api/context-pressure'),
+          this.fetchOr('/api/dreaming'),
+          this.fetchOr('/api/sovereignty?days=30'),
+          this.fetchOr('/api/leaderboard'),
+          this.fetchOr('/api/lifecycle?days=7'),
+          this.fetchOr('/api/tiers'),
+          this.fetchOr('/api/hardware/vram-resident'),
+          this.fetchOr('/api/sovereignty/trend?hours=24'),
+          this.fetchOr('/api/phases'),
+          this.fetchOr('/api/healthz-deep'),
+        ]);
+        if (!snap || !hw) {
+          this.connectionLost = true;
+          return;
+        }
+        this.connectionLost = false;
+        this.data = snap;
+        this.recent = rec || [];
+        this.hardware = hw;
+        this.agents = ag;
+        this.velocity = vel;
+        this.ctx = cx;
+        this.dreaming = dr;
+        this.sovereignty = sov;
+        this.leaderboard = lb || [];
+        this.lifecycle   = lc;
+        this.tiers       = ti || [];
+        this.vramResident = vr;
+        this.sovTrend    = st || [];
+        this.phasesData  = ph;
+        this.healthDeep  = hd;
+      } catch (e) {
+        console.error('refresh failed', e);
+        this.connectionLost = true;
+      }
+    },
+
+    async runQuickBenchmark() {
+      this.benchActive = true;
+      this.benchLog = ['⚡ Triggering quick sweep…'];
+      try {
+        const r = await fetch('/api/benchmark/run?mode=quick', { method: 'POST' });
+        const d = await r.json();
+        this.benchLog.push(`→ webhook: HTTP ${d.status_code}`);
+        if (d.ok) {
+          this.benchLog.push('Quick sweep dispatched. Polling for results…');
+          // Poll the leaderboard for new results
+          for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            const lb = await this.fetchOr('/api/leaderboard');
+            if (lb && lb.length > 0) {
+              const newest = lb[0];
+              const ageMs = Date.now() - new Date(newest.scored_at).getTime();
+              if (ageMs < 60000) {
+                this.benchLog.push(`✓ result: ${newest.model_name} composite ${newest.composite_score.toFixed(1)}%, ${newest.avg_speed_tps.toFixed(1)} t/s`);
+                this.leaderboard = lb;
+                break;
+              }
+            }
+          }
+        } else {
+          this.benchLog.push('✗ webhook returned non-200');
+        }
+      } catch (e) {
+        this.benchLog.push('✗ ' + e.message);
+      } finally {
+        this.benchActive = false;
+      }
+    },
+
+    runDeepBenchmark() {
+      this.benchActive = true;
+      this.benchLog = [`🔬 Deep benchmark — ${this.benchModel} on tier=${this.benchTier}`, '─'.repeat(40)];
+      const url = `/api/benchmark/stream?model=${encodeURIComponent(this.benchModel)}&tier=${encodeURIComponent(this.benchTier)}`;
+      const es = new EventSource(url);
+      es.onmessage = (ev) => {
+        if (ev.data) this.benchLog.push(ev.data);
+        // auto-scroll
+        this.$nextTick(() => {
+          const pane = document.querySelector('.log-pane');
+          if (pane) pane.scrollTop = pane.scrollHeight;
+        });
+      };
+      es.addEventListener('done', (ev) => {
+        this.benchLog.push('─'.repeat(40));
+        this.benchLog.push('✓ ' + ev.data);
+        es.close();
+        this.benchActive = false;
+      });
+      es.onerror = () => {
+        this.benchLog.push('✗ stream error or closed');
+        es.close();
+        this.benchActive = false;
+      };
+    },
+
+    layerSummary(layer) {
+      const arr = this.lifecycle?.by_layer?.[layer] || [];
+      return {
+        calls:    arr.reduce((a, m) => a + (m.calls || 0), 0),
+        cost_gbp: arr.reduce((a, m) => a + (m.cost_gbp || 0), 0),
+      };
+    },
+
+    leaderboardFreshness() {
+      if (!this.leaderboard?.length) return '';
+      const newest = this.leaderboard.reduce((a, b) =>
+        new Date(b.scored_at) > new Date(a.scored_at) ? b : a);
+      return this.formatRel(newest.scored_at);
+    },
+
+    leaderboardFreshnessAmber() {
+      if (!this.leaderboard?.length) return false;
+      const newest = this.leaderboard.reduce((a, b) =>
+        new Date(b.scored_at) > new Date(a.scored_at) ? b : a);
+      const ageDays = (Date.now() - new Date(newest.scored_at).getTime()) / 86400000;
+      return ageDays > 7;
+    },
+
+    async fetchOr(url) {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) { this.lastEndpoint = url + ' → HTTP ' + r.status; return null; }
+        return await r.json();
+      } catch (e) {
+        this.lastEndpoint = url + ' → ' + (e.message || 'network');
+        return null;
+      }
+    },
+
+    async loadRecent() {
+      const r = await this.fetchOr('/api/recent');
+      if (r) this.recent = r;
+    },
+
+    situationalLine() {
+      const s = this.data?.situational;
+      if (!s) return '';
+      if (s.severity === 'red')   return `⚠ system ${s.system_state} · router silent ${this.formatAgo(s.router_age_s)}`;
+      if (s.severity === 'amber') return `⚠ paused${s.paused_reason ? ' · ' + s.paused_reason : ''}`;
+      return `running · router heartbeat ${this.formatAgo(s.router_age_s)}`;
+    },
+
+    pipelineToWorkflowId(p) {
+      const map = {
+        'email_pipeline':       'gmail-ingest-v1',
+        'invoice_pipeline':     'invoice-pipeline-v1',
+        'partition_maintenance':'partition-maintenance-v1',
+        'bank_csv_import':      'bank-csv-import-v1',
+        'report_ingestion':     'report-ingestion-v1',
+        'nanny_pipeline':       'nanny-v1',
+        'master_router':        'test-master-router',
+        'alert_sink':           'alert-sink-v1',
+        'hmac_verifier':        'hmac-verifier-v1',
+        'dreaming':             'dreaming-v1',
+        'diagnostics':          'diagnostics-v1',
+        'cleanup':              'cleanup-v1',
+      };
+      return map[p] || '';
+    },
+
+    // Outcome Primitive taxonomy: Validated / Escalated / Hallucination_Detected / Human_Required
+    badgeFor(r) {
+      const o = r.outcome || {};
+      const status = o.status || r.result || '';
+      const reqHuman = o.requires_human || (status === 'fail');
+      // Hallucination heuristic: AI worker had reasoning but extracted no/empty data
+      const hallucination = o.worker && o.confidence != null && o.confidence < 0.5 && !reqHuman;
+      if (status === 'success' || status === 'resolved') return 'validated';
+      if (status === 'escalate' || status === 'partial_failure') return 'escalated';
+      if (hallucination)        return 'hallucination';
+      if (reqHuman || status === 'fail' || status === 'failure') return 'human';
+      return 'other';
+    },
+
+    badgeLabelFor(r) {
+      const m = { validated: 'Validated', escalated: 'Escalated', hallucination: 'Hallucination?', human: 'Human required', other: r.result || r.outcome?.status || '—' };
+      return m[this.badgeFor(r)];
+    },
+
+    badgeClassFor(r) {
+      const m = { validated: 'chip-validated', escalated: 'chip-escalated', hallucination: 'chip-hallucination', human: 'chip-human', other: 'chip-other' };
+      return m[this.badgeFor(r)];
+    },
+
+    streamClassFor(r) {
+      const m = { validated: 'stream-validated', escalated: 'stream-escalated', hallucination: 'stream-hallucination', human: 'stream-human', other: 'stream-other' };
+      return m[this.badgeFor(r)];
+    },
+
+    isShadowable(r) {
+      const b = this.badgeFor(r);
+      return b === 'escalated' || b === 'hallucination' || b === 'human';
+    },
+
+    rankedNeedsUser() {
+      // Simple impact ranking: known unblocker counts (handcrafted; could be derived).
+      // The first 3 unblock the most pipelines.
+      const impactByKey = {
+        'xero-oauth':     { unblocks: 2, label: 'P3 + P2 matching' },
+        'gmail-routing':  { unblocks: 2, label: 'P5 + P6' },
+        'telegram-smtp':  { unblocks: 2, label: 'P10 + alert delivery' },
+        'gsheets-oauth':  { unblocks: 1, label: 'P7' },
+        'open-webui-admin':{ unblocks: 1, label: 'OWUI admin' },
+        'nas-mount':      { unblocks: 1, label: 'off-host backup' },
+      };
+      const tasks = (this.data?.tasks?.needs_user || []).map(t => ({
+        ...t,
+        _impact: impactByKey[t.id]?.unblocks || 0
+      }));
+      return tasks.sort((a, b) => (b._impact || 0) - (a._impact || 0));
+    },
+
+    velocityPath() {
+      const series = this.velocity || [];
+      if (series.length === 0) return '';
+      const w = 100, h = 28, pad = 1;
+      const max = Math.max(1, ...series.map(p => p.gbp));
+      const step = (w - pad*2) / Math.max(series.length - 1, 1);
+      let pts = series.map((p, i) => {
+        const x = pad + i * step;
+        const y = h - pad - ((p.gbp / max) * (h - pad*2));
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      });
+      return `M${pts[0]} L${pts.slice(1).join(' L')} L${(w-pad).toFixed(1)},${(h-pad).toFixed(1)} L${pad},${(h-pad).toFixed(1)} Z`;
+    },
+
+    sovTrendPath() {
+      const series = (this.sovTrend || []).map(p => p.sov ?? null);
+      if (series.length === 0) return '';
+      const w = 100, h = 22, pad = 1;
+      // If a bucket has no data, carry the previous value (or 0)
+      let last = 0;
+      const filled = series.map(v => { if (v != null) last = v; return last; });
+      const step = (w - pad*2) / Math.max(filled.length - 1, 1);
+      const pts = filled.map((v, i) => {
+        const x = pad + i * step;
+        const y = h - pad - ((v / 100) * (h - pad*2));
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      });
+      return `M${pts[0]} L${pts.slice(1).join(' L')}`;
+    },
+
+    sovTrendSummary() {
+      const pts = (this.sovTrend || []).filter(p => p.sov != null);
+      if (!pts.length) return '—';
+      const avg = pts.reduce((a, p) => a + p.sov, 0) / pts.length;
+      return `${avg.toFixed(0)}% avg · ${pts.length}h data`;
+    },
+
+    // ── Phase-gate helpers ──
+    phaseFillClass(phase) {
+      return {
+        'tl-fill-done':    phase.status === 'done',
+        'tl-fill-active':  phase.status === 'in_progress',
+        'tl-fill-error':   phase.status === 'blocked',
+        'tl-fill-backlog': phase.status === 'backlog',
+      };
+    },
+    phaseTextClass(phase) {
+      return {
+        'tl-done':    phase.status === 'done',
+        'tl-active':  phase.status === 'in_progress',
+        'tl-error':   phase.status === 'blocked',
+        'tl-backlog': phase.status === 'backlog',
+      };
+    },
+    phaseStatusLabel(phase) {
+      const counts = phase.counts || {};
+      const parts = [];
+      if (counts.done) parts.push(`${counts.done} done`);
+      if (counts.in_progress) parts.push(`${counts.in_progress} active`);
+      if (counts.blocked) parts.push(`${counts.blocked} blocked`);
+      if (counts.backlog) parts.push(`${counts.backlog} backlog`);
+      return parts.join(' · ');
+    },
+
+    // ── Outcome registry pagination ──
+    paginatedOutcomes() {
+      if (this.outcomeLiveStream) return this.recent;
+      const start = this.outcomePage * this.outcomePageSize;
+      return this.recent.slice(start, start + this.outcomePageSize);
+    },
+    outcomePageCount() {
+      return Math.max(1, Math.ceil(this.recent.length / this.outcomePageSize));
+    },
+
+    // ── Connection / health helpers ──
+    healthOverallClass() {
+      const s = this.healthDeep?.status || (this.connectionLost ? 'down' : 'ok');
+      if (this.connectionLost) return 'down';
+      if (s === 'ok') return 'ok';
+      if (s === 'degraded') return 'degraded';
+      return 'down';
+    },
+    healthDetail() {
+      if (this.connectionLost) return 'connection lost';
+      if (!this.healthDeep) return 'pinging…';
+      const checks = this.healthDeep.checks || {};
+      const bits = [];
+      for (const k of ['postgres', 'n8n', 'google_fetch']) {
+        const v = checks[k];
+        if (!v) continue;
+        const dot = v.status === 'ok' ? '●' : v.status === 'degraded' ? '◑' : '○';
+        bits.push(`${dot} ${k}`);
+      }
+      return bits.join(' · ');
+    },
+
+    // ── Debt cost-of-delay ──
+    debtCostOfDelay(d) {
+      // Severity weight × days-since-noticed × impact-on-unblock
+      // Without explicit fields, derive: severity=high→3, medium→2, low→1
+      // and assume 7-day average age unless the YAML provides one.
+      const sev = ({high: 3, medium: 2, low: 1}[d.severity] || 1);
+      const age = (d.age_days || 7);
+      const impact = (d.impact || (d.unblocks ? 2 : 1));
+      return sev * age * impact;
+    },
+    sortedDebt() {
+      const items = (this.data?.debt || []).slice();
+      items.sort((a, b) => this.debtCostOfDelay(b) - this.debtCostOfDelay(a));
+      return items;
+    },
+    totalCostOfDelay() {
+      return (this.data?.debt || []).reduce((sum, d) => sum + this.debtCostOfDelay(d), 0);
+    },
+
+    tierRationale(r) {
+      // Heuristic explanation of WHY this tier was chosen for the row's worker.
+      const worker = r.outcome?.worker || r.ai_worker || '';
+      const tier   = r.outcome?.tier_used || '';
+      const map = {
+        'email_classifier_hot':  'High-volume + low-stakes triage → hot tier (qwen2.5:7b)',
+        'email_classifier_haiku':'Hot tier confidence < threshold → escalated to Haiku',
+        'invoice_extractor':     'Multi-field structured extraction → Haiku for schema-fidelity',
+        'report_parser':         'Mixed-format documents → Haiku for variable-schema reasoning',
+        'nanny_classifier':      'Family-sensitive content → Haiku to maximise care + accuracy',
+      };
+      const key = `${worker}_${tier}`;
+      return map[key] || map[worker] || `Tier ${tier || 'unset'} default for ${worker || 'this worker'}`;
+    },
+
+    layerRationale(layer) {
+      // For the build-vs-production split — explain the tier
+      if (layer === 'apex')        return 'Multi-file code surgery and architectural pivots → Opus 4.7';
+      if (layer === 'legacy_apex') return 'Long-context dreaming + deep research → Opus 4.6';
+      if (layer === 'local_logic') return 'Complex JSON/logic + private docs → phi4:14b on local GPU';
+      if (layer === 'cloud_speed') return 'Fast triage + API glue + escalation → Haiku 4.5';
+      if (layer === 'local_fast')  return 'Log parsing + summaries + hot dashboard refreshes → qwen2.5:7b on local GPU';
+      return '';
+    },
+
+    velocityTotal7d() {
+      return ((this.velocity || []).reduce((a, p) => a + p.gbp, 0)).toFixed(0);
+    },
+
+    formatRel(iso) {
+      if (!iso) return '—';
+      const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+      return this.formatAgo(s);
+    },
+
+    formatAgo(s) {
+      if (s == null) return '—';
+      if (s < 60)        return s + 's';
+      if (s < 3600)      return Math.round(s / 60)   + 'm';
+      if (s < 86400)     return Math.round(s / 3600) + 'h';
+      return Math.round(s / 86400) + 'd';
+    }
+  };
+}
+</script>
+</body>
+</html>

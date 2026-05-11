@@ -1,0 +1,109 @@
+{
+  "id": "alert-sink-v1",
+  "name": "Alertmanager Sink",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": false
+  },
+  "nodes": [
+    {
+      "id": "as-0001-webhook",
+      "name": "Webhook (prom-alert)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "prom-alert",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "prom-alert",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "as-0002-flatten",
+      "name": "Flatten Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "parameters": {
+        "jsCode": "// Alertmanager sends an envelope with `alerts: [...]` (one or more).\n// Emit one item per individual alert. Mark items where alertname triggers\n// an auto-pause so the downstream node can act per SPEC §4.6.\nconst AUTO_PAUSE_ALERTS = new Set(['DeadLetterFlood']);\n\nconst body = $input.first().json.body || $input.first().json;\nconst alerts = Array.isArray(body.alerts) ? body.alerts : [body];\n\nconst items = alerts.map(a => {\n  const labels = a.labels || {};\n  const annotations = a.annotations || {};\n  const startsAt = a.startsAt || '';\n  const endsAtRaw = a.endsAt || '';\n  const ends_at = (endsAtRaw && !endsAtRaw.startsWith('0001-')) ? endsAtRaw : '';\n  const alertname = labels.alertname || 'unknown';\n  const status = a.status || 'firing';\n  return {\n    json: {\n      fingerprint:   a.fingerprint || '',\n      alertname,\n      severity:      labels.severity || 'unknown',\n      status,\n      starts_at:     startsAt,\n      ends_at:       ends_at,\n      generator_url: a.generatorURL || '',\n      summary:       String(annotations.summary || '').slice(0, 500),\n      description:   String(annotations.description || '').slice(0, 2000),\n      labels_json:      JSON.stringify(labels),\n      annotations_json: JSON.stringify(annotations),\n      auto_pause:    AUTO_PAUSE_ALERTS.has(alertname) && status === 'firing'\n    }\n  };\n});\n\nif (items.length === 0) {\n  return [{ json: { skipped: true, reason: 'no alerts in payload' } }];\n}\nreturn items;"
+      }
+    },
+    {
+      "id": "as-0003-upsert",
+      "name": "Upsert system_alerts + audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [680, 300],
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH up AS (\n  INSERT INTO system_alerts\n    (fingerprint, alertname, severity, status, starts_at, ends_at,\n     generator_url, summary, description, labels, annotations,\n     last_updated_at)\n  VALUES\n    ('{{ $json.fingerprint }}',\n     '{{ $json.alertname }}',\n     '{{ $json.severity }}',\n     '{{ $json.status }}',\n     COALESCE(NULLIF('{{ $json.starts_at }}','')::timestamptz, NOW()),\n     NULLIF('{{ $json.ends_at }}','')::timestamptz,\n     '{{ $json.generator_url }}',\n     $pl${{ $json.summary }}$pl$,\n     $pl${{ $json.description }}$pl$,\n     $pl${{ $json.labels_json }}$pl$::jsonb,\n     $pl${{ $json.annotations_json }}$pl$::jsonb,\n     NOW())\n  ON CONFLICT (fingerprint) DO UPDATE SET\n    status          = EXCLUDED.status,\n    ends_at         = EXCLUDED.ends_at,\n    summary         = EXCLUDED.summary,\n    description     = EXCLUDED.description,\n    labels          = EXCLUDED.labels,\n    annotations     = EXCLUDED.annotations,\n    last_updated_at = NOW()\n  RETURNING id, alertname, status\n)\nINSERT INTO audit_log\n  (pipeline, action, pipeline_version, result, ai_parsed)\nSELECT 'alert_sink',\n       up.alertname || ':' || up.status,\n       '1.0',\n       'success',\n       jsonb_build_object('alert_id', up.id,\n                          'alertname', up.alertname,\n                          'status', up.status,\n                          'severity', '{{ $json.severity }}')\n  FROM up\nRETURNING id AS audit_id;",
+        "options": {}
+      }
+    },
+    {
+      "id": "as-0004-pause-check",
+      "name": "Auto-Pause?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "leftValue": "", "caseSensitive": true, "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [{
+            "operator": { "type": "boolean", "operation": "true" },
+            "leftValue": "={{ $('Flatten Alerts').first().json.auto_pause === true }}",
+            "rightValue": ""
+          }]
+        }
+      }
+    },
+    {
+      "id": "as-0005-pause",
+      "name": "Pause Pipelines",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1120, 200],
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE static_context\n   SET value = jsonb_build_object(\n                 'state',         'paused',\n                 'paused_at',     NOW()::text,\n                 'paused_reason', 'auto_pause:{{ $('Flatten Alerts').first().json.alertname }}'),\n       updated_at = NOW()\n WHERE key = 'system.state'\n   AND (value->>'state') = 'running'\nRETURNING value AS new_state;",
+        "options": {}
+      }
+    },
+    {
+      "id": "as-0006-noop",
+      "name": "No Pause Needed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1120, 400],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Webhook (prom-alert)": {
+      "main": [[{ "node": "Flatten Alerts", "type": "main", "index": 0 }]]
+    },
+    "Flatten Alerts": {
+      "main": [[{ "node": "Upsert system_alerts + audit", "type": "main", "index": 0 }]]
+    },
+    "Upsert system_alerts + audit": {
+      "main": [[{ "node": "Auto-Pause?", "type": "main", "index": 0 }]]
+    },
+    "Auto-Pause?": {
+      "main": [
+        [{ "node": "Pause Pipelines", "type": "main", "index": 0 }],
+        [{ "node": "No Pause Needed", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}

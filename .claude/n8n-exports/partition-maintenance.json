@@ -1,0 +1,106 @@
+{
+  "id": "partition-maintenance-v1",
+  "name": "Partition Maintenance",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "nodes": [
+    {
+      "id": "pm-0001-schedule",
+      "name": "Schedule (25th 09:00)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 9 25 * *" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "pm-0002-vault-signing",
+      "name": "Vault: Signing Key",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "0wPA4DCDuehPC9Mf",
+          "name": "vault-token-header"
+        }
+      },
+      "parameters": {
+        "method": "GET",
+        "url": "http://vault:8200/v1/secret/data/signing",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      }
+    },
+    {
+      "id": "pm-0003-ensure-partition",
+      "name": "Ensure Next Partition",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [680, 300],
+      "credentials": {
+        "postgres": {
+          "id": "iTuuNfsqHY49MGhk",
+          "name": "HomeAI Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM ensure_next_event_partition();",
+        "options": {}
+      }
+    },
+    {
+      "id": "pm-0004-sign-event",
+      "name": "Build + Sign Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300],
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst vaultData = $('Vault: Signing Key').first().json;\nconst signing_key = vaultData?.data?.data?.payload_hmac_key;\nif (!signing_key) {\n  throw new Error('signing key not returned by vault — check vault-token-header credential scope');\n}\n\nconst row = $input.first().json;\nif (!row.partition_name) throw new Error('ensure_next_event_partition returned no row');\n\n// range_start/range_end come back as ISO date strings; keep them as-is in canonical payload.\nconst payload = {\n  partition_name: row.partition_name,\n  range_start:    row.range_start,\n  range_end:      row.range_end,\n  was_created:    row.was_created === true || row.was_created === 't'\n};\n\nconst canonical = JSON.stringify(payload, Object.keys(payload).sort());\nconst signature = crypto.createHmac('sha256', signing_key)\n                        .update(canonical)\n                        .digest('hex');\n\n// Idempotency: one ensured-event per target partition month, regardless of how\n// many times the workflow runs (cron + manual triggers + retries all collapse).\nconst monthKey = String(row.partition_name).replace(/^events_/, '');\n\nreturn [{\n  json: {\n    event_type: 'partition.ensured',\n    source: 'partition_maintenance',\n    payload_json: JSON.stringify(payload),\n    payload_signature: signature,\n    idempotency_key: 'partition_ensured_' + monthKey,\n    pipeline_version: '1.0',\n    partition_name: row.partition_name,\n    was_created: payload.was_created\n  }\n}];"
+      }
+    },
+    {
+      "id": "pm-0005-write-event-audit",
+      "name": "Write Event + Audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1120, 300],
+      "credentials": {
+        "postgres": {
+          "id": "iTuuNfsqHY49MGhk",
+          "name": "HomeAI Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SET LOCAL app.current_entity = 'all';\n\n-- Application-level idempotency: events.idempotency_key has no DB unique\n-- constraint (partitioned tables can't UNIQUE-index a non-partition-key\n-- column without including created_at), so we WHERE NOT EXISTS instead of\n-- ON CONFLICT. Pipeline 11 fires once per month from a single trigger so\n-- TOCTOU risk between SELECT and INSERT is negligible.\nWITH new_event AS (\n  INSERT INTO events\n    (event_type, source, entity_id, payload, payload_signature,\n     status, idempotency_key, pipeline_version)\n  SELECT '{{ $json.event_type }}',\n         '{{ $json.source }}',\n         NULL,\n         $pl${{ $json.payload_json }}$pl$::jsonb,\n         '{{ $json.payload_signature }}',\n         'done',\n         '{{ $json.idempotency_key }}',\n         '{{ $json.pipeline_version }}'\n   WHERE NOT EXISTS (\n     SELECT 1 FROM events\n      WHERE idempotency_key = '{{ $json.idempotency_key }}'\n   )\n  RETURNING id, trace_id\n),\naudit AS (\n  INSERT INTO audit_log\n    (pipeline, event_id, trace_id, action, record_type, record_id,\n     pipeline_version, result)\n  SELECT 'partition_maintenance',\n         ne.id,\n         ne.trace_id,\n         CASE WHEN {{ $json.was_created }} THEN 'partition_created'\n                                            ELSE 'partition_already_existed' END,\n         'event_partition',\n         NULL,\n         '{{ $json.pipeline_version }}',\n         'success'\n    FROM new_event ne\n  RETURNING id\n)\nSELECT (SELECT id FROM new_event) AS event_id,\n       (SELECT id FROM audit) AS audit_id,\n       '{{ $json.partition_name }}' AS partition_name,\n       {{ $json.was_created }} AS was_created;",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Schedule (25th 09:00)": {
+      "main": [[{ "node": "Vault: Signing Key", "type": "main", "index": 0 }]]
+    },
+    "Vault: Signing Key": {
+      "main": [[{ "node": "Ensure Next Partition", "type": "main", "index": 0 }]]
+    },
+    "Ensure Next Partition": {
+      "main": [[{ "node": "Build + Sign Event", "type": "main", "index": 0 }]]
+    },
+    "Build + Sign Event": {
+      "main": [[{ "node": "Write Event + Audit", "type": "main", "index": 0 }]]
+    }
+  }
+}

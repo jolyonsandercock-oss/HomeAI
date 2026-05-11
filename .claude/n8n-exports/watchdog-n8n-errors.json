@@ -1,0 +1,244 @@
+[
+  {
+    "updatedAt": "2026-05-06T19:10:42.578Z",
+    "createdAt": "2026-05-06T19:10:17.812Z",
+    "id": "watchdog-n8n-errors",
+    "name": "Watchdog \u2014 n8n Errors",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "id": "watch-0001-4000-8000-000000000001",
+        "name": "Every 15 Minutes",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          240,
+          300
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 15
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "watch-0002-4000-8000-000000000002",
+        "name": "Count Recent Errors",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          460,
+          300
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "iTuuNfsqHY49MGhk",
+            "name": "HomeAI Postgres"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT count(*)::int AS error_count, COALESCE(string_agg(DISTINCT w.name, ', '), '(none)') AS workflows FROM execution_entity e LEFT JOIN workflow_entity w ON w.id = e.\"workflowId\" WHERE e.status = 'error' AND e.\"startedAt\" > NOW() - INTERVAL '1 hour';",
+          "options": {}
+        }
+      },
+      {
+        "id": "watch-0003-4000-8000-000000000003",
+        "name": "Over Threshold?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          680,
+          300
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true
+            },
+            "conditions": [
+              {
+                "id": "watch-0003a-4000-8000-000000000003a",
+                "leftValue": "={{ $json.error_count }}",
+                "rightValue": 50,
+                "operator": {
+                  "type": "number",
+                  "operation": "gt"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "watch-0004-4000-8000-000000000004",
+        "name": "Vault: Telegram",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          900,
+          200
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "0wPA4DCDuehPC9Mf",
+            "name": "vault-token-header"
+          }
+        },
+        "parameters": {
+          "url": "http://vault:8200/v1/secret/data/telegram",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "httpHeaderAuth",
+          "options": {}
+        }
+      },
+      {
+        "id": "watch-0005-4000-8000-000000000005",
+        "name": "Send Telegram",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1120,
+          200
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "={{ 'https://api.telegram.org/bot' + $json.data.data.bot_token + '/sendMessage' }}",
+          "sendBody": true,
+          "contentType": "form-urlencoded",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "chat_id",
+                "value": "={{ $json.data.data.chat_id }}"
+              },
+              {
+                "name": "text",
+                "value": "=Home AI watchdog: {{ $('Count Recent Errors').item.json.error_count }} n8n workflow errors in the last hour.\nWorkflow(s): {{ $('Count Recent Errors').item.json.workflows }}"
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "wd-record-alerts",
+        "name": "Record system_alerts",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          900,
+          400
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "iTuuNfsqHY49MGhk",
+            "name": "HomeAI Postgres"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "INSERT INTO system_alerts\n  (fingerprint, alertname, severity, status, starts_at,\n   summary, description, labels, annotations, last_updated_at)\nVALUES\n  ('watchdog_n8n_errors:' || to_char(NOW(), 'YYYYMMDDHH24MI'),\n   'WatchdogN8nErrors',\n   'warning',\n   'firing',\n   NOW(),\n   'n8n workflow errors detected by watchdog',\n   'Errors in last hour: {{ $('Count Recent Errors').first().json.error_count }}; '\n   || 'workflows: {{ $('Count Recent Errors').first().json.workflows }}',\n   '{\"source\":\"watchdog-n8n-errors\"}'::jsonb,\n   '{}'::jsonb,\n   NOW())\nON CONFLICT (fingerprint) DO UPDATE SET\n  status = 'firing',\n  description = EXCLUDED.description,\n  last_updated_at = NOW()\nRETURNING id;",
+          "options": {}
+        }
+      }
+    ],
+    "connections": {
+      "Every 15 Minutes": {
+        "main": [
+          [
+            {
+              "node": "Count Recent Errors",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Count Recent Errors": {
+        "main": [
+          [
+            {
+              "node": "Over Threshold?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Over Threshold?": {
+        "main": [
+          [
+            {
+              "node": "Vault: Telegram",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Record system_alerts",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          []
+        ]
+      },
+      "Vault: Telegram": {
+        "main": [
+          [
+            {
+              "node": "Send Telegram",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": {
+      "node:Every 15 Minutes": {
+        "recurrenceRules": []
+      }
+    },
+    "meta": null,
+    "pinData": null,
+    "versionId": "268bbebc-d5a5-4ae8-bc8e-1efc15328686",
+    "activeVersionId": "268bbebc-d5a5-4ae8-bc8e-1efc15328686",
+    "versionCounter": 57,
+    "triggerCount": 1,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-05-06T19:10:17.812Z",
+        "createdAt": "2026-05-06T19:10:17.812Z",
+        "role": "workflow:owner",
+        "workflowId": "watchdog-n8n-errors",
+        "projectId": "mrS0xwM1mSrSan63",
+        "project": {
+          "updatedAt": "2026-05-01T17:08:53.977Z",
+          "createdAt": "2026-05-01T16:45:56.945Z",
+          "id": "mrS0xwM1mSrSan63",
+          "name": "jolyon sandercock <jolyon.sandercock@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "creatorId": "8e8d0968-3b92-4b54-ad56-ee4b3b72dffc"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]

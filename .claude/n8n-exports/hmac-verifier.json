@@ -1,0 +1,97 @@
+{
+  "id": "hmac-verifier-v1",
+  "name": "HMAC Signature Verifier",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": false
+  },
+  "nodes": [
+    {
+      "id": "hv-0001-schedule",
+      "name": "Daily 04:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "30 4 * * *" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "hv-0002-vault",
+      "name": "Vault: Signing Key",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" }
+      },
+      "parameters": {
+        "method": "GET",
+        "url": "http://vault:8200/v1/secret/data/signing",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      }
+    },
+    {
+      "id": "hv-0003-sample",
+      "name": "Sample 100 Events",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [680, 300],
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Random sample of recent events with non-empty signatures.\n-- TABLESAMPLE not used because partitioned tables don't support it well;\n-- ORDER BY random() LIMIT 100 is fine at this volume.\nSELECT id,\n       event_type,\n       source,\n       payload,\n       payload_signature\n  FROM events\n WHERE created_at > NOW() - INTERVAL '7 days'\n   AND payload_signature IS NOT NULL\n   AND payload_signature <> ''\n   AND payload_signature NOT LIKE 'PLACEHOLDER%'\n ORDER BY random()\n LIMIT 100;",
+        "options": {}
+      }
+    },
+    {
+      "id": "hv-0004-verify",
+      "name": "Verify Signatures",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300],
+      "parameters": {
+        "jsCode": "// Recompute HMAC over canonical JSON of each payload, compare to stored\n// payload_signature. Counts pass/fail; collects failure details (capped).\nconst crypto = require('crypto');\nconst signingKey = $('Vault: Signing Key').first().json.data.data.payload_hmac_key;\nif (!signingKey) throw new Error('signing key missing from Vault response');\n\nconst rows = $input.all().map(i => i.json);\n\nlet verified = 0;\nlet failed = 0;\nconst failures = [];\n\nfor (const row of rows) {\n  // Payloads are stored as JSONB — same canonicalisation rule used at sign\n  // time was JSON.stringify with sorted keys.\n  let p = row.payload;\n  if (typeof p === 'string') {\n    try { p = JSON.parse(p); } catch { failures.push({ id: row.id, reason: 'payload not parseable JSON' }); failed++; continue; }\n  }\n  const canonical = JSON.stringify(p, Object.keys(p).sort());\n  const expected = crypto.createHmac('sha256', signingKey).update(canonical).digest('hex');\n  // Some pipelines wrote 'hmac-sha256:' prefix; strip if present.\n  const stored = String(row.payload_signature).replace(/^hmac-sha256:/, '');\n  if (stored === expected) {\n    verified++;\n  } else {\n    failed++;\n    if (failures.length < 20) {\n      failures.push({ id: row.id, event_type: row.event_type, source: row.source });\n    }\n  }\n}\n\nreturn [{\n  json: {\n    sample_size: rows.length,\n    verified,\n    failed,\n    failure_ids: failures.map(f => f.id),\n    failures_json: JSON.stringify(failures)\n  }\n}];"
+      }
+    },
+    {
+      "id": "hv-0005-record",
+      "name": "Record Result",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1120, 300],
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log\n  (pipeline, action, pipeline_version, result, ai_parsed)\nVALUES\n  ('hmac_verifier',\n   'sample_check',\n   '1.0',\n   CASE WHEN {{ $json.failed }} = 0 THEN 'success' ELSE 'failure' END,\n   jsonb_build_object(\n     'sample_size', {{ $json.sample_size }},\n     'verified',    {{ $json.verified }},\n     'failed',      {{ $json.failed }},\n     'failures',    $pl${{ $json.failures_json }}$pl$::jsonb\n   ))\nRETURNING id AS audit_id;",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Daily 04:30": {
+      "main": [[{ "node": "Vault: Signing Key", "type": "main", "index": 0 }]]
+    },
+    "Vault: Signing Key": {
+      "main": [[{ "node": "Sample 100 Events", "type": "main", "index": 0 }]]
+    },
+    "Sample 100 Events": {
+      "main": [[{ "node": "Verify Signatures", "type": "main", "index": 0 }]]
+    },
+    "Verify Signatures": {
+      "main": [[{ "node": "Record Result", "type": "main", "index": 0 }]]
+    }
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "id": "notify-bridge-v1",
+  "name": "Notify Bridge (HTTP→Telegram)",
+  "active": true,
+  "nodes": [
+    {
+      "id": "trig",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "notify-bridge",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "vault",
+      "name": "Vault",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 300],
+      "parameters": {
+        "url": "http://vault:8200/v1/secret/data/telegram",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" }
+      }
+    },
+    {
+      "id": "send",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300],
+      "parameters": {
+        "url": "={{ 'https://api.telegram.org/bot' + $json.data.data.bot_token + '/sendMessage' }}",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "chat_id", "value": "={{ $json.data.data.chat_id }}" },
+            { "name": "text",    "value": "={{ $('Webhook').first().json.body.text || $('Webhook').first().json.query.text || 'empty' }}" },
+            { "name": "parse_mode", "value": "HTML" },
+            { "name": "disable_web_page_preview", "value": "true" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "respond",
+      "name": "OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [860, 300],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "ok"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook":       { "main": [[{ "node": "Vault",         "type": "main", "index": 0 }]] },
+    "Vault":         { "main": [[{ "node": "Send Telegram", "type": "main", "index": 0 }]] },
+    "Send Telegram": { "main": [[{ "node": "OK",            "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

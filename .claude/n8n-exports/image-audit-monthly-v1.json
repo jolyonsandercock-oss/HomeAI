@@ -1,0 +1,122 @@
+{
+  "id": "image-audit-monthly-v1",
+  "name": "Image Audit (monthly)",
+  "active": true,
+  "nodes": [
+    {
+      "id": "trig",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 7 1 * *" }] }
+      }
+    },
+    {
+      "id": "list-images",
+      "name": "Pinned images",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Hardcoded list of images we care about — kept in sync with docker-compose.yml\n// pin step. Each entry: { repo, current, max_patch_drift } where current is\n// the tag we currently pin to.\nreturn [\n  { repo: 'library/postgres',                  current: '16.13',         max_patch_drift: 5 },\n  { repo: 'library/redis',                     current: '7.4.8-alpine',  max_patch_drift: 5 },\n  { repo: 'library/caddy',                     current: '2.11.2-alpine', max_patch_drift: 5 },\n  { repo: 'netdata/netdata',                   current: 'v2.10.3',       max_patch_drift: 5 },\n  { repo: 'hashicorp/vault',                   current: '1.15.6',        max_patch_drift: 10 },\n  { repo: 'n8nio/n8n',                         current: '2.18.5',        max_patch_drift: 10 },\n  { repo: 'metabase/metabase',                 current: 'v0.60.3.3',     max_patch_drift: 5 },\n  { repo: 'grafana/grafana',                   current: '13.0.1',        max_patch_drift: 5 },\n  { repo: 'qdrant/qdrant',                     current: 'v1.17.1',       max_patch_drift: 5 },\n  { repo: 'authelia/authelia',                 current: '4.39.19',       max_patch_drift: 5 },\n  { repo: 'prom/prometheus',                   current: 'v3.11.3',       max_patch_drift: 5 },\n  { repo: 'prom/alertmanager',                 current: 'v0.27.0',       max_patch_drift: 5 },\n  { repo: 'prometheuscommunity/postgres-exporter', current: 'v0.15.0',   max_patch_drift: 5 },\n  { repo: 'ollama/ollama',                     current: '0.22.1',        max_patch_drift: 10 },\n  { repo: 'open-webui/open-webui',             current: '0.9.2',         max_patch_drift: 5 }\n].map(r => ({ json: r }));"
+      }
+    },
+    {
+      "id": "fetch-tags",
+      "name": "Docker Hub tags",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300],
+      "parameters": {
+        "url": "={{ 'https://hub.docker.com/v2/repositories/' + $json.repo + '/tags?page_size=100&ordering=last_updated' }}",
+        "method": "GET",
+        "options": { "timeout": 15000 }
+      }
+    },
+    {
+      "id": "compare",
+      "name": "Compare versions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 300],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForEachItem",
+        "jsCode": "const repo    = $('Pinned images').itemMatching($itemIndex).json.repo;\nconst current = $('Pinned images').itemMatching($itemIndex).json.current;\nconst maxDrift= $('Pinned images').itemMatching($itemIndex).json.max_patch_drift;\nconst tags    = ($json.results || []).map(t => t.name);\n\n// Extract semver-ish parts for comparison. Keep prefixes (v) intact.\nfunction parseSemver(t) {\n  const m = String(t).match(/v?(\\d+)\\.(\\d+)\\.(\\d+)(?:[.-]([\\w]+))?/);\n  if (!m) return null;\n  return { maj: +m[1], min: +m[2], patch: +m[3], extra: m[4] || '', raw: t };\n}\n\nconst cur = parseSemver(current);\nif (!cur) {\n  return { json: { repo, current, latest: null, drift: null, status: 'unparseable_current' } };\n}\n\n// Find tags with same major + same suffix-flavour (alpine/-r etc) when present\nconst suffix = current.match(/-[a-z]+/)?.[0] || '';\nconst sameMajor = tags\n  .filter(t => t.includes(suffix) || (!suffix && !/[a-z]/.test(t.replace(/^v/, '').replace(/[\\d.]/g, ''))))\n  .map(parseSemver)\n  .filter(p => p && p.maj === cur.maj);\n\nif (sameMajor.length === 0) {\n  return { json: { repo, current, latest: null, drift: null, status: 'no_candidates' } };\n}\n\nsameMajor.sort((a, b) => (b.min - a.min) || (b.patch - a.patch));\nconst newest = sameMajor[0];\n\n// Drift = newest minor.patch ahead of current\nconst drift = (newest.min - cur.min) * 1000 + (newest.patch - cur.patch);\nconst behind = drift > 0;\nconst over   = drift > maxDrift;\n\nreturn { json: {\n  repo, current,\n  latest: newest.raw,\n  drift,\n  status: !behind ? 'ok' : (over ? 'over_threshold' : 'behind_within_threshold')\n} };"
+      }
+    },
+    {
+      "id": "agg",
+      "name": "Aggregate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const items = $input.all().map(i => i.json);\nconst over   = items.filter(i => i.status === 'over_threshold');\nconst behind = items.filter(i => i.status === 'behind_within_threshold');\nconst errors = items.filter(i => i.status !== 'ok' && i.status !== 'over_threshold' && i.status !== 'behind_within_threshold');\nreturn [{ json: { items, over, behind, errors, anyOver: over.length > 0 } }];"
+      }
+    },
+    {
+      "id": "vault",
+      "name": "Vault",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 300],
+      "parameters": {
+        "url": "http://vault:8200/v1/secret/data/telegram",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" }
+      }
+    },
+    {
+      "id": "format",
+      "name": "Format report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const r  = $('Aggregate').first().json;\nconst tg = $('Vault').first().json.data.data;\n\nconst lines = ['<b>Image audit — monthly</b>', ''];\nif (r.over.length) {\n  lines.push('<b>Over drift threshold (action required):</b>');\n  for (const i of r.over) lines.push(`• ${i.repo}: ${i.current} → ${i.latest} (drift ${i.drift})`);\n  lines.push('');\n}\nif (r.behind.length) {\n  lines.push('<b>Behind, within threshold:</b>');\n  for (const i of r.behind) lines.push(`• ${i.repo}: ${i.current} → ${i.latest}`);\n  lines.push('');\n}\nif (!r.over.length && !r.behind.length) {\n  lines.push('All pinned images on the latest minor/patch within their major. Nothing to do.');\n}\nif (r.errors.length) {\n  lines.push('<b>Could not check:</b>');\n  for (const i of r.errors) lines.push(`• ${i.repo}: ${i.status}`);\n}\nreturn [{ json: { chat_id: tg.chat_id, bot_token: tg.bot_token, text: lines.join('\\n') } }];"
+      }
+    },
+    {
+      "id": "send",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1740, 300],
+      "parameters": {
+        "url": "={{ 'https://api.telegram.org/bot' + $json.bot_token + '/sendMessage' }}",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "chat_id", "value": "={{ $json.chat_id }}" },
+            { "name": "text",    "value": "={{ $json.text }}" },
+            { "name": "parse_mode", "value": "HTML" },
+            { "name": "disable_web_page_preview", "value": "true" }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Schedule":          { "main": [[{ "node": "Pinned images",    "type": "main", "index": 0 }]] },
+    "Pinned images":     { "main": [[{ "node": "Docker Hub tags",  "type": "main", "index": 0 }]] },
+    "Docker Hub tags":   { "main": [[{ "node": "Compare versions", "type": "main", "index": 0 }]] },
+    "Compare versions":  { "main": [[{ "node": "Aggregate",        "type": "main", "index": 0 }]] },
+    "Aggregate":         { "main": [[{ "node": "Vault",            "type": "main", "index": 0 }]] },
+    "Vault":             { "main": [[{ "node": "Format report",    "type": "main", "index": 0 }]] },
+    "Format report":     { "main": [[{ "node": "Send Telegram",    "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

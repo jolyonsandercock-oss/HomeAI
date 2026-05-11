@@ -1,0 +1,104 @@
+{
+  "id": "caterbook-bookings-v1",
+  "name": "Caterbook Bookings (P6b)",
+  "active": true,
+  "nodes": [
+    {
+      "id": "trig",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "*/15 * * * *" }] }
+      }
+    },
+    {
+      "id": "find",
+      "name": "Find unprocessed reservations",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [420, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SET app.current_entity = 'all'; SELECT e.id AS email_id, e.event_id AS source_event_id, e.subject, e.body_text, e.from_address FROM emails e WHERE e.from_address ILIKE '%@caterbook.%' AND (e.subject ILIKE 'New Reservation%' OR e.subject ILIKE 'Cancelled Reservation%' OR e.subject ILIKE 'Modified Reservation%') AND e.received_at > NOW() - INTERVAL '90 days' AND NOT EXISTS (SELECT 1 FROM accommodation_bookings ab WHERE ab.email_id = e.id) ORDER BY e.received_at DESC LIMIT 50;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      }
+    },
+    {
+      "id": "parse",
+      "name": "Parse reservation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForEachItem",
+        "jsCode": "const subject = $json.subject || '';\nconst html    = $json.body_text || '';\n\n// Strip HTML — keep table rows / br as line breaks\nfunction strip(s) {\n  s = s.replace(/<br[^>]*>/gi, '\\n');\n  s = s.replace(/<\\/(td|th|tr|p|div)\\s*>/gi, '\\n');\n  s = s.replace(/<[^>]+>/g, ' ');\n  // Decode common HTML entities\n  s = s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\").replace(/&nbsp;/g, ' ');\n  s = s.replace(/[ \\t]+/g, ' ').replace(/\\n[ \\t]*\\n/g, '\\n');\n  return s.trim();\n}\nconst text = strip(html);\n\n// Subject pattern: 'New Reservation  -  agodaycs for John Rowell 657887135_L-1420'\nconst subjMatch = subject.match(/(New|Cancelled|Modified)\\s+Reservation\\s+-\\s+(\\S+)\\s+for\\s+(.+?)\\s+(\\S+)$/i);\n\nlet status = null, source = null, guest = null, source_ref = null;\nif (subjMatch) {\n  status     = subjMatch[1].charAt(0).toUpperCase() + subjMatch[1].slice(1).toLowerCase();\n  source     = subjMatch[2];\n  guest      = subjMatch[3];\n  source_ref = subjMatch[4];\n} else {\n  return { json: { email_id: $json.email_id, parseable: false, reason: 'subject_unparseable', subject } };\n}\n\nfunction grab(re) { const m = text.match(re); return m ? m[1].trim() : null; }\n\nconst room       = grab(/Room\\s+(.+?)\\s+Check\\s*in/i);\nconst dateRange  = grab(/Check\\s*in\\s+(\\d{1,2}\\s+\\w{3}\\s+\\d{4}\\s*-\\s*\\d{1,2}\\s+\\w{3}\\s+\\d{4})/i);\nconst mealPlan   = grab(/Meal\\s+Plan\\s*:\\s*(.+?)$/im) || grab(/(Bed\\s*&\\s*Breakfast|Room\\s*Only|Half\\s*Board|Full\\s*Board)/i);\nconst adults     = grab(/Adults\\s*:?\\s*(\\d+)/i);\nconst children   = grab(/Children\\s*:?\\s*(\\d+)/i);\nconst totalLine  = text.match(/Total\\s+(GBP|USD|EUR|\\u00a3|\\$|\\u20ac)\\s*([\\d,]+(?:\\.\\d{1,2})?)/i);\nconst grossLine  = text.match(/(?:Sub[-\\s]?total|Gross|Room\\s+rate)\\s+(GBP|USD|EUR|\\u00a3|\\$|\\u20ac)\\s*([\\d,]+(?:\\.\\d{1,2})?)/i);\nconst commission = text.match(/Commission\\s+(?:GBP|USD|EUR|\\u00a3|\\$|\\u20ac)\\s*([\\d,]+(?:\\.\\d{1,2})?)/i);\nconst tax        = text.match(/Tax\\s+(?:GBP|USD|EUR|\\u00a3|\\$|\\u20ac)\\s*([\\d,]+(?:\\.\\d{1,2})?)/i);\n\n// Parse date range '17 Jun 2026 - 18 Jun 2026'\nlet checkin = null, checkout = null;\nif (dateRange) {\n  const parts = dateRange.split('-').map(s => s.trim());\n  function toIso(d) {\n    const m = d.match(/(\\d{1,2})\\s+(\\w{3})\\s+(\\d{4})/);\n    if (!m) return null;\n    const months = { jan:'01', feb:'02', mar:'03', apr:'04', may:'05', jun:'06', jul:'07', aug:'08', sep:'09', oct:'10', nov:'11', dec:'12' };\n    const mo = months[m[2].toLowerCase()];\n    if (!mo) return null;\n    return `${m[3]}-${mo}-${m[1].padStart(2,'0')}`;\n  }\n  checkin  = toIso(parts[0]);\n  checkout = toIso(parts[1]);\n}\n\nfunction n(s) { return s == null ? null : Number(String(s).replace(/,/g, '')); }\n\nconst total      = totalLine  ? n(totalLine[2])  : null;\nconst gross      = grossLine  ? n(grossLine[2])  : total;\nconst commissionAmt = commission ? n(commission[1]) : null;\nconst taxAmt     = tax        ? n(tax[1])        : null;\n\n// Currency: take from total line or default GBP\nconst currency = totalLine ? totalLine[1].toUpperCase().replace('\\u00a3', 'GBP').replace('\\u20ac', 'EUR').replace('$', 'USD') : 'GBP';\n\nconst parseable = !!(status && source && source_ref);\n\nreturn { json: {\n  email_id:        $json.email_id,\n  source_event_id: $json.source_event_id,\n  source, source_ref, status, guest_name: guest,\n  room, checkin_date: checkin, checkout_date: checkout,\n  adults: adults ? Number(adults) : null,\n  children: children ? Number(children) : null,\n  meal_plan: mealPlan,\n  currency, gross_amount: gross,\n  commission: commissionAmt, tax: taxAmt, total_amount: total,\n  raw_text: text.substring(0, 2000),\n  parseable,\n  subject\n} };"
+      }
+    },
+    {
+      "id": "filter",
+      "name": "Parseable?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [860, 300],
+      "parameters": {
+        "looseTypeValidation": true,
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            { "id": "p1",
+              "operator": { "type": "boolean", "operation": "true" },
+              "leftValue": "={{ $json.parseable }}",
+              "rightValue": "" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "insert",
+      "name": "Insert booking",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1100, 240],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SET app.current_entity = '1'; INSERT INTO accommodation_bookings (entity_id, source, source_ref, status, guest_name, room, checkin_date, checkout_date, adults, children, meal_plan, currency, gross_amount, commission, tax, total_amount, email_id, source_event_id, raw_text) VALUES (1, '{{ $json.source }}', '{{ $json.source_ref }}', '{{ $json.status }}', $pl${{ $json.guest_name || '' }}$pl$, $pl${{ $json.room || '' }}$pl$, {{ $json.checkin_date ? \"'\" + $json.checkin_date + \"'\" : 'NULL' }}, {{ $json.checkout_date ? \"'\" + $json.checkout_date + \"'\" : 'NULL' }}, {{ $json.adults ?? 'NULL' }}, {{ $json.children ?? 'NULL' }}, $pl${{ $json.meal_plan || '' }}$pl$, '{{ $json.currency || 'GBP' }}', {{ $json.gross_amount ?? 'NULL' }}, {{ $json.commission ?? 'NULL' }}, {{ $json.tax ?? 'NULL' }}, {{ $json.total_amount ?? 'NULL' }}, {{ $json.email_id }}, {{ $json.source_event_id ?? 'NULL' }}, $pl${{ $json.raw_text }}$pl$) ON CONFLICT (entity_id, source, source_ref) DO UPDATE SET status = EXCLUDED.status, guest_name = EXCLUDED.guest_name, room = EXCLUDED.room, checkin_date = EXCLUDED.checkin_date, checkout_date = EXCLUDED.checkout_date, adults = EXCLUDED.adults, children = EXCLUDED.children, meal_plan = EXCLUDED.meal_plan, gross_amount = EXCLUDED.gross_amount, total_amount = EXCLUDED.total_amount, email_id = EXCLUDED.email_id, raw_text = EXCLUDED.raw_text, updated_at = NOW() RETURNING id; INSERT INTO audit_log (pipeline, action, ai_worker, ai_parsed, result, provider) VALUES ('p6b-caterbook-bookings', 'parsed_reservation', 'caterbook_bookings_parser', $pl${{ JSON.stringify({email_id: $json.email_id, source: $json.source, source_ref: $json.source_ref, status: $json.status, guest: $json.guest_name, total: $json.total_amount}) }}$pl$::jsonb, 'success', 'local') RETURNING id;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      }
+    },
+    {
+      "id": "log-skip",
+      "name": "Log unparseable",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1100, 380],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (pipeline, action, ai_worker, ai_parsed, result, provider) VALUES ('p6b-caterbook-bookings', 'unparseable', 'caterbook_bookings_parser', $pl${{ JSON.stringify({email_id: $json.email_id, reason: $json.reason || 'unknown', subject: $json.subject}) }}$pl$::jsonb, 'failure', 'local') RETURNING id;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule":                       { "main": [[{ "node": "Find unprocessed reservations", "type": "main", "index": 0 }]] },
+    "Find unprocessed reservations":  { "main": [[{ "node": "Parse reservation", "type": "main", "index": 0 }]] },
+    "Parse reservation":              { "main": [[{ "node": "Parseable?", "type": "main", "index": 0 }]] },
+    "Parseable?":                     { "main": [
+      [{ "node": "Insert booking",  "type": "main", "index": 0 }],
+      [{ "node": "Log unparseable", "type": "main", "index": 0 }]
+    ]}
+  },
+  "settings": { "executionOrder": "v1" }
+}

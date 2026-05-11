@@ -22,9 +22,18 @@
 *.gpg
 /security/.vault-*
 
+# Service configs with bootstrapped live secrets — never commit.
+# Each file contains hex secret_key / encryption_key / jwt_secret values
+# generated at deployment. Rebuild from templates instead.
+/config/searxng/settings.yml
+
 # Authelia secrets
 /security/authelia/users_database.yml
 /security/authelia-v2/users_database.yml
+# Authelia config: filled by bootstrap with live JWT/session secrets — never commit.
+# v1 is also root-owned 600 (unreadable by joly).
+/security/authelia/configuration.yml
+/security/authelia-v2/configuration.yml
 
 # Restic
 .restic-pw

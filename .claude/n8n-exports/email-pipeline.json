@@ -1,0 +1,185 @@
+{
+  "name": "Email Pipeline",
+  "id": "email-pipeline-v1",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "nodes": [
+    {
+      "id": "ep-0001-webhook",
+      "name": "Webhook (email.received)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "email-pipeline",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "ep-0002-vault-signing-key",
+      "name": "Vault: Signing Key",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "0wPA4DCDuehPC9Mf",
+          "name": "vault-token-header"
+        }
+      },
+      "parameters": {
+        "method": "GET",
+        "url": "http://vault:8200/v1/secret/data/signing",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      }
+    },
+    {
+      "id": "ep-0003-extract",
+      "name": "Extract Event Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "parameters": {
+        "jsCode": "// Webhook input is in $('Webhook (email.received)').first().json.body (or root if no body wrapper)\n// Vault response gives us the signing key for later HMAC signing\n\nconst webhookData = $('Webhook (email.received)').first().json;\nconst eventBody = webhookData.body || webhookData;\nconst event_id = eventBody.id;\nconst trace_id = eventBody.trace_id;\nconst payload = typeof eventBody.payload === 'string' ? JSON.parse(eventBody.payload) : eventBody.payload;\n\nif (!event_id) throw new Error('missing event id');\nif (!trace_id) throw new Error('missing trace_id');\nif (!payload || !payload.gmail_message_id) {\n  throw new Error('missing gmail_message_id in payload');\n}\n\nconst vaultData = $input.first().json;\nconst signing_key = vaultData?.data?.data?.payload_hmac_key;\nif (!signing_key) {\n  throw new Error('signing key not returned by vault — check vault-token-header credential scope');\n}\n\nreturn [{\n  json: {\n    event_id,\n    trace_id,\n    gmail_message_id: payload.gmail_message_id,\n    received_at: payload.received_at || null,\n    signing_key\n  }\n}];"
+      }
+    },
+    {
+      "id": "ep-0004-fetch-email",
+      "name": "Fetch Email Row",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [900, 300],
+      "credentials": {
+        "postgres": {
+          "id": "iTuuNfsqHY49MGhk",
+          "name": "HomeAI Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SET LOCAL app.current_entity = 'all';\n\nSELECT id, gmail_message_id, account, from_address, from_name,\n       subject, body_text_safe, received_at\n  FROM emails\n WHERE gmail_message_id = '{{ $json.gmail_message_id }}'\n LIMIT 1;",
+        "options": {}
+      }
+    },
+    {
+      "id": "ep-0005-build-prompt",
+      "name": "Build Classification Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300],
+      "parameters": {
+        "jsCode": "const e = $input.first().json;\nconst extracted = $('Extract Event Fields').first().json;\nif (!e.body_text_safe) {\n  throw new Error('emails.body_text_safe is empty — sanitisation step missed?');\n}\n\nconst system = `You are an email classification system for Jo, a business owner.\nJo runs: The Olde Malthouse pub (Tintagel, Cornwall), a property company (7 properties),\nand manages personal and family matters.\n\nClassify into exactly one category:\n  invoice | action-required | report-attachment | school-medical | property | pub | fyi | junk\n\nDetermine entity_id: 1=Trading (pub), 2=Estates (property), 3=Personal, 4=Family\n\nReturn ONLY valid JSON. No markdown. No explanation.\nFormat: {\"category\": \"...\", \"entity_id\": N, \"confidence_score\": 0.0-1.0}`;\n\nconst user = `From: ${e.from_address || '(unknown)'}\\nSubject: ${e.subject || '(no subject)'}\\nBody: ${(e.body_text_safe || '').slice(0, 4000)}`;\n\nconst prompt = `${system}\\n\\n${user}\\n\\nResult:`;\n\nreturn [{\n  json: {\n    ...e,\n    prompt,\n    trace_id: extracted.trace_id,\n    event_id: extracted.event_id,\n    signing_key: extracted.signing_key\n  }\n}];"
+      }
+    },
+    {
+      "id": "ep-0006-classify",
+      "name": "Classify via llm-router",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://homeai-llm-router:8001/route",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ task_type: 'email.classify', prompt: $json.prompt, trace_id: $json.trace_id || null, allow_escalation: true }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      }
+    },
+    {
+      "id": "ep-0007-validate",
+      "name": "Validate Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300],
+      "parameters": {
+        "jsCode": "// llm-router returns {text, model_used, tier, escalated, ...}.\n// `text` should be a JSON string per the prompt contract.\n\nconst route = $input.first().json;\nconst email = $('Build Classification Prompt').first().json;\n\nconst VALID_CATEGORIES = ['invoice','action-required','report-attachment','school-medical','property','pub','fyi','junk'];\nconst VALID_ENTITIES = [1,2,3,4];\n\nlet parsed;\ntry {\n  let raw = (route.text || '').trim();\n  if (raw.startsWith('```')) {\n    raw = raw.replace(/^```[a-z]*\\n?/, '').replace(/```\\s*$/, '').trim();\n  }\n  parsed = JSON.parse(raw);\n} catch (e) {\n  throw new Error(`classifier returned non-JSON: ${(route.text || '').slice(0, 200)}`);\n}\n\nif (!VALID_CATEGORIES.includes(parsed.category)) {\n  throw new Error(`invalid category: ${parsed.category}`);\n}\nif (!VALID_ENTITIES.includes(parsed.entity_id)) {\n  throw new Error(`invalid entity_id: ${parsed.entity_id}`);\n}\nif (typeof parsed.confidence_score !== 'number' || parsed.confidence_score < 0 || parsed.confidence_score > 1) {\n  throw new Error(`invalid confidence_score: ${parsed.confidence_score}`);\n}\n\nconst crypto = require('crypto');\n\nreturn [{\n  json: {\n    ...email,\n    classification: parsed.category,\n    classified_entity_id: parsed.entity_id,\n    confidence_score: parsed.confidence_score,\n    model_used: route.model_used,\n    tier: route.tier,\n    escalated: route.escalated,\n    escalation_reason: route.escalation_reason || null,\n    ai_raw_output: route.text,\n    ai_input_hash: crypto.createHash('sha256').update(email.prompt).digest('hex')\n  }\n}];"
+      }
+    },
+    {
+      "id": "ep-0008-update-email",
+      "name": "Update Email Row",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1780, 300],
+      "credentials": {
+        "postgres": {
+          "id": "iTuuNfsqHY49MGhk",
+          "name": "HomeAI Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SET LOCAL app.current_entity = 'all';\n\nUPDATE emails\n   SET classification    = '{{ $json.classification }}',\n       confidence_score  = {{ $json.confidence_score }},\n       entity_id         = {{ $json.classified_entity_id }},\n       processed         = TRUE\n WHERE gmail_message_id  = '{{ $json.gmail_message_id }}'\nRETURNING id;",
+        "options": {}
+      }
+    },
+    {
+      "id": "ep-0009-sign-and-build-payload",
+      "name": "Sign + Build Event Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300],
+      "parameters": {
+        "jsCode": "// HMAC-sign the email.classified event payload using the signing key\n// fetched from Vault earlier in the pipeline (NOT $env — that's blocked).\n\nconst crypto = require('crypto');\nconst v = $('Validate Classification').first().json;\nconst emailRow = $('Update Email Row').first().json;\nconst extracted = $('Extract Event Fields').first().json;\n\nconst payload = {\n  email_id: emailRow.id,\n  gmail_message_id: v.gmail_message_id,\n  classification: v.classification,\n  entity_id: v.classified_entity_id,\n  confidence_score: v.confidence_score,\n  model_used: v.model_used,\n  tier: v.tier,\n  escalated: v.escalated\n};\n\nconst canonical = JSON.stringify(payload, Object.keys(payload).sort());\nconst signature = crypto.createHmac('sha256', extracted.signing_key)\n                        .update(canonical)\n                        .digest('hex');\n\nreturn [{\n  json: {\n    event_type: 'email.classified',\n    source: 'email_pipeline',\n    classified_entity_id: v.classified_entity_id,\n    payload_json: JSON.stringify(payload),\n    payload_signature: signature,\n    trace_id: extracted.trace_id,\n    parent_event_id: extracted.event_id,\n    idempotency_key: 'email_classified_' + v.gmail_message_id,\n    pipeline_version: '1.0',\n    email_id: emailRow.id,\n    ai_input_hash: v.ai_input_hash,\n    ai_raw_output: (v.ai_raw_output || '').replace(/'/g, \"''\"),\n    model_used: v.model_used,\n    classification: v.classification,\n    confidence_score: v.confidence_score\n  }\n}];"
+      }
+    },
+    {
+      "id": "ep-0010-write-events-and-audit",
+      "name": "Write Events + Audit + Mark Done",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2220, 300],
+      "credentials": {
+        "postgres": {
+          "id": "iTuuNfsqHY49MGhk",
+          "name": "HomeAI Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SET LOCAL app.current_entity = 'all';\n\nWITH new_event AS (\n  INSERT INTO events\n    (event_type, source, entity_id, payload, payload_signature,\n     status, trace_id, parent_event_id, idempotency_key, pipeline_version)\n  VALUES\n    ('{{ $json.event_type }}',\n     '{{ $json.source }}',\n     {{ $json.classified_entity_id }},\n     $pl${{ $json.payload_json }}$pl$::jsonb,\n     '{{ $json.payload_signature }}',\n     'pending',\n     '{{ $json.trace_id }}',\n     {{ $json.parent_event_id }},\n     '{{ $json.idempotency_key }}',\n     '{{ $json.pipeline_version }}')\n  ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL\n    DO NOTHING\n  RETURNING id\n),\nparent_done AS (\n  UPDATE events SET status = 'done', processed_at = NOW()\n   WHERE id = {{ $json.parent_event_id }} AND status = 'processing'\n  RETURNING id\n),\naudit AS (\n  INSERT INTO audit_log\n    (pipeline, event_id, trace_id, action, entity_id, record_type, record_id,\n     ai_worker, ai_model, pipeline_version, ai_input_hash, ai_raw_output, result)\n  VALUES\n    ('email_pipeline',\n     COALESCE((SELECT id FROM new_event), {{ $json.parent_event_id }}),\n     '{{ $json.trace_id }}',\n     'classify',\n     {{ $json.classified_entity_id }},\n     'email',\n     {{ $json.email_id }},\n     'email_classifier',\n     '{{ $json.model_used }}',\n     '{{ $json.pipeline_version }}',\n     '{{ $json.ai_input_hash }}',\n     '{{ $json.ai_raw_output }}',\n     'success')\n)\nSELECT (SELECT id FROM new_event) AS new_event_id,\n       (SELECT id FROM parent_done) AS parent_event_id;",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (email.received)": {
+      "main": [[{ "node": "Vault: Signing Key", "type": "main", "index": 0 }]]
+    },
+    "Vault: Signing Key": {
+      "main": [[{ "node": "Extract Event Fields", "type": "main", "index": 0 }]]
+    },
+    "Extract Event Fields": {
+      "main": [[{ "node": "Fetch Email Row", "type": "main", "index": 0 }]]
+    },
+    "Fetch Email Row": {
+      "main": [[{ "node": "Build Classification Prompt", "type": "main", "index": 0 }]]
+    },
+    "Build Classification Prompt": {
+      "main": [[{ "node": "Classify via llm-router", "type": "main", "index": 0 }]]
+    },
+    "Classify via llm-router": {
+      "main": [[{ "node": "Validate Classification", "type": "main", "index": 0 }]]
+    },
+    "Validate Classification": {
+      "main": [[{ "node": "Update Email Row", "type": "main", "index": 0 }]]
+    },
+    "Update Email Row": {
+      "main": [[{ "node": "Sign + Build Event Payload", "type": "main", "index": 0 }]]
+    },
+    "Sign + Build Event Payload": {
+      "main": [[{ "node": "Write Events + Audit + Mark Done", "type": "main", "index": 0 }]]
+    }
+  }
+}

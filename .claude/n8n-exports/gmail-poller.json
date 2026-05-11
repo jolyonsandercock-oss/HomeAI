@@ -1,0 +1,432 @@
+[
+  {
+    "updatedAt": "2026-05-08T12:36:40.372Z",
+    "createdAt": "2026-05-06T14:25:30.713Z",
+    "id": "QMKzaCFrKBS4ewWm",
+    "name": "Gmail Ingest",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "id": "fe21f97c-a758-4664-91d3-a69561410847",
+        "name": "Every 15 Minutes",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.2,
+        "position": [
+          240,
+          300
+        ],
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 15
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "80cbb133-8cff-4ca2-8bfe-f0182507ab32",
+        "name": "Vault: Gmail Creds",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          460,
+          200
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "0wPA4DCDuehPC9Mf",
+            "name": "vault-token-header"
+          }
+        },
+        "parameters": {
+          "url": "http://vault:8200/v1/secret/data/gmail/personal1",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "httpHeaderAuth",
+          "options": {}
+        }
+      },
+      {
+        "id": "c40a4552-472b-4e5c-a497-b0539338e236",
+        "name": "Vault: Signing Key",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          460,
+          400
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "0wPA4DCDuehPC9Mf",
+            "name": "vault-token-header"
+          }
+        },
+        "parameters": {
+          "url": "http://vault:8200/v1/secret/data/signing",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "httpHeaderAuth",
+          "options": {}
+        }
+      },
+      {
+        "id": "ebe90985-566f-4851-ab7d-dfccd68297f4",
+        "name": "OAuth: Refresh Access Token",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          680,
+          300
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://oauth2.googleapis.com/token",
+          "sendBody": true,
+          "contentType": "form-urlencoded",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "grant_type",
+                "value": "refresh_token"
+              },
+              {
+                "name": "refresh_token",
+                "value": "={{ $('Vault: Gmail Creds').item.json.data.data.refresh_token }}"
+              },
+              {
+                "name": "client_id",
+                "value": "={{ $('Vault: Gmail Creds').item.json.data.data.oauth_client_id }}"
+              },
+              {
+                "name": "client_secret",
+                "value": "={{ $('Vault: Gmail Creds').item.json.data.data.oauth_client_secret }}"
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "d2c6df59-39a6-436a-8780-468c88ce0c75",
+        "name": "Gmail: List Messages",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          900,
+          300
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+          "sendQuery": true,
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "q",
+                "value": "newer_than:1d"
+              },
+              {
+                "name": "maxResults",
+                "value": "50"
+              }
+            ]
+          },
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $json.access_token }}"
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "55961e1d-434c-4b7e-9263-82087df0ba14",
+        "name": "Any Messages?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          1120,
+          300
+        ],
+        "parameters": {
+          "conditions": {
+            "conditions": [
+              {
+                "id": "21be4698-158d-41c5-adfa-81c368a444e6",
+                "leftValue": "={{ ($json.messages || []).length }}",
+                "rightValue": 0,
+                "operator": {
+                  "type": "number",
+                  "operation": "gt"
+                }
+              }
+            ],
+            "options": {}
+          }
+        }
+      },
+      {
+        "id": "a09dd607-ae31-4149-b308-59a2917ef98e",
+        "name": "Split Per Message",
+        "type": "n8n-nodes-base.splitOut",
+        "typeVersion": 1,
+        "position": [
+          1340,
+          240
+        ],
+        "parameters": {
+          "fieldToSplitOut": "messages",
+          "options": {}
+        }
+      },
+      {
+        "id": "3dd49021-e1b6-4315-960b-ff5575971ca7",
+        "name": "Gmail: Get Message",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1560,
+          240
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "={{ 'https://gmail.googleapis.com/gmail/v1/users/me/messages/' + $json.id + '?format=full' }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('OAuth: Refresh Access Token').item.json.access_token }}"
+              }
+            ]
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "fc4292e4-7c4b-404d-9f0d-f3f564e4c534",
+        "name": "Parse + Sanitise",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1780,
+          240
+        ],
+        "parameters": {
+          "language": "javaScript",
+          "jsCode": "\nfunction sanitiseForPrompt(rawText) {\n  if (!rawText || typeof rawText !== 'string') return '';\n  let clean = rawText.replace(/<[^>]*>/g, ' ');\n  const patterns = [\n    /ignore\\s+(all\\s+)?previous\\s+instructions?/gi,\n    /forget\\s+(all\\s+)?instructions?/gi,\n    /you\\s+are\\s+now\\s+/gi,\n    /new\\s+instructions?:/gi,\n    /system\\s*:/gi,\n    /\\[INST\\]/gi, /\\[\\/INST\\]/gi,\n    /<\\|im_start\\|>/gi, /<\\|im_end\\|>/gi,\n    /###\\s*instruction/gi,\n    /act\\s+as\\s+/gi,\n    /pretend\\s+(you\\s+are|to\\s+be)\\s+/gi,\n    /override\\s+(the\\s+)?system/gi,\n    /jailbreak/gi,\n  ];\n  patterns.forEach(p => { clean = clean.replace(p, '[REDACTED]'); });\n  clean = clean.substring(0, 2000);\n  return clean.replace(/\\s+/g, ' ').trim();\n}\nfunction decodeBase64Url(s) {\n  if (!s) return '';\n  return Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');\n}\nfunction findTextPart(p) {\n  if (!p) return '';\n  if (p.mimeType === 'text/plain' && p.body && p.body.data) return decodeBase64Url(p.body.data);\n  if (p.parts && Array.isArray(p.parts)) {\n    for (const x of p.parts) { const t = findTextPart(x); if (t) return t; }\n  }\n  if (p.mimeType === 'text/html' && p.body && p.body.data) return decodeBase64Url(p.body.data);\n  return '';\n}\nfunction header(hs, name) {\n  if (!hs) return null;\n  const h = hs.find(x => x.name && x.name.toLowerCase() === name.toLowerCase());\n  return h ? h.value : null;\n}\n\nconst msg = $json;\nconst payload = msg.payload || {};\nconst headers = payload.headers || [];\nconst fromRaw = header(headers, 'From') || '';\nconst subject = header(headers, 'Subject') || '';\nconst dateHdr = header(headers, 'Date');\nconst internalDate = msg.internalDate ? new Date(parseInt(msg.internalDate, 10)).toISOString() : null;\nconst receivedAt = internalDate || (dateHdr ? new Date(dateHdr).toISOString() : new Date().toISOString());\n\nlet fromName = null;\nlet fromAddress = fromRaw;\nconst m = fromRaw.match(/^\\s*\"?([^\"<]*?)\"?\\s*<([^>]+)>\\s*$/);\nif (m) { fromName = m[1].trim() || null; fromAddress = m[2].trim(); }\n\nconst bodyText = findTextPart(payload);\nconst bodyTextSafe = sanitiseForPrompt(bodyText);\nconst hasAttachment = !!(payload.parts && payload.parts.some(p => p.filename && p.filename.length > 0));\n\n// A3_ATTACH_PARSE_v1\nfunction walkAttachments(part, out) {\n  if (!part) return;\n  if (part.filename && part.filename.length > 0 && part.body && part.body.attachmentId) {\n    out.push({\n      filename: part.filename,\n      mime_type: part.mimeType || 'application/octet-stream',\n      attachment_id: part.body.attachmentId,\n      size: part.body.size || 0\n    });\n  }\n  if (Array.isArray(part.parts)) {\n    for (const p of part.parts) walkAttachments(p, out);\n  }\n}\nconst attachments = [];\nwalkAttachments(payload, attachments);\n\n\nreturn [{ json: {\n  gmail_message_id: msg.id,\n  account: 'personal1',  // A2_ACCOUNT_FIX_v1\n  from_address: fromAddress,\n  from_name: fromName,\n  subject,\n  body_text: bodyText,\n  body_text_safe: bodyTextSafe,\n  received_at: receivedAt,\n  has_attachment: hasAttachment,\n  attachments,\n} }];\n"
+        }
+      },
+      {
+        "id": "28f031e7-3cc7-4e0d-bbc4-9d6e15b23e6f",
+        "name": "Sign + Build Event SQL",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2000,
+          240
+        ],
+        "parameters": {
+          "language": "javaScript",
+          "jsCode": "\nconst hmacKey = $('Vault: Signing Key').item.json.data.data.payload_hmac_key;\nconst parsed = $json;\n\nconst eventPayload = {\n  gmail_message_id: parsed.gmail_message_id,\n  account: parsed.account,\n  from_address: parsed.from_address,\n  from_name: parsed.from_name,\n  subject: parsed.subject,\n  body_text: parsed.body_text,\n  body_text_safe: parsed.body_text_safe,\n  received_at: parsed.received_at,\n  has_attachment: parsed.has_attachment,\n};\nconst canonical = JSON.stringify(eventPayload, Object.keys(eventPayload).sort());\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', hmacKey).update(canonical).digest('hex');\n\nfunction S(v) {\n  if (v === null || v === undefined) return 'NULL';\n  if (typeof v === 'boolean' || typeof v === 'number') return String(v);\n  return \"'\" + String(v).replace(/'/g, \"''\") + \"'\";\n}\nfunction J(obj) {\n  return \"'\" + JSON.stringify(obj).replace(/'/g, \"''\") + \"'::jsonb\";\n}\n\n// A1_DUP_FIX_v1\n// Application-level idempotency: events.idempotency_key is non-unique\n// because partitioned tables can't UNIQUE-index a non-partition-key\n// column. WHERE NOT EXISTS ensures duplicate Gmail polls don't create\n// new event rows for the same gmail_message_id.\nconst idemKey = 'email_' + parsed.gmail_message_id;\nconst sql = `\nSET LOCAL app.current_entity = 'all';\n\nINSERT INTO events (\n  event_type, source, entity_id, payload, payload_signature,\n  idempotency_key, pipeline_version\n)\nSELECT 'email.received', 'gmail', NULL, ${J(eventPayload)}, ${S(signature)},\n       ${S(idemKey)}, ${S('gmail_ingest:1.0')}\n WHERE NOT EXISTS (\n   SELECT 1 FROM events WHERE idempotency_key = ${S(idemKey)}\n )\nRETURNING id, trace_id;\n`;\n\n// A3_ATTACH_SQL_v1\n// Build one item for email.received + one item per attachment\n// (document.received). The Postgres node downstream runs once per item.\nconst items = [{ json: { sql, gmail_message_id: parsed.gmail_message_id, kind: 'email_received' } }];\n\nconst attachments = parsed.attachments || [];\nfor (const att of attachments) {\n  const docPayload = {\n    gmail_message_id: parsed.gmail_message_id,\n    attachment_id:    att.attachment_id,\n    filename:         att.filename,\n    mime_type:        att.mime_type,\n    size:             att.size,\n    account:          parsed.account,\n    detected_at:      new Date().toISOString()\n  };\n  const docCanonical = JSON.stringify(docPayload, Object.keys(docPayload).sort());\n  const docSig = crypto.createHmac('sha256', hmacKey).update(docCanonical).digest('hex');\n\n  // Idempotency per SPEC \u00a76.2 P9: report_{sha256(gmail_message_id+filename)}\n  const idemRaw = parsed.gmail_message_id + ':' + att.filename;\n  const idemHash = crypto.createHash('sha256').update(idemRaw).digest('hex');\n  const docIdem = 'report_' + idemHash;\n\n  const docSql = `\nSET LOCAL app.current_entity = 'all';\n\nINSERT INTO events (\n  event_type, source, entity_id, payload, payload_signature,\n  idempotency_key, pipeline_version\n)\nSELECT 'document.received', 'gmail', NULL, ${J(docPayload)}, ${S(docSig)},\n       ${S(docIdem)}, ${S('gmail_ingest:1.0')}\n WHERE NOT EXISTS (\n   SELECT 1 FROM events WHERE idempotency_key = ${S(docIdem)}\n )\nRETURNING id, trace_id;\n`;\n  items.push({ json: { sql: docSql, gmail_message_id: parsed.gmail_message_id,\n                       attachment_id: att.attachment_id, filename: att.filename,\n                       kind: 'document_received' } });\n}\n\nreturn items;\n\n"
+        }
+      },
+      {
+        "id": "715fc10e-9b30-4f30-828f-db9f2ed12c45",
+        "name": "INSERT email.received",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          2220,
+          240
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "iTuuNfsqHY49MGhk",
+            "name": "HomeAI Postgres"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "={{ $json.sql }}",
+          "options": {}
+        }
+      },
+      {
+        "id": "99cc687c-4d72-47ad-a08e-7e9af148f7b1",
+        "name": "No Messages",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          1340,
+          420
+        ],
+        "parameters": {}
+      }
+    ],
+    "connections": {
+      "Every 15 Minutes": {
+        "main": [
+          [
+            {
+              "node": "Vault: Gmail Creds",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Vault: Gmail Creds": {
+        "main": [
+          [
+            {
+              "node": "Vault: Signing Key",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Vault: Signing Key": {
+        "main": [
+          [
+            {
+              "node": "OAuth: Refresh Access Token",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OAuth: Refresh Access Token": {
+        "main": [
+          [
+            {
+              "node": "Gmail: List Messages",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gmail: List Messages": {
+        "main": [
+          [
+            {
+              "node": "Any Messages?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Any Messages?": {
+        "main": [
+          [
+            {
+              "node": "Split Per Message",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "No Messages",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Split Per Message": {
+        "main": [
+          [
+            {
+              "node": "Gmail: Get Message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gmail: Get Message": {
+        "main": [
+          [
+            {
+              "node": "Parse + Sanitise",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse + Sanitise": {
+        "main": [
+          [
+            {
+              "node": "Sign + Build Event SQL",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Sign + Build Event SQL": {
+        "main": [
+          [
+            {
+              "node": "INSERT email.received",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": {
+      "node:Every 15 Minutes": {
+        "recurrenceRules": []
+      }
+    },
+    "meta": null,
+    "pinData": null,
+    "versionId": "9d78a1e5-b06d-4041-acd3-52ec253bce10",
+    "activeVersionId": "9d78a1e5-b06d-4041-acd3-52ec253bce10",
+    "versionCounter": 19,
+    "triggerCount": 1,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-05-06T14:25:30.713Z",
+        "createdAt": "2026-05-06T14:25:30.713Z",
+        "role": "workflow:owner",
+        "workflowId": "QMKzaCFrKBS4ewWm",
+        "projectId": "mrS0xwM1mSrSan63",
+        "project": {
+          "updatedAt": "2026-05-01T17:08:53.977Z",
+          "createdAt": "2026-05-01T16:45:56.945Z",
+          "id": "mrS0xwM1mSrSan63",
+          "name": "jolyon sandercock <jolyon.sandercock@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "creatorId": "8e8d0968-3b92-4b54-ad56-ee4b3b72dffc"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]

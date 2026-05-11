@@ -1,0 +1,476 @@
+# HOME AI — STRETCH & UPDATE DOCUMENT
+## Living Amendment to SPEC v5.1
+## Owner: Jo | Atlantic Road Trading Ltd / Atlantic Road Estates Limited
+## Started: May 2026 | Updated as discoveries are made during build
+
+---
+
+**HOW THIS DOCUMENT WORKS**
+
+This is the first document Claude Code should read at the start of every session,
+alongside AGENTS.md. It captures:
+- Build lessons learned (things the spec got wrong or didn't anticipate)
+- Known fixes for specific errors
+- Model stack updates as new releases land
+- New ideas and stretch goals discovered during build
+- Pre-flight checks before starting each session
+
+When something breaks and you fix it — add it here immediately.
+When a new model releases — update the model stack table.
+When a new idea is worth capturing — add it to the stretch goals section.
+
+**Session opening prompt:**
+> *"Read HOME-AI-STRETCH-v1.0.md first, then AGENTS.md. Note any known issues
+> or model updates before we start. We are on [Phase N, Step N]."*
+
+---
+
+## SECTION 1 — BUILD LESSONS LEARNED
+
+### 1.1 Pre-Flight Checklist (run before every Claude Code session)
+
+```bash
+# 1. Confirm docker group is active (do ONCE after login — expires with shell)
+newgrp docker
+# Permanent fix: sudo usermod -aG docker joly → full logout/login
+
+# 2. Start everything via start.sh — NEVER run docker compose up -d directly
+cd /home_ai
+./start.sh
+# start.sh: unseals Vault (if needed), fetches all secrets, issues n8n token, runs compose
+# If Vault already unsealed: skips unseal step automatically
+
+# 3. Check all running services
+docker ps --format "table {{.Names}}\t{{.Status}}" | grep homeai
+
+# 4. Confirm AGENTS.md build state is current
+grep "Last completed step" /home_ai/AGENTS.md
+```
+
+**CRITICAL:** Never run `docker compose up -d` without `start.sh`. Compose without the
+script starts containers with blank passwords — crash-loops and insecure services result.
+
+### 1.2 Known Issues and Fixes
+
+**ISSUE: `permission denied while trying to connect to the Docker API`**
+- Cause: Docker group membership not active in current shell
+- Fix: `newgrp docker` (temporary, current shell only)
+- Permanent fix: `sudo usermod -aG docker joly` then FULL logout and login
+- Note: `newgrp docker` expires when you close the terminal — need it again each session until you do the full logout/login
+
+**ISSUE: Vault container crash-loops with `unable to set CAP_SETFCAP effective capability`**
+- Cause: Ubuntu 26.04 (Resolute) blocks CAP_SETFCAP at kernel level via AppArmor
+- Fix: Use specific vault image version (NOT latest) + custom vault.hcl with `disable_mlock = true`
+- vault service in docker-compose.yml must use:
+  ```yaml
+  image: hashicorp/vault:1.15.6   # NEVER use :latest — breaks on Ubuntu 26+
+  command: vault server -config=/vault/config/vault.hcl
+  cap_add: [IPC_LOCK]
+  security_opt:
+    - no-new-privileges:false
+    - seccomp:unconfined
+  volumes:
+    - vault_data:/vault/data
+    - ./security/vault-policies:/vault/policies
+    - ./security/vault-config:/vault/config   # ADD THIS
+  ```
+- vault.hcl must include `disable_mlock = true` — this avoids needing CAP_SETFCAP entirely
+- Full vault.hcl at: `/home_ai/security/vault-config/vault.hcl`
+
+**ISSUE: YAML indentation error in docker-compose.yml**
+- Cause: Service block accidentally lost its 2-space indent (e.g. `vault:` instead of `  vault:`)
+- Fix: `sed -n '40,70p' /home_ai/docker-compose.yml` to find the broken line
+- Test before restarting: `docker compose config --quiet && echo "YAML OK"`
+
+**ISSUE: Ubuntu version mismatch**
+- SPEC says Ubuntu 22.04 LTS — actual installed OS is Ubuntu 26.04 (Resolute)
+- This caused the CAP_SETFCAP issue (newer AppArmor defaults)
+- No action needed — the fixes above handle it
+- Update AGENTS.md environment.md to reflect Ubuntu 26.04
+
+**ISSUE: Metabase pointed at wrong database + role**
+- Cause: SPEC had `MB_DB_DBNAME: homeai` and `MB_DB_USER: homeai_readonly`
+- Result: Metabase tried to create Liquibase metadata tables in the application DB
+  using a read-only role — correctly denied, crash-loop
+- Fix: Created dedicated `metabase_app` database and role with full ownership
+- Migration: `/home_ai/postgres/migrations/V2__metabase_db.sql`
+- docker-compose.yml now uses `MB_DB_DBNAME: metabase_app`, `MB_DB_USER: metabase_app`,
+  `MB_DB_PASS: ${METABASE_APP_PASSWORD}`
+- Secret stored at: `secret/postgres-roles` field `metabase_app`
+- Add homeai database as a Metabase Data Source via the UI (homeai_readonly creds)
+- NEVER grant CREATE to homeai_readonly — defeats RLS/least-privilege model
+
+**ISSUE: Vault unseal keys exposed in chat session**
+- Cause: Unseal keys pasted into a chat window during a recovery session
+- Fix: Vault rekey + root token rotation immediately after discovery
+- Procedure: `vault operator rekey -init` then submit 3 old keys → receive 5 new keys
+- Root rotation: `vault operator generate-root -init` → submit 3 new keys → decode token
+- Rule: NEVER paste unseal keys or root tokens into any chat window ever
+
+**ISSUE: start.sh not running — containers start with blank passwords**
+- Cause: Running `docker compose up -d` directly instead of `./start.sh`
+- Symptoms: WARN messages about blank env vars, containers crash-loop or run insecurely
+- Fix: Always use `./start.sh` — it fetches all secrets from Vault before compose starts
+- If start.sh fails: check VAULT_TOKEN is exported, Vault is unsealed, all secret paths exist
+
+**ISSUE: homeai_pipeline password set to literal placeholder in rls-policies.sql**
+- Cause: `rls-policies.sql` creates the role with `PASSWORD 'REPLACE_VIA_VAULT'` — a placeholder never updated at runtime
+- Symptom: n8n crash-loops with "password authentication failed for user homeai_pipeline"
+  (local/127.0.0.1 trust auth bypasses this — remote Docker network connections use scram-sha-256)
+- Fix applied 2026-05-05: `ALTER ROLE homeai_pipeline PASSWORD '<vault:secret/postgres-roles[homeai_pipeline]>';`
+- Command: `PASS=$(vault kv get -field=homeai_pipeline secret/postgres-roles) && psql -U postgres -c "ALTER ROLE homeai_pipeline PASSWORD '$PASS';"`
+- Note: metabase_app was set correctly via V2 migration variables — only homeai_pipeline was affected
+
+**ISSUE: SPEC port conflict — model-evaluator on 8080 clashes with Open WebUI**
+- SPEC originally assigned port 8080 to model-evaluator
+- Open WebUI also uses port 8080 (8088 on host, but internal port 8080)
+- Fix applied: model-evaluator now uses port 8008
+- All SPEC references to `localhost:8080/api/models/` should read `localhost:8008/api/models/`
+
+**ISSUE: init_placeholder HMAC signature in static_context_change trigger**
+- Location: `init-db.sql` — the `static_context_change` trigger
+- Problem: writes `payload_signature='init_placeholder'` instead of a real HMAC-SHA256
+- Build rule violated: "ALWAYS sign event payloads before INSERT to events table"
+- Status: flagged as pre-existing tech debt, deferred to a separate fix step
+- Do NOT fix inline during other steps — touches RLS-bypassing code paths
+
+**ISSUE: Auto-compaction fired mid-session during file write**
+- Cause: Context window exceeded 83% during a large file write (SPEC.md ~2,100 lines)
+- Result: Claude lost context, had to re-orient from AGENTS.md and skill files
+- Lesson: Run `/compact` before reaching 60% — especially before large file writes
+- On restart, Claude correctly read AGENTS.md, skill files, and checked disk state before continuing
+
+**ISSUE: `vault operator init` fails — container still restarting**
+- Cause: Running init before the container is fully stable
+- Fix: `docker ps | grep vault` must show `Up X minutes` (not `Restarting`) before running init
+- Wait script: `until docker ps | grep -q "homeai-vault.*Up"; do sleep 3; done && echo "READY"`
+
+**ISSUE: `newgrp docker` shell expired between commands**
+- Cause: Opening a new terminal tab resets group membership
+- Fix: Always run `newgrp docker` at the start of each terminal session
+- Permanent fix: log out completely and log back in
+
+### 1.3 Environment Facts (actual, not spec assumptions)
+
+| Item | Spec assumed | Actual |
+|---|---|---|
+| Ubuntu version | 22.04 LTS | 26.04 Resolute |
+| Vault image | hashicorp/vault:latest | hashicorp/vault:1.15.6 (pinned) |
+| Vault config | Env-var based | vault.hcl file at /security/vault-config/ |
+| Docker group | Active after usermod | Requires full logout/login or `newgrp docker` |
+| Vault mlock | Enabled (IPC_LOCK) | Disabled (disable_mlock = true in vault.hcl) |
+| Metabase DB | homeai (app DB) | metabase_app (dedicated DB + role) |
+| Startup method | docker compose up -d | ./start.sh (fetches secrets from Vault first) |
+| Model evaluator port | 8080 (SPEC typo) | 8008 (fixed — 8080 conflicts with Open WebUI) |
+
+---
+
+## SECTION 2 — MODEL STACK UPDATES
+
+### 2.1 Current Recommended Tiers (as of May 2026)
+
+The spec's original model recommendations are outdated. Qwen3 (released April 2025)
+provides one tier higher quality at the same VRAM cost via architectural improvements.
+
+**Update these values in static_context `model.tiers` once Milestone B is complete.**
+
+| Tier | Original spec | Updated recommendation | VRAM | Notes |
+|---|---|---|---|---|
+| Hot | qwen2.5:7b | **qwen3:8b** | 5.2GB | Matches old qwen2.5:14B quality. Has thinking mode. |
+| Medium | phi4:14b | **qwen3:14b** | 9.3GB | Matches old qwen2.5:32B quality. Fits 12GB VRAM. |
+| Heavy | llama3.3:70b | llama3.3:70b (unchanged) | RAM | Unchanged until GPU upgrade |
+| Cloud escalation | claude-haiku-4-5 → claude-sonnet-4-6 | unchanged | API | |
+
+**Qwen3 key advantages over previous recommendations:**
+- Thinking mode: `/think` and `/no_think` commands per-prompt — heavy reasoning when needed, fast response otherwise
+- Better structured JSON output (critical for invoice_extractor and reconciliation_explainer)
+- Stronger multilingual (irrelevant for this build but free improvement)
+- qwen3:8b benchmarks: ~40 t/s on RTX 3060 at Q4_K_M
+
+**Ollama pull commands:**
+```bash
+ollama pull qwen3:8b     # 5.2GB — hot tier
+ollama pull qwen3:14b    # 9.3GB — medium tier
+# Deploy via model evaluator after pulling:
+curl -X POST http://localhost:8080/api/models/qwen3%3A8b/deploy/hot
+curl -X POST http://localhost:8080/api/models/qwen3%3A14b/deploy/medium
+```
+
+### 2.2 Model Auto-Discovery (proposed Workflow B extension)
+
+**Gap identified during build:** The spec benchmarks existing models but has no mechanism
+to discover when new model versions are released on Ollama. This requires manual checking.
+
+**Proposed addition to Workflow B (weekly scanner):**
+
+Add a second check after the existing benchmark scan — query the Ollama registry API
+for newer tags on monitored model families, compare against installed versions,
+and send a Telegram notification if updates exist:
+
+```javascript
+// Add to Workflow B Code node — after existing benchmark checks:
+const monitoredFamilies = ['qwen3', 'deepseek-r1', 'llama3.3', 'granite3.3'];
+const ollamaApiBase = 'http://localhost:11434/api';
+
+for (const family of monitoredFamilies) {
+  // Get currently installed tags for this family
+  const installed = await fetch(`${ollamaApiBase}/tags`).then(r => r.json());
+  const installedTags = installed.models
+    .filter(m => m.name.startsWith(family))
+    .map(m => ({ name: m.name, modified: new Date(m.modified_at) }));
+
+  // Compare against latest known tag in static_context
+  const knownLatest = await db.fetchOne(
+    "SELECT value FROM static_context WHERE key = $1",
+    [`model.latest.${family}`]
+  );
+
+  // If installed tag is older than 30 days, flag for manual review
+  const oldest = installedTags.reduce((min, m) =>
+    m.modified < min.modified ? m : min, installedTags[0]);
+
+  if (oldest && (Date.now() - oldest.modified) > 30 * 24 * 60 * 60 * 1000) {
+    // Send Telegram alert
+    await telegram.send(
+      `🔄 Model check: ${family} installed version is 30+ days old.\n` +
+      `Current: ${oldest.name}\n` +
+      `Check https://ollama.com/library/${family} for newer releases.\n` +
+      `Run /model-eval to benchmark a new candidate.`
+    );
+  }
+}
+```
+
+**Status:** Not yet built — add to Phase 2 deliverables.
+
+### 2.3 New Model Candidates to Watch
+
+| Model | Status | When relevant |
+|---|---|---|
+| Qwen3:30b-a3b | Available now (19GB) | Buy 24GB GPU — runs at 3B speed, 30B quality |
+| DeepSeek V4 Pro | API only — too large for local | Cloud escalation candidate |
+| Kimi K2.6 | Cloud-hosted via Ollama CLI | Not locally runnable at 1T params |
+| IBM Granite 3.3 | Available now (8B, 5GB) | Alternative hot tier for structured extraction |
+
+---
+
+## SECTION 3 — STRETCH GOALS & NEW IDEAS
+
+Ideas captured during build that aren't in the main spec. Some are Phase 5+,
+some are small additions that could go in any phase.
+
+### 3.1 Operational Intelligence (discovered during build)
+
+**Vault Health Monitor** *(Phase 2 addition)*
+The vault-autounseal.sh script handles reboots, but there's no alert if Vault seals
+unexpectedly mid-session (e.g. after a crash). Add to Ralph loop (Workflow G):
+check Vault seal status every 30 minutes — if sealed and system_state is 'running',
+trigger auto-unseal script and send Telegram: "⚠️ Vault re-sealed unexpectedly — auto-unsealing."
+
+**Docker Service Watchdog** *(Phase 2 addition)*
+The Ralph loop checks n8n, Vault, Postgres. But if a container restarts (not crashes),
+`docker ps` still shows it as Up. Add a check: if any homeai container has restarted
+more than 2 times in the last hour (via `docker inspect --format '{{.RestartCount}}'`),
+flag it in the digest as unstable even if currently running.
+
+**Session Start Auto-Brief** *(Phase 1 addition, cheap)*
+When you open Open WebUI or start a Claude Code session, have a Telegram message
+fire automatically: *"Session started: Vault ✓ sealed=false, PostgreSQL ✓ 0 dead letters,
+last pipeline: Gmail 4 mins ago, 0 items in Action Queue."*
+Trigger: simple n8n webhook on a Telegram command `/start-session`.
+
+### 3.2 Build Process Improvements
+
+**SPEC.md compression for Claude Code sessions** *(immediate)*
+The full SPEC.md is 5,500+ lines. Claude Code reads the whole thing on session start,
+burning context. Consider creating a `SPEC-QUICKREF.md` — a 200-line digest of
+section headers, key decisions, and port/service references. Claude reads quickref first,
+pulls specific SPEC sections as needed. Similar to the Karpathy wiki index pattern.
+
+**~~start.sh — consolidated startup script~~** ✓ DONE (May 2026)
+Built at `/home_ai/start.sh`. Unseals Vault, fetches all secrets, issues n8n token, runs compose.
+
+**Automated docker-compose YAML validation pre-commit hook** *(immediate)*
+Add to `.git/hooks/pre-commit`:
+```bash
+#!/bin/bash
+cd /home_ai
+docker compose config --quiet 2>&1 | grep -v "WARN" && echo "YAML OK" || exit 1
+```
+This prevents committing broken YAML. The indentation error in Vault cost 30 minutes.
+
+**Environment variable validation script** *(Phase 1 Step 6)*
+Before starting any service, a quick script confirms all required env vars for that
+service exist in Vault. Cheaper than debugging a service that starts but fails silently:
+```bash
+# scripts/check-vault-secrets.sh
+REQUIRED_PATHS=(
+  "secret/postgres"
+  "secret/signing"
+  "secret/encryption"
+  "secret/anthropic"
+  "secret/telegram"
+)
+for path in "${REQUIRED_PATHS[@]}"; do
+  docker exec -e VAULT_TOKEN=$VAULT_TOKEN homeai-vault \
+    vault kv get "$path" > /dev/null 2>&1 \
+    && echo "✓ $path" || echo "✗ MISSING: $path"
+done
+```
+
+**Build session time tracker** *(nice to have)*
+A simple log entry in `AGENTS.md` after each session: date, duration, what was built,
+what broke, what was fixed. Gives a running record of actual vs estimated build time.
+The spec estimated 12-16 hours for Phase 1 — tracking actuals would be useful data.
+
+### 3.3 Vault Secrets — Current State (as of 2026-05-08)
+
+| Vault path | Fields | Status |
+|---|---|---|
+| secret/postgres | host, port, database, username, password | ✓ Loaded |
+| secret/postgres-roles | homeai_pipeline, homeai_readonly, metabase_app | ✓ Loaded — `homeai_pipeline` rotated 2026-05-07 (was NULL after empty-fetch fix script bug; freshly generated via `openssl rand -base64 32` and aligned with role + container env) |
+| secret/signing | payload_hmac_key | ✓ Loaded |
+| secret/encryption | aes_key | ✓ Loaded |
+| secret/anthropic | api_key | ✓ Loaded |
+| secret/telegram | bot_token, chat_id | ✓ Loaded |
+| secret/redis | password | ✓ Loaded (May 2026) |
+| secret/grafana | admin_password | ✓ Loaded (May 2026) |
+| secret/open-webui | secret_key | ✓ Loaded (May 2026) |
+| secret/gmail/personal1 | oauth_client_id, oauth_client_secret, refresh_token, email_address | ⏳ In progress (2026-05-08) — naming changed from `account1`/`account2` to `personal1`/`personal2`/`workspace` to accommodate three Gmail accounts (2 personal + 1 Workspace). Initial put attempt left only client_id populated; redo pending |
+| secret/gmail/personal2 | oauth_client_id, oauth_client_secret, refresh_token, email_address | ⏳ Pending OAuth flow |
+| secret/gmail/workspace | oauth_client_id, oauth_client_secret, refresh_token, email_address | ⏳ Pending OAuth flow |
+| secret/xero/trading | client_id, client_secret, refresh_token, org_id | ⏳ Needs OAuth flow |
+| secret/xero/estates | client_id, client_secret, refresh_token, org_id | ⏳ Needs OAuth flow |
+| secret/natwest/openbanking | client_id, client_secret, access_token, consent_id | ⏳ Phase 2 — start developer registration ASAP (1-2 wk lead time) |
+| secret/rbs/openbanking | client_id, client_secret, access_token, consent_id | ⏳ Phase 2 — same as NatWest |
+| secret/garmin | email, password | ⏳ Phase 2 |
+| secret/dext | api_key | ⏳ Register before Phase 1 Step 13 (Invoice pipeline) |
+| secret/github | personal_access_token | ⏳ Phase 5 |
+| secret/google/calendar | oauth credentials | ⏳ Phase 3 |
+| secret/google/sheets | oauth credentials | ⏳ Phase 3 |
+| secret/google/drive | oauth credentials | ⏳ Phase 3 |
+
+**Naming note (2026-05-08):** SPEC originally specified `secret/gmail/account1` and `secret/gmail/account2`. Updated to `personal1`/`personal2`/`workspace` because Jo has three Gmail accounts (2 personal + 1 Workspace org). The n8n Gmail Ingest workflow's hardcoded paths will need to match — the existing `gmail-ingest.json` references the old paths and must be updated when these are populated.
+
+### 3.4 Phase 1 Additions (before moving to Phase 2)
+
+**Vault backup on init** *(do immediately after Vault init)*
+As soon as Vault is initialised and unsealed, back up the vault_data volume:
+```bash
+docker run --rm -v home_ai_vault_data:/vault/data \
+  -v /mnt/mycloud/backups:/backup alpine \
+  tar czf /backup/vault-init-$(date +%Y%m%d).tar.gz /vault/data
+```
+The encrypted vault data is useless without the unseal keys, but having it backed up
+means a hardware failure doesn't require re-configuring all secrets from scratch.
+
+**n8n webhook URL documentation** *(Phase 1 Step 11)*
+Every n8n webhook URL is only known after the workflow is created. Create a file
+`/home_ai/.claude/n8n-webhooks.md` during Step 11 build, listing every webhook URL
+as they're created. Claude Code should update this file after each workflow is built.
+Without it, the webhook URLs have to be looked up in n8n each time.
+
+**Telegram bot /help command** *(Phase 1 Step 11, 5 minutes)*
+Add a `/help` command to the Telegram bot that returns the full list of available
+commands with descriptions. Cheap to add during Step 11 when the bot is being built,
+annoying to add later.
+
+### 3.4 Infrastructure Improvements
+
+**Docker image version pinning strategy** *(all services)*
+The Vault :latest failure showed the risk of unpinned images. Proposed policy:
+- All services use pinned versions in docker-compose.yml
+- A monthly Workflow B check queries Docker Hub for newer versions of pinned images
+- Telegram notification when an image is > 6 months behind latest
+- Manual decision to upgrade, not automatic
+
+Current unpinned services in docker-compose.yml to fix:
+- `postgres:latest` → `postgres:16.3`
+- `n8nio/n8n:latest` → pin to current version
+- `metabase/metabase:latest` → pin to current version
+- `hashicorp/vault:1.15.6` → already pinned ✓
+- `grafana/grafana:latest` → pin to current version
+
+**Tailscale exit node for remote access** *(Phase 2)*
+Currently Tailscale provides device-to-device connectivity. Adding the P620 as a
+Tailscale exit node would let you route all traffic through it when on pub WiFi —
+useful for accessing internal tools from any network without exposing ports.
+
+### 3.5 AI/Model Layer Improvements
+
+**Thinking mode routing** *(Phase 2, small addition)*
+Qwen3's `/think` mode is significantly better for complex multi-step reasoning but
+slower. Add a `thinking_mode` flag to the AI worker dispatch in the Master Router:
+- `reconciliation_explainer` → always `/think` (complex financial reasoning)
+- `email_classifier` → never `/think` (simple classification, speed matters)
+- `invoice_extractor` → `/no_think` for standard invoices, `/think` for flagged ones
+- `digest_generator` → `/think` on Mondays (weekly summary), `/no_think` other days
+
+This is a single field addition to the worker configuration in static_context.
+
+**Prompt version control** *(Phase 2)*
+Currently prompts are hardcoded in n8n Code nodes. When a prompt is updated
+(because model drift alert fired, or a supplier changed invoice format), there's no
+history of what changed. Add prompt versioning: store active prompts in static_context
+with a `prompt_version` integer, and log every change to `audit_log` with the old
+and new prompt text. Makes rollback trivial.
+
+**Local embedding model** *(Phase 5, before Qdrant setup)*
+The spec uses `nomic-embed-text` via Ollama for embeddings. As of 2026,
+`mxbai-embed-large` (1.5GB, 1024-dim) benchmarks significantly better on retrieval
+tasks. Pull alongside nomic-embed-text and benchmark both on a sample of your
+actual emails and invoices before committing to either for the Qdrant collections.
+
+---
+
+## SECTION 4 — PENDING DECISIONS
+
+Items that came up during build requiring a decision before proceeding.
+
+| Item | Context | Decision needed |
+|---|---|---|
+| Ubuntu version | Actually 26.04 not 22.04 | ✓ Resolved — fixes documented in Section 1.2 |
+| Vault image pinning | Must stay at 1.15.6 | ✓ Resolved — pinned in docker-compose.yml |
+| Metabase database | Was pointing at app DB | ✓ Resolved — metabase_app DB created, V2 migration applied |
+| start.sh | Manual env var exports each session | ✓ Resolved — start.sh built at /home_ai/start.sh |
+| Step 9b gate verification | Implemented but 5-point gate not yet run | ✓ Resolved 2026-05-07 — gate run, all 5 checks green |
+| Docker image pinning | All services currently use :latest | ✓ Resolved 2026-05-08 — 9 services pinned to specific versions in docker-compose.yml. netdata pinned to `:stable` channel rather than full version (re-evaluate if you want hard version pin) |
+| Master Router activation | "Could not find property option" — Switch v3 schema mismatch | ✓ Diagnosed + fix drafted 2026-05-08 — `master-router.fixed.json` ready to import. Re-import + activate to resolve |
+| Metabase: homeai data source | Connected only to "Sample Database" — homeai DB not added | ⚠ Outstanding — must add via Metabase UI before Step 11 Phase 3 (Gate B Q7 needs review queue card) |
+| Email pipeline workflow | Doesn't exist; needed for Step 11 | ✓ Drafted 2026-05-08 — `email-pipeline.json`. 3 caveats logged in OVERNIGHT-LOG before import |
+| Gmail OAuth credentials (× 3) | personal1 + personal2 + workspace | ⚠ In progress 2026-05-08 — Google Cloud Console OAuth consent screen + client created, refresh_tokens being obtained via OAuth Playground; Vault put for personal1 attempted but only client_id populated — redo pending |
+| n8n vault-token-header credential | Static service token — needs AppRole replacement | Phase 2 hardening |
+| rent_payments RLS | RLS-enabled with no policy = deny-all (no entity_id column) | ⏳ Design pending — needs JOIN-based policy via tenancy_id → tenancies.entity_id, or denormalised entity_id column |
+| llm-router crash root cause | Different from model-evaluator despite same role/env. Postgres password drift to NULL was the immediate cause; underlying difference between services unexplored | ⚠ Open — n8n + model-evaluator are stable; llm-router currently stopped (`docker compose stop llm-router`). Pick up when Step 11 needs it |
+| NatWest Open Banking | Developer registration takes 1-2 weeks | Start registration now — needed for Phase 2 |
+| RBS Open Banking | Same as NatWest | Same as NatWest |
+| ICRTouch PLU tracking | Per-flavour tracking not yet configured | Configure TouchOffice before Phase 2 build — required for Ice Cream Oracle + Menu Engineering |
+| Dext API key | Not yet registered | Register at api.dext.com before Phase 1 Step 13 (Invoice Pipeline needs it) |
+| WhatsApp blacklist numbers | Blacklist framework built, numbers not populated | Add actual numbers to static_context before Phase 4 |
+| Garmin credentials | Stored in Vault but not yet tested | Test Garmin service connectivity before Phase 2 |
+| init_placeholder HMAC bug | static_context_change trigger uses fake signature | ✓ Resolved 2026-05-08 — V4 dropped the trigger; emissions now happen in app code (model-evaluator deploy_model is reference) |
+| HMAC signing key | secret/signing exists but trigger not using it | ✓ Resolved with V4 above |
+| Master Router routing (Item 1 unblocker) | n8n Postgres v2.5 drops RETURNING rows when set_config involved — Switch sees `{"success":true}`, never routes | ⚠ OPEN — three candidate fixes documented in issues-fixes-log 2026-05-08. Resolve before Step 11. |
+| n8n stored credential drift | Postgres password rotation breaks Master Router silently | Partially mitigated: start.sh now warns on drift. Phase 2 hardening (AppRole + dynamic creds) is the real fix. |
+| Email Review Queue Metabase card | Required for Gate B Q7 | ⏳ SQL ready in `.claude/metabase/email-review-queue.md` — needs 2-min UI paste |
+| llm-router error-path logging | Was missing — fixed today | ✓ Resolved — error paths now call _log_usage; ai_usage table grants added |
+| rent_payments RLS | RLS-enabled, no policy = deny-all (no entity_id column) | ✓ Resolved — V7 added entity_id (denormalised via tenancy → property → entity) + standard entity_isolation policy + sync trigger |
+| Anthropic + signing + redis credential leaks | 2026-05-08 incident — values printed to terminal, captured in transcript | ✓ Resolved — all three rotated. Convention added to feedback memory. |
+
+---
+
+## SECTION 5 — VERSION LOG
+
+| Date | What changed |
+|---|---|
+| May 2026 | v1.0 created — initial build lessons from Milestone A (Vault setup). Model stack updated to Qwen3. Pre-flight checklist added. Known issues documented: CAP_SETFCAP, Docker permissions, Ubuntu version mismatch, YAML indentation, auto-compaction mid-write. |
+| May 2026 (session 2) | Hard reboot recovery documented. Metabase architectural fix (dedicated metabase_app DB). Vault rekey + root token rotation after keys exposed in chat. start.sh built and documented. Model evaluator port corrected to 8008 (was 8080, conflict with Open WebUI). init_placeholder HMAC bug flagged as tech debt. Three new Vault secrets added: secret/redis, secret/grafana, secret/open-webui. Vault secrets state table added (Section 3.3). Pre-flight checklist updated to use start.sh. Pending decisions table updated with resolved items. |
+| May 2026 (session 3) | Step 9b (Model Stack Evaluator) implemented but gate not yet verified. Files: services/model-evaluator/Dockerfile + main.py + requirements.txt. docker-compose.yml updated with model-evaluator on port 8008. Verification gate pending next reboot: ./start.sh → docker compose up -d --build model-evaluator → 5 curl/psql checks → bump AGENTS.md to Last completed step: 9b. |
+| 2026-05-07 (review run) | Comprehensive review. Step 9b gates re-confirmed green (5/5). V3 idempotency confirmed (count=10). RLS smoke confirmed (all=9 / entity1=5 / unset=0 — deny-all working). Master Router activation failing with `Could not find property option` — new deferred item. Postgres password regressed to NULL via empty-fetch script (token scope issue); rotated fresh in single shell. Cleanups landed: `_set_system_entity` helper, `_scan` UPSERT, `deploy_model` two-UPDATEs-into-one CASE, compose `x-postgres-env` YAML anchor for model-evaluator + llm-router, model-evaluator requirements aligned with llm-router. V3 migration's CREATE POLICY template patched to V5 CASE form. SPEC §4.3 query updated to include SET LOCAL. AGENTS.md pre-activation note rewritten. issues-fixes-log refreshed with 7 new entries (2026-05-02 to 05-07). Deferred this run: image pinning, init_placeholder HMAC, rent_payments RLS, Master Router activation bug. |
+| 2026-05-08 (long session) | Master Router schema bugs resolved (Switch v3 rules.values, fallbackOutput enum, IF condition vs JSONB shape, workflow_history vs workflow_entity drift). Old workflow `4Tyj7ImxpkZZmitf` replaced by `test-master-router`. V7 rent_payments RLS migration applied (denormalised entity_id via tenancy→property chain). llm-router error-path logging added; ai_usage table grants fixed. Email Pipeline drafted + imported. Anthropic/signing/redis credentials rotated after exposure incident. n8n stored Postgres credential drift discovered (start.sh now warns on it). 4 new feedback-memory rules committed. **Sprint Item 1 BLOCKED** — n8n Postgres-node executeQuery drops RETURNING rows when set_config is involved. Three candidate fixes proposed; resolution required before Step 11. Sprint Items 2 (Metabase card SQL ready), 3 (Watchdog auto-resolved by cred sync), 4 (start.sh drift detection), 5 (this doc cleanup) done. Items 6 (Vault auto-unseal) and 7 (Telegram bot) deferred to next session. |
+
+---
+
+*This document is updated after every build session via the `/retro` slash command.*
+*It is read at the START of every Claude Code session before AGENTS.md.*
+*Never delete entries — mark them resolved with a ✓ prefix if fixed.*

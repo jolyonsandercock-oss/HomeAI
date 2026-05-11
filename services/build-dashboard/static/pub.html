@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Olde Malthouse — Live Operations</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .chan-agoda     { color: #4ade80; }
+  .chan-booking   { color: #60a5fa; }
+  .chan-ctrip     { color: #f87171; }
+  .chan-direct    { color: #fbbf24; }
+  .chan-trivago   { color: #c084fc; }
+  .chan-other     { color: #94a3b8; }
+  .dot { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 999px; margin-right: 0.4rem; vertical-align: middle; }
+  .day-cell { transition: background 0.3s; }
+  .pulse-on-update { animation: pulse 0.6s ease-in-out; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(56,189,248,0.5); } 100% { box-shadow: 0 0 0 16px rgba(56,189,248,0); } }
+  .sparkline path { stroke: rgba(56,189,248,0.9); fill: none; stroke-width: 1.5; }
+  .sparkline path.fill { stroke: none; fill: rgba(56,189,248,0.12); }
+  .now-tick { color: #38bdf8; }
+</style>
+</head>
+<body class="text-slate-100">
+
+<div x-data="pub()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+
+  <header class="flex items-center justify-between">
+    <div>
+      <div class="text-xs tracking-widest text-slate-400 uppercase">Home AI</div>
+      <h1 class="text-2xl md:text-3xl font-semibold">The Olde Malthouse — Live Operations</h1>
+    </div>
+    <div class="text-right text-xs text-slate-400">
+      <div x-text="prettyDate"></div>
+      <div class="now-tick" x-text="prettyTime"></div>
+      <button @click="refresh(true)" class="mt-1 text-xs px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700">↻ refresh</button>
+    </div>
+  </header>
+
+  <!-- KPI row -->
+  <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <template x-for="kpi in kpis" :key="kpi.label">
+      <div class="glass rounded-2xl p-4 md:p-5" :class="kpi.flash && 'pulse-on-update'">
+        <div class="text-xs text-slate-400 uppercase tracking-wider" x-text="kpi.label"></div>
+        <div class="mt-1 text-3xl md:text-4xl font-semibold" x-text="kpi.value"></div>
+        <div class="mt-1 text-xs text-slate-500" x-text="kpi.sub"></div>
+        <svg class="sparkline mt-2 w-full h-8" viewBox="0 0 100 30" preserveAspectRatio="none"
+             x-html="kpi.sparkSvg"></svg>
+      </div>
+    </template>
+  </section>
+
+  <!-- Arrivals + Departures -->
+  <section class="grid md:grid-cols-2 gap-3">
+    <div class="glass rounded-2xl p-4 md:p-5">
+      <div class="flex justify-between items-baseline mb-3">
+        <h2 class="text-sm uppercase tracking-wider text-slate-400">Arrivals today</h2>
+        <span class="text-xs text-slate-500" x-text="(snap.arrivals_today||[]).length + ' guest' + ((snap.arrivals_today||[]).length===1?'':'s')"></span>
+      </div>
+      <div class="space-y-2">
+        <template x-for="b in (snap.arrivals_today||[])" :key="b.id">
+          <div class="flex items-center justify-between text-sm border-l-2 pl-3 py-1" :style="`border-color: ${channelColour(b.source)}`">
+            <div>
+              <div class="font-medium" x-text="b.guest_name || '—'"></div>
+              <div class="text-xs text-slate-400" x-text="(b.room ? b.room : 'room TBD') + ' • ' + b.source"></div>
+            </div>
+            <div class="text-right">
+              <div class="text-slate-200" x-text="formatMoney(b.total_amount, b.currency)"></div>
+            </div>
+          </div>
+        </template>
+        <div x-show="(snap.arrivals_today||[]).length === 0" class="text-sm text-slate-500 italic">No arrivals today.</div>
+      </div>
+    </div>
+
+    <div class="glass rounded-2xl p-4 md:p-5">
+      <div class="flex justify-between items-baseline mb-3">
+        <h2 class="text-sm uppercase tracking-wider text-slate-400">Departures tomorrow</h2>
+        <span class="text-xs text-slate-500" x-text="(snap.departures_tomorrow||[]).length + ' guest' + ((snap.departures_tomorrow||[]).length===1?'':'s')"></span>
+      </div>
+      <div class="space-y-2">
+        <template x-for="b in (snap.departures_tomorrow||[])" :key="b.id">
+          <div class="flex items-center justify-between text-sm border-l-2 pl-3 py-1" :style="`border-color: ${channelColour(b.source)}`">
+            <div>
+              <div class="font-medium" x-text="b.guest_name || '—'"></div>
+              <div class="text-xs text-slate-400" x-text="(b.room ? b.room : 'room TBD') + ' • ' + b.source"></div>
+            </div>
+            <div class="text-right">
+              <div class="text-slate-200" x-text="formatMoney(b.total_amount, b.currency)"></div>
+            </div>
+          </div>
+        </template>
+        <div x-show="(snap.departures_tomorrow||[]).length === 0" class="text-sm text-slate-500 italic">No departures tomorrow.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Week calendar -->
+  <section class="glass rounded-2xl p-4 md:p-5">
+    <div class="flex justify-between items-baseline mb-3">
+      <h2 class="text-sm uppercase tracking-wider text-slate-400">This week — bookings load</h2>
+      <span class="text-xs text-slate-500">confirmed / cancelled / gross £</span>
+    </div>
+    <div class="grid grid-cols-7 gap-2">
+      <template x-for="d in (snap.week_calendar||[])" :key="d.day">
+        <div class="day-cell rounded-lg p-3 text-center"
+             :class="isToday(d.day) ? 'bg-sky-900/40 ring-1 ring-sky-500/40' : 'bg-slate-900/60'">
+          <div class="text-xs text-slate-400 uppercase" x-text="weekday(d.day)"></div>
+          <div class="text-2xl font-semibold" x-text="d.confirmed"></div>
+          <div class="text-xs" :class="d.cancelled > 0 ? 'text-rose-400' : 'text-slate-500'"
+               x-text="(d.cancelled > 0 ? '−' + d.cancelled : '·')"></div>
+          <div class="text-xs text-slate-500 mt-1" x-text="d.gross > 0 ? '£' + Math.round(d.gross) : '—'"></div>
+        </div>
+      </template>
+    </div>
+  </section>
+
+  <!-- Channel mix -->
+  <section class="glass rounded-2xl p-4 md:p-5">
+    <div class="flex justify-between items-baseline mb-3">
+      <h2 class="text-sm uppercase tracking-wider text-slate-400">Channel mix — 14d either side of today</h2>
+      <span class="text-xs text-slate-500" x-text="totalChannelBookings + ' bookings · ' + formatMoney(totalChannelGross, 'GBP')"></span>
+    </div>
+    <div class="space-y-2">
+      <template x-for="m in (snap.channel_mix_14d||[])" :key="m.source">
+        <div>
+          <div class="flex justify-between text-sm">
+            <span><span class="dot" :style="`background: ${channelColour(m.source)}`"></span><span x-text="m.source"></span></span>
+            <span class="text-slate-400" x-text="m.bookings + ' • ' + formatMoney(m.gross, 'GBP')"></span>
+          </div>
+          <div class="h-1.5 mt-1 rounded bg-slate-800 overflow-hidden">
+            <div class="h-full" :style="`width: ${(m.bookings / Math.max(1, totalChannelBookings) * 100).toFixed(1)}%; background: ${channelColour(m.source)}`"></div>
+          </div>
+        </div>
+      </template>
+      <div x-show="(snap.channel_mix_14d||[]).length === 0" class="text-sm text-slate-500 italic">No bookings in the window.</div>
+    </div>
+  </section>
+
+  <footer class="text-xs text-slate-600 text-center pt-2 pb-4">
+    auto-refreshing every 60s · build-dashboard:8090/pub · last update <span x-text="lastUpdated"></span>
+  </footer>
+</div>
+
+<script>
+function pub() {
+  return {
+    snap: {},
+    lastUpdated: '—',
+    prettyDate: '',
+    prettyTime: '',
+
+    boot() {
+      this.refresh();
+      setInterval(() => this.refresh(), 60_000);
+      setInterval(() => this.tickClock(), 1_000);
+      this.tickClock();
+    },
+
+    tickClock() {
+      const now = new Date();
+      this.prettyDate = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      this.prettyTime = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) + ' UTC';
+    },
+
+    async refresh(manual = false) {
+      try {
+        const r = await fetch('/api/pub/snapshot');
+        if (!r.ok) throw new Error('snapshot ' + r.status);
+        const data = await r.json();
+        const oldSnap = JSON.stringify(this.snap || {});
+        this.snap = data;
+        this.lastUpdated = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        if (manual || oldSnap !== JSON.stringify(data)) {
+          this.flashKpis();
+        }
+      } catch (e) {
+        console.error(e);
+        this.lastUpdated = 'error — retrying';
+      }
+    },
+
+    flashKpis() {
+      this.kpis.forEach(k => k.flash = true);
+      setTimeout(() => this.kpis.forEach(k => k.flash = false), 800);
+    },
+
+    get totalChannelBookings() {
+      return (this.snap.channel_mix_14d || []).reduce((a, b) => a + (b.bookings || 0), 0);
+    },
+    get totalChannelGross() {
+      return (this.snap.channel_mix_14d || []).reduce((a, b) => a + (b.gross || 0), 0);
+    },
+
+    get kpis() {
+      const t = this.snap.today || {};
+      const occ = t.occupancy_pct;
+      return [
+        { label: 'EPoS gross today', value: this.formatMoney(t.epos_gross, 'GBP'),
+          sub: (t.epos_covers || 0) + ' covers · ' + (t.epos_sessions || 0) + ' session' + ((t.epos_sessions || 0) === 1 ? '' : 's'),
+          sparkSvg: this.spark(this.snap.sparklines?.epos_gross_14d) },
+        { label: 'Covers today',    value: (t.epos_covers || 0).toString(),
+          sub: '14d trend below',
+          sparkSvg: this.spark(this.snap.sparklines?.epos_gross_14d) },
+        { label: 'Occupancy today', value: occ == null ? '—' : occ + '%',
+          sub: (t.rooms_occupied || '—') + ' / ' + (t.total_rooms || '—') + ' · £' + Math.round(t.room_revenue || 0),
+          sparkSvg: this.spark(this.snap.sparklines?.occupancy_14d) },
+        { label: 'New bookings 24h', value: (t.new_bookings || 0).toString(),
+          sub: this.formatMoney(t.bookings_gross, 'GBP') + ' gross',
+          sparkSvg: this.spark(this.snap.sparklines?.epos_gross_14d) }, // placeholder shape
+      ];
+    },
+
+    spark(points) {
+      if (!points || points.length === 0) return '';
+      const W = 100, H = 30;
+      const max = Math.max(...points.map(p => p.v), 1);
+      const dx = W / Math.max(1, points.length - 1);
+      const pts = points.map((p, i) => [i * dx, H - (p.v / max) * (H - 4) - 2]);
+      const line = 'M ' + pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L ');
+      const fill = line + ` L ${W},${H} L 0,${H} Z`;
+      return `<path class="fill" d="${fill}"/><path d="${line}"/>`;
+    },
+
+    formatMoney(v, ccy) {
+      if (v == null || isNaN(Number(v))) return '£—';
+      const sym = ccy === 'USD' ? '$' : ccy === 'EUR' ? '€' : '£';
+      return sym + Number(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    },
+
+    weekday(iso) {
+      try { return new Date(iso + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'short' }); }
+      catch { return iso; }
+    },
+
+    isToday(iso) {
+      const today = new Date().toISOString().slice(0, 10);
+      return iso === today;
+    },
+
+    channelColour(source) {
+      if (!source) return '#94a3b8';
+      const s = source.toLowerCase();
+      if (s.includes('agoda'))    return '#4ade80';
+      if (s.includes('booking'))  return '#60a5fa';
+      if (s.includes('ctrip'))    return '#f87171';
+      if (s.includes('expedia'))  return '#fbbf24';
+      if (s.includes('direct'))   return '#fbbf24';
+      if (s.includes('trivago'))  return '#c084fc';
+      return '#94a3b8';
+    },
+  };
+}
+</script>
+</body>
+</html>

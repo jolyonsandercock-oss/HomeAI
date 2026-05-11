@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home AI — Dead Letter Forensics</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .row:hover { background: rgba(56,189,248,0.06); }
+  .row.selected { background: rgba(56,189,248,0.12); border-left: 3px solid #38bdf8; }
+  .pill { display:inline-block; padding: 0.1rem 0.55rem; border-radius: 999px; font-size: 0.7rem; }
+  .pill-pipeline { background: rgba(148,163,184,0.18); color: #cbd5e1; }
+  .pill-event-type { background: rgba(56,189,248,0.18); color: #7dd3fc; }
+  .pill-downstream-ok { background: rgba(74,222,128,0.18); color: #4ade80; }
+  .pill-downstream-missing { background: rgba(248,113,113,0.18); color: #f87171; }
+  pre { white-space: pre-wrap; word-break: break-all; font-size: 0.7rem; }
+  .age-warn { color: #fbbf24; }
+  .age-alert { color: #f87171; }
+</style>
+</head>
+<body class="text-slate-100">
+
+<div x-data="forensics()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-4">
+
+  <header class="flex items-center justify-between">
+    <div>
+      <div class="text-xs tracking-widest text-slate-400 uppercase">Home AI</div>
+      <h1 class="text-2xl md:text-3xl font-semibold">Dead Letter Forensics</h1>
+    </div>
+    <div class="text-right">
+      <div class="text-xs text-slate-400" x-text="`${items.length} unresolved`"></div>
+      <button @click="loadList()" class="mt-1 text-xs px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700">↻ refresh</button>
+    </div>
+  </header>
+
+  <!-- Filter strip -->
+  <div class="glass rounded-2xl p-3 flex flex-wrap gap-2 text-xs">
+    <button @click="filter='all'"     :class="filter==='all'    ? 'bg-sky-700' : 'bg-slate-800'" class="px-3 py-1 rounded">All <span x-text="`(${items.length})`"></span></button>
+    <button @click="filter='stale'"   :class="filter==='stale'  ? 'bg-sky-700' : 'bg-slate-800'" class="px-3 py-1 rounded">Stale-lease <span x-text="`(${countByPipeline('stale_lease_recovery')})`"></span></button>
+    <button @click="filter='other'"   :class="filter==='other'  ? 'bg-sky-700' : 'bg-slate-800'" class="px-3 py-1 rounded">Other pipelines <span x-text="`(${items.length - countByPipeline('stale_lease_recovery')})`"></span></button>
+    <button @click="filter='old'"     :class="filter==='old'    ? 'bg-sky-700' : 'bg-slate-800'" class="px-3 py-1 rounded">&gt;24h old</button>
+  </div>
+
+  <div class="grid md:grid-cols-3 gap-4">
+
+    <!-- List -->
+    <div class="glass rounded-2xl overflow-hidden md:col-span-1">
+      <div class="p-3 border-b border-slate-700/30 text-xs uppercase tracking-wider text-slate-400">Unresolved dead letters</div>
+      <div class="max-h-[80vh] overflow-y-auto">
+        <template x-for="dl in filtered" :key="dl.dl_id">
+          <div class="row px-3 py-2 cursor-pointer border-b border-slate-800/40"
+               :class="selected?.dl_id === dl.dl_id ? 'selected' : ''"
+               @click="loadDetail(dl)">
+            <div class="flex justify-between items-baseline">
+              <div class="text-sm font-medium">#<span x-text="dl.dl_id"></span> · event <span x-text="dl.event_id"></span></div>
+              <div class="text-xs" :class="ageClass(dl.age_hours)" x-text="ageDisplay(dl.age_hours)"></div>
+            </div>
+            <div class="mt-1 flex gap-1 flex-wrap">
+              <span class="pill pill-pipeline" x-text="dl.pipeline"></span>
+              <span class="pill pill-event-type" x-text="dl.event_type || '(no event)'"></span>
+            </div>
+            <div class="text-xs text-slate-500 mt-1 truncate" x-text="dl.error_message || ''"></div>
+          </div>
+        </template>
+        <div x-show="filtered.length === 0" class="px-3 py-6 text-center text-sm text-slate-500 italic">
+          <template x-if="items.length === 0">No unresolved dead letters. System is clean.</template>
+          <template x-if="items.length !== 0">No dead letters match the current filter.</template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Detail panel -->
+    <div class="md:col-span-2 space-y-3">
+      <template x-if="!detail">
+        <div class="glass rounded-2xl p-8 text-center text-slate-500">
+          <div class="text-2xl mb-2">←</div>
+          <div>Select a dead letter to inspect.</div>
+        </div>
+      </template>
+
+      <template x-if="detail">
+        <div class="space-y-3">
+          <!-- Header card -->
+          <div class="glass rounded-2xl p-4">
+            <div class="flex justify-between items-start">
+              <div>
+                <div class="text-xs text-slate-400">Event <span x-text="detail.event.id"></span> · type <span x-text="detail.event.event_type"></span></div>
+                <div class="font-medium mt-1" x-text="detail.event.idempotency_key || '(no idem key)'"></div>
+                <div class="text-xs text-slate-500" x-text="`trace ${detail.event.trace_id || '—'}`"></div>
+              </div>
+              <div class="text-right text-xs">
+                <div>status: <span x-text="detail.event.status"></span></div>
+                <div>retries: <span x-text="detail.event.retry_count"></span></div>
+                <div x-show="detail.event.processing_node_id" class="text-slate-500" x-text="`node: ${detail.event.processing_node_id}`"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Downstream presence -->
+          <div class="glass rounded-2xl p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-400">Downstream verification</div>
+            <div class="mt-2">
+              <template x-if="detail.downstream.present">
+                <div>
+                  <span class="pill pill-downstream-ok">downstream OK</span>
+                  Row <code class="text-slate-300" x-text="detail.downstream.row_id"></code>
+                  exists in <code x-text="detail.downstream.table"></code>.
+                  <div class="text-xs text-slate-400 mt-1">Safe to resolve as false-positive.</div>
+                </div>
+              </template>
+              <template x-if="!detail.downstream.present">
+                <div>
+                  <span class="pill pill-downstream-missing">downstream MISSING</span>
+                  <span class="text-sm text-slate-300 ml-1">no expected downstream row found.</span>
+                  <div class="text-xs text-slate-400 mt-1">This may be a real failure — consider re-queueing or marking for human review.</div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Action buttons -->
+          <div class="glass rounded-2xl p-4 flex flex-wrap gap-2">
+            <button @click="resolve('downstream_ok')"
+                    :disabled="busy"
+                    class="px-3 py-1.5 rounded text-sm bg-emerald-700/40 border border-emerald-600 hover:bg-emerald-600/50 disabled:opacity-40">
+              ✓ Resolve as false-positive
+            </button>
+            <button @click="resolve('requeued')"
+                    :disabled="busy"
+                    class="px-3 py-1.5 rounded text-sm bg-sky-700/40 border border-sky-600 hover:bg-sky-600/50 disabled:opacity-40">
+              ↻ Re-queue (retry from scratch)
+            </button>
+            <button @click="resolve('needs_review')"
+                    :disabled="busy"
+                    class="px-3 py-1.5 rounded text-sm bg-slate-800 border border-slate-600 hover:bg-slate-700 disabled:opacity-40">
+              📌 Mark for human review
+            </button>
+            <input type="text" placeholder="optional note" x-model="noteText"
+                   class="flex-1 px-2 py-1.5 rounded text-sm bg-slate-800 border border-slate-700 focus:outline-none focus:border-slate-500">
+            <div class="text-xs text-slate-400 self-center" x-show="lastResolveMsg" x-text="lastResolveMsg"></div>
+          </div>
+
+          <!-- Event payload -->
+          <div class="glass rounded-2xl p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-2">Event payload</div>
+            <pre class="text-slate-300" x-text="JSON.stringify(detail.event.payload, null, 2)"></pre>
+          </div>
+
+          <!-- Audit chain -->
+          <div class="glass rounded-2xl p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-2">Audit log (last 30, this event + trace)</div>
+            <div class="space-y-1">
+              <template x-for="a in detail.audit" :key="a.id">
+                <div class="text-xs flex gap-2">
+                  <span class="text-slate-500" x-text="a.created_at?.slice(11, 19)"></span>
+                  <span class="text-slate-400 w-32 truncate" x-text="a.pipeline"></span>
+                  <span class="text-slate-300 flex-1" x-text="a.action"></span>
+                  <span :class="a.result === 'success' ? 'text-emerald-400' : a.result === 'failure' ? 'text-rose-400' : 'text-slate-400'" x-text="a.result"></span>
+                </div>
+              </template>
+              <div x-show="(detail.audit || []).length === 0" class="text-xs text-slate-500 italic">no audit log entries</div>
+            </div>
+          </div>
+
+          <!-- Children -->
+          <div x-show="(detail.children || []).length > 0" class="glass rounded-2xl p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-400 mb-2">Children events</div>
+            <div class="space-y-1">
+              <template x-for="c in detail.children" :key="c.id">
+                <div class="text-xs flex gap-2">
+                  <span class="text-slate-500" x-text="`#${c.id}`"></span>
+                  <span class="pill pill-event-type" x-text="c.event_type"></span>
+                  <span x-text="c.status"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <footer class="text-xs text-slate-600 text-center pt-2 pb-4">
+    forensics.html · auto-loads list every 60s · last refresh <span x-text="lastRefresh"></span>
+  </footer>
+</div>
+
+<script>
+function forensics() {
+  return {
+    items: [],
+    filter: 'all',
+    selected: null,
+    detail: null,
+    busy: false,
+    noteText: '',
+    lastResolveMsg: '',
+    lastRefresh: '—',
+
+    boot() {
+      this.loadList();
+      setInterval(() => this.loadList(), 60_000);
+    },
+
+    async loadList() {
+      try {
+        const r = await fetch('/api/forensics/dead-letters?limit=200');
+        const data = await r.json();
+        this.items = data.items || [];
+        this.lastRefresh = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      } catch (e) { console.error(e); }
+    },
+
+    async loadDetail(dl) {
+      this.selected = dl;
+      this.detail = null;
+      this.lastResolveMsg = '';
+      try {
+        const r = await fetch(`/api/forensics/event/${dl.event_id}`);
+        this.detail = await r.json();
+      } catch (e) { console.error(e); }
+    },
+
+    async resolve(verdict) {
+      if (!this.selected) return;
+      this.busy = true;
+      this.lastResolveMsg = '';
+      try {
+        const url = `/api/forensics/resolve?dl_id=${this.selected.dl_id}&verdict=${verdict}&note=${encodeURIComponent(this.noteText)}`;
+        const r = await fetch(url, { method: 'POST' });
+        const data = await r.json();
+        if (r.ok) {
+          this.lastResolveMsg = `✓ ${verdict}`;
+          this.noteText = '';
+          this.selected = null;
+          this.detail = null;
+          await this.loadList();
+        } else {
+          this.lastResolveMsg = `✗ ${data.error || r.statusText}`;
+        }
+      } catch (e) {
+        this.lastResolveMsg = '✗ ' + e.message;
+      } finally {
+        this.busy = false;
+      }
+    },
+
+    get filtered() {
+      if (this.filter === 'all') return this.items;
+      if (this.filter === 'stale') return this.items.filter(i => i.pipeline === 'stale_lease_recovery');
+      if (this.filter === 'other') return this.items.filter(i => i.pipeline !== 'stale_lease_recovery');
+      if (this.filter === 'old')   return this.items.filter(i => (i.age_hours || 0) > 24);
+      return this.items;
+    },
+
+    countByPipeline(p) {
+      return this.items.filter(i => i.pipeline === p).length;
+    },
+
+    ageDisplay(h) {
+      if (h == null) return '—';
+      if (h < 1)  return Math.round(h * 60) + 'm';
+      if (h < 24) return Math.round(h) + 'h';
+      return Math.round(h / 24) + 'd';
+    },
+    ageClass(h) {
+      if (h == null) return 'text-slate-500';
+      if (h > 48) return 'age-alert';
+      if (h > 24) return 'age-warn';
+      return 'text-slate-400';
+    },
+  };
+}
+</script>
+</body>
+</html>

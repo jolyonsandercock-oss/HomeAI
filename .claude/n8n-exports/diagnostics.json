@@ -1,0 +1,78 @@
+{
+  "id": "diagnostics-v1",
+  "name": "Diagnostics (daily)",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": false
+  },
+  "nodes": [
+    {
+      "id": "dx-0001-schedule",
+      "name": "Daily 06:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "30 6 * * *" }] }
+      }
+    },
+    {
+      "id": "dx-0002-run",
+      "name": "Run Diagnostics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 300],
+      "credentials": { "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" } },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Daily diagnostic suite. Each test returns one diagnostic_history row.\n-- Test categories follow SPEC §11 severity tiers.\nWITH run AS (SELECT gen_random_uuid() AS run_id),\nresults AS (\n  SELECT 'partition_overflow' AS test_id,\n         CASE WHEN count(*) = 0 THEN 'ok' ELSE 'critical' END AS status,\n         count(*)::text AS value,\n         'rows in events_overflow' AS detail\n    FROM events_overflow\n  UNION ALL\n  SELECT 'next_partition_exists',\n         CASE WHEN to_regclass('public.events_' || to_char((NOW() + INTERVAL '1 month')::date, 'YYYY_MM')) IS NOT NULL THEN 'ok' ELSE 'critical' END,\n         to_char((NOW() + INTERVAL '1 month')::date, 'YYYY_MM'),\n         'next month''s partition table'\n  UNION ALL\n  SELECT 'dead_letter_recent',\n         CASE WHEN count(*) = 0 THEN 'ok' WHEN count(*) < 5 THEN 'warning' ELSE 'critical' END,\n         count(*)::text,\n         'dead-letters in last 24h'\n    FROM dead_letter\n   WHERE created_at > NOW() - INTERVAL '24 hours' AND pipeline != 'system_marker'\n  UNION ALL\n  SELECT 'stuck_processing_leases',\n         CASE WHEN count(*) = 0 THEN 'ok' WHEN count(*) < 3 THEN 'warning' ELSE 'critical' END,\n         count(*)::text,\n         'events stuck >30 min in processing'\n    FROM events\n   WHERE status = 'processing' AND processing_started_at < NOW() - INTERVAL '30 minutes'\n  UNION ALL\n  SELECT 'system_state',\n         CASE WHEN value->>'state' = 'running' THEN 'ok' ELSE 'critical' END,\n         value->>'state',\n         'global kill-switch'\n    FROM static_context WHERE key = 'system.state'\n  UNION ALL\n  SELECT 'audit_log_recent_activity',\n         CASE WHEN count(*) = 0 THEN 'warning' ELSE 'ok' END,\n         count(*)::text,\n         'audit_log rows in last 24h (zero = pipelines silent)'\n    FROM audit_log WHERE created_at > NOW() - INTERVAL '24 hours'\n  UNION ALL\n  SELECT 'pipeline_failure_rate_24h',\n         CASE WHEN total = 0 THEN 'ok'\n              WHEN failures::float / total > 0.20 THEN 'critical'\n              WHEN failures::float / total > 0.05 THEN 'warning'\n              ELSE 'ok' END,\n         CASE WHEN total = 0 THEN '0%'\n              ELSE round(100.0 * failures / total, 1)::text || '%' END,\n         failures::text || ' / ' || total::text || ' total'\n    FROM (\n      SELECT count(*) FILTER (WHERE result IN ('failure','fail','partial_failure')) AS failures,\n             count(*)                                                                AS total\n        FROM audit_log WHERE created_at > NOW() - INTERVAL '24 hours'\n    ) x\n  UNION ALL\n  SELECT 'firing_alerts',\n         CASE WHEN count(*) = 0 THEN 'ok'\n              WHEN count(*) FILTER (WHERE severity = 'critical') > 0 THEN 'critical'\n              ELSE 'warning' END,\n         count(*)::text,\n         'system_alerts with status=firing'\n    FROM system_alerts WHERE status = 'firing'\n  UNION ALL\n  SELECT 'workflows_active',\n         CASE WHEN count(*) >= 10 THEN 'ok' WHEN count(*) >= 5 THEN 'warning' ELSE 'critical' END,\n         count(*)::text,\n         'n8n workflows currently active'\n    FROM workflow_entity WHERE active = true\n  UNION ALL\n  SELECT 'rls_enforced',\n         CASE WHEN count(*) FILTER (WHERE relrowsecurity) >= 8 THEN 'ok' ELSE 'critical' END,\n         count(*) FILTER (WHERE relrowsecurity)::text || ' / ' || count(*)::text,\n         'tables with RLS active'\n    FROM pg_class\n   WHERE relname IN ('emails','invoices','bank_transactions','events',\n                     'epos_daily_reports','accommodation_daily_reports',\n                     'till_reconciliation','child_events','rent_payments','documents','staff','cashflow_forecast')\n)\nINSERT INTO diagnostic_history (run_id, test_id, status, value, detail)\nSELECT (SELECT run_id FROM run), test_id, status, value, detail\n  FROM results\nRETURNING run_id, test_id, status, detail;",
+        "options": {}
+      }
+    },
+    {
+      "id": "dx-0003-eval",
+      "name": "Eval + Build Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "parameters": {
+        "jsCode": "// Aggregate the run's results. Emit one alert payload per critical / warning.\nconst rows = $input.all().map(i => i.json);\nif (rows.length === 0) return [{ json: { skipped: true, reason: 'no diagnostic rows' } }];\nconst run_id = rows[0].run_id;\n\nconst critical = rows.filter(r => r.status === 'critical');\nconst warning  = rows.filter(r => r.status === 'warning');\nconst ok_count = rows.filter(r => r.status === 'ok').length;\n\nconst alerts = [];\nfor (const r of critical) {\n  alerts.push({\n    fingerprint: 'diag_' + r.test_id + '_' + run_id.slice(0, 8),\n    alertname:   'Diag_' + r.test_id,\n    severity:    'critical',\n    summary:     'diagnostic critical: ' + r.test_id,\n    description: r.detail || ''\n  });\n}\nfor (const r of warning) {\n  alerts.push({\n    fingerprint: 'diag_' + r.test_id + '_' + run_id.slice(0, 8),\n    alertname:   'Diag_' + r.test_id,\n    severity:    'warning',\n    summary:     'diagnostic warning: ' + r.test_id,\n    description: r.detail || ''\n  });\n}\n\nreturn [{\n  json: {\n    run_id,\n    total: rows.length,\n    ok:    ok_count,\n    warning: warning.length,\n    critical: critical.length,\n    alerts_json: JSON.stringify({ alerts: alerts.map(a => ({ ...a, status: 'firing', startsAt: new Date().toISOString(), labels: { alertname: a.alertname, severity: a.severity }, annotations: { summary: a.summary, description: a.description } })) })\n  }\n}];"
+      }
+    },
+    {
+      "id": "dx-0004-emit-alerts",
+      "name": "Forward to Alert Sink",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://homeai-n8n:5678/webhook/prom-alert",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.alerts_json }}",
+        "options": { "timeout": 15000 }
+      }
+    },
+    {
+      "id": "dx-0005-summary-audit",
+      "name": "Audit Run Summary",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1120, 300],
+      "credentials": { "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" } },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (pipeline, action, pipeline_version, result, ai_parsed)\nVALUES ('diagnostics', 'daily_run', '1.0',\n        CASE WHEN {{ $json.critical }} > 0 THEN 'failure'\n             WHEN {{ $json.warning  }} > 0 THEN 'escalate'\n             ELSE 'success' END,\n        jsonb_build_object('run_id', '{{ $json.run_id }}',\n                           'total',    {{ $json.total }},\n                           'ok',       {{ $json.ok }},\n                           'warning',  {{ $json.warning }},\n                           'critical', {{ $json.critical }}))\nRETURNING id;",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Daily 06:30":          { "main": [[{ "node": "Run Diagnostics", "type": "main", "index": 0 }]] },
+    "Run Diagnostics":      { "main": [[{ "node": "Eval + Build Alerts", "type": "main", "index": 0 }]] },
+    "Eval + Build Alerts":  { "main": [[{ "node": "Forward to Alert Sink", "type": "main", "index": 0 }, { "node": "Audit Run Summary", "type": "main", "index": 0 }]] }
+  }
+}

@@ -1,0 +1,563 @@
+[
+  {
+    "updatedAt": "2026-05-08T22:15:16.666Z",
+    "createdAt": "2026-05-08T22:15:14.633Z",
+    "id": "report-ingestion-v1",
+    "name": "Report Ingestion (P9)",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "id": "p9-0001-webhook",
+        "name": "Webhook (report-ingestion)",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          240,
+          300
+        ],
+        "webhookId": "report-ingestion",
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "report-ingestion",
+          "responseMode": "lastNode",
+          "options": {}
+        }
+      },
+      {
+        "id": "p9-0002-validate",
+        "name": "Validate Event",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          460,
+          300
+        ],
+        "parameters": {
+          "jsCode": "// Master Router POSTs the events row body. Pull payload, verify shape.\nconst raw = $input.first().json;\nconst body = raw.body || raw;\n\nconst payload = (body.payload && typeof body.payload === 'object')\n  ? body.payload\n  : (typeof body.payload === 'string' ? JSON.parse(body.payload) : {});\n\nconst event_id        = body.id || raw.id;\nconst trace_id        = body.trace_id || raw.trace_id;\nconst gmail_message_id = payload.gmail_message_id;\nconst attachment_id   = payload.attachment_id;\nconst filename        = payload.filename;\nconst mime_type       = String(payload.mime_type || 'application/octet-stream').toLowerCase();\nconst email_id        = payload.email_id ?? null;  // B3_VALIDATE_v1\nconst account         = payload.account || 'personal1';\n\nif (!event_id)         throw new Error('missing event id');\nif (!trace_id)         throw new Error('missing trace_id');\nif (!gmail_message_id) throw new Error('payload missing gmail_message_id');\nif (!attachment_id)    throw new Error('payload missing attachment_id');\nif (!filename)         throw new Error('payload missing filename');\n// email_id is optional in B3 design \u2014 looked up from emails table\n// at INSERT time via gmail_message_id, with NULL fallback if the\n// email pipeline hasn't INSERTed the emails row yet.\n\n// Choose pdfplumber endpoint by MIME type. Other types \u2192 unknown handling.\nlet pdfplumber_endpoint = null;\nif (mime_type === 'application/pdf') {\n  pdfplumber_endpoint = '/extract-pdf';\n} else if (mime_type.includes('spreadsheet') || filename.toLowerCase().endsWith('.xlsx')) {\n  pdfplumber_endpoint = '/parse-xlsx';\n} else if (mime_type.includes('csv') || filename.toLowerCase().endsWith('.csv')) {\n  pdfplumber_endpoint = '/parse-csv';\n}\n\nreturn [{\n  json: {\n    event_id, trace_id, email_id, gmail_message_id, attachment_id,\n    filename, mime_type, account, pdfplumber_endpoint,\n    parent_event_id: event_id\n  }\n}];"
+        }
+      },
+      {
+        "id": "p9-0003-idem",
+        "name": "Idempotency Check",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          680,
+          300
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "iTuuNfsqHY49MGhk",
+            "name": "HomeAI Postgres"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- B3_IDEM_v1\n-- Lookup by (gmail_message_id, filename) \u2014 joins via emails table\n-- when emails row exists, else falls back to direct attachment search.\nSELECT ea.id AS attachment_db_id, ea.processed\n  FROM email_attachments ea\n  LEFT JOIN emails e ON e.id = ea.email_id\n WHERE ea.filename = '{{ $json.filename.replace(/'/g, \"''\") }}'\n   AND (e.gmail_message_id = '{{ $json.gmail_message_id }}'\n        OR ea.email_id IS NULL)\n LIMIT 1;",
+          "options": {}
+        }
+      },
+      {
+        "id": "p9-0004-already",
+        "name": "Already Processed?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          900,
+          300
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "leftValue": "",
+              "caseSensitive": true,
+              "typeValidation": "loose"
+            },
+            "combinator": "and",
+            "conditions": [
+              {
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true"
+                },
+                "leftValue": "={{ $json.processed === true || $json.processed === 't' }}",
+                "rightValue": ""
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "p9-0005-skip",
+        "name": "Skip \u2014 Already Done",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          1120,
+          200
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "p9-0006-vault-gmail",
+        "name": "Vault: Gmail Creds",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1120,
+          400
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "0wPA4DCDuehPC9Mf",
+            "name": "vault-token-header"
+          }
+        },
+        "parameters": {
+          "method": "GET",
+          "url": "=http://vault:8200/v1/secret/data/gmail/{{ $('Validate Event').first().json.account }}",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "httpHeaderAuth",
+          "options": {}
+        }
+      },
+      {
+        "id": "p9-0007-vault-signing",
+        "name": "Vault: Signing Key",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1340,
+          400
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "0wPA4DCDuehPC9Mf",
+            "name": "vault-token-header"
+          }
+        },
+        "parameters": {
+          "method": "GET",
+          "url": "http://vault:8200/v1/secret/data/signing",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "httpHeaderAuth",
+          "options": {}
+        }
+      },
+      {
+        "id": "p9-0008-vault-anthropic",
+        "name": "Vault: Anthropic Key",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1560,
+          400
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "0wPA4DCDuehPC9Mf",
+            "name": "vault-token-header"
+          }
+        },
+        "parameters": {
+          "method": "GET",
+          "url": "http://vault:8200/v1/secret/data/anthropic",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "httpHeaderAuth",
+          "options": {}
+        }
+      },
+      {
+        "id": "p9-0009-oauth-refresh",
+        "name": "OAuth: Refresh Access Token",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1780,
+          400
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://oauth2.googleapis.com/token",
+          "sendBody": true,
+          "contentType": "form-urlencoded",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "client_id",
+                "value": "={{ $('Vault: Gmail Creds').first().json.data.data.client_id }}"
+              },
+              {
+                "name": "client_secret",
+                "value": "={{ $('Vault: Gmail Creds').first().json.data.data.client_secret }}"
+              },
+              {
+                "name": "refresh_token",
+                "value": "={{ $('Vault: Gmail Creds').first().json.data.data.refresh_token }}"
+              },
+              {
+                "name": "grant_type",
+                "value": "refresh_token"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 15000
+          }
+        }
+      },
+      {
+        "id": "p9-0010-fetch-attachment",
+        "name": "Gmail: Fetch Attachment",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2000,
+          400
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $('Validate Event').first().json.gmail_message_id }}/attachments/{{ $('Validate Event').first().json.attachment_id }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $('OAuth: Refresh Access Token').first().json.access_token }}"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 30000
+          }
+        }
+      },
+      {
+        "id": "p9-0011-decode",
+        "name": "Decode + Build Form",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2220,
+          400
+        ],
+        "parameters": {
+          "jsCode": "// Gmail returns attachment as base64url-encoded `data`. Convert to a binary\n// buffer and attach so the next HTTP node can multipart-POST it to pdfplumber.\nconst attachment = $input.first().json;\nif (!attachment.data) throw new Error('Gmail attachment fetch returned no data');\n\n// base64url \u2192 base64 \u2192 buffer\nconst b64 = attachment.data.replace(/-/g, '+').replace(/_/g, '/');\nconst pad = b64.length % 4;\nconst b64padded = pad ? b64 + '='.repeat(4 - pad) : b64;\nconst buffer = Buffer.from(b64padded, 'base64');\n\nconst v = $('Validate Event').first().json;\nif (buffer.length > 25 * 1024 * 1024) {\n  throw new Error(`attachment ${v.filename} is ${buffer.length} bytes (>25MB cap)`);\n}\n\nreturn [{\n  json: { ...v, attachment_size: buffer.length },\n  binary: {\n    file: {\n      data:     buffer.toString('base64'),\n      fileName: v.filename,\n      mimeType: v.mime_type\n    }\n  }\n}];"
+        }
+      },
+      {
+        "id": "p9-0012-pdfplumber",
+        "name": "pdfplumber: extract",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2440,
+          400
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "=http://homeai-pdfplumber:8003{{ $('Validate Event').first().json.pdfplumber_endpoint || '/extract-pdf' }}",
+          "sendBody": true,
+          "contentType": "multipart-form-data",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "parameterType": "formBinaryData",
+                "name": "file",
+                "inputDataFieldName": "file"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 60000
+          }
+        }
+      },
+      {
+        "id": "p9-0013-sanitise-build-prompt",
+        "name": "Sanitise + Build Prompt",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2660,
+          400
+        ],
+        "parameters": {
+          "jsCode": "// pdfplumber returns either {text, content_hash} or {data: [...rows...]}.\n// Normalise to a single 'extracted_text' string for the classifier.\nconst pdfp = $input.first().json;\nlet text = '';\nif (pdfp.text) {\n  text = pdfp.text;\n} else if (Array.isArray(pdfp.data)) {\n  // For xlsx/csv: serialize the first 200 rows as TSV-ish\n  text = pdfp.data.slice(0, 200).map(r => Object.values(r).join('\\t')).join('\\n');\n}\n\n// SPEC \u00a72.4 sanitiser \u2014 strip control chars, cap at 8000 chars\ntext = String(text).replace(/[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]/g, '').slice(0, 8000);\n\nconst v = $('Validate Event').first().json;\nconst crypto = require('crypto');\nconst content_hash = crypto.createHash('sha256').update(text).digest('hex');\n\nreturn [{\n  json: {\n    ...v,\n    extracted_text: text,\n    content_hash,\n    classifier_prompt: text\n  }\n}];"
+        }
+      },
+      {
+        "id": "p9-0014-classify",
+        "name": "Classify via Haiku",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2880,
+          400
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 256, system: \"You are a document classification system for Jo, a business owner.\\nClassify documents into exactly one type:\\n  bank_statement | supplier_invoice | property_agent_report | epos_report |\\n  accommodation_report | payroll_report | analytics_report | unknown\\n\\nReturn ONLY valid JSON. No markdown.\\nSchema: {\\\"document_type\\\": string, \\\"confidence_score\\\": number (0-1), \\\"summary\\\": string (max 200 chars), \\\"requires_human\\\": boolean}\\nIf type cannot be determined with confidence > 0.70: return document_type='unknown', requires_human=true.\", messages: [{ role: 'user', content: 'Filename: ' + $json.filename + '\\nMIME: ' + $json.mime_type + '\\n\\n' + $json.classifier_prompt }] }) }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "x-api-key",
+                "value": "={{ $('Vault: Anthropic Key').first().json.data.data.api_key }}"
+              },
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 30000
+          }
+        }
+      },
+      {
+        "id": "p9-0015-outcome",
+        "name": "Build OutcomeObject",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3100,
+          400
+        ],
+        "parameters": {
+          "jsCode": "// Parse Haiku response \u2192 OutcomeObject (SPEC \u00a76.2 v5.3 mandatory).\nconst item = $input.first().json;\nconst v = $('Sanitise + Build Prompt').first().json;\n\nlet ai;\ntry {\n  const text = item.content?.[0]?.text || '{}';\n  ai = JSON.parse(text);\n} catch (e) {\n  ai = { document_type: 'unknown', confidence_score: 0,\n         summary: 'parse error', requires_human: true };\n}\n\nconst validTypes = ['bank_statement','supplier_invoice','property_agent_report',\n                    'epos_report','accommodation_report','payroll_report',\n                    'analytics_report','unknown'];\nconst document_type = validTypes.includes(ai.document_type) ? ai.document_type : 'unknown';\nconst confidence    = Math.min(1, Math.max(0, Number(ai.confidence_score) || 0));\nconst summary       = String(ai.summary || '').slice(0, 200);\n\nconst min_conf = 0.70; // SPEC \u00a76.2 P9: type=unknown if confidence < 0.70\nconst status = confidence >= min_conf\n  ? 'success'\n  : confidence >= min_conf * 0.85\n    ? 'escalate'\n    : 'fail';\n\nconst outcome = {\n  status,\n  confidence,\n  reasoning:    String(ai.summary || ai.reasoning || '').slice(0, 1000),\n  data:         { document_type, summary, requires_human: !!ai.requires_human },\n  requires_human: status === 'fail' || !!ai.requires_human || confidence < min_conf,\n  worker:       'report_parser',\n  tier_used:    'haiku'\n};\n\nconst crypto = require('crypto');\nconst signing_key = $('Vault: Signing Key').first().json.data.data.payload_hmac_key;\nconst canonical = JSON.stringify(outcome, Object.keys(outcome).sort());\nconst signature = crypto.createHmac('sha256', signing_key).update(canonical).digest('hex');\n\nreturn [{\n  json: {\n    ...v,\n    document_type,\n    confidence,\n    summary,\n    requires_human: outcome.requires_human,\n    outcome,\n    outcome_json: JSON.stringify(outcome),\n    outcome_signature: signature,\n    ai_raw: JSON.stringify(item.content || item)\n  }\n}];"
+        }
+      },
+      {
+        "id": "p9-0016-write",
+        "name": "Upsert Attachment + Audit",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          3320,
+          400
+        ],
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "-- B3_UPSERT_v1\n-- email_id is resolved by gmail_message_id lookup; NULL if the email\n-- pipeline hasn't INSERTed the emails row yet (will be back-fillable\n-- via a future cron/trigger).\nWITH resolved_email AS (\n  SELECT id AS email_id FROM emails\n   WHERE gmail_message_id = '{{ $json.gmail_message_id }}'\n   LIMIT 1\n),\nupserted AS (\n  INSERT INTO email_attachments\n    (email_id, event_id, filename, mime_type, extracted_text, processed)\n  VALUES\n    ((SELECT email_id FROM resolved_email),\n     {{ $json.event_id }},\n     '{{ $json.filename.replace(/'/g, \"''\") }}',\n     '{{ $json.mime_type.replace(/'/g, \"''\") }}',\n     $pl${{ $json.extracted_text }}$pl$,\n     true)\n  RETURNING id\n)\nINSERT INTO audit_log\n  (pipeline, event_id, trace_id, action, record_type, record_id,\n   ai_worker, ai_model, ai_raw_output, ai_parsed,\n   pipeline_version, result)\nSELECT 'report_ingestion',\n       {{ $json.event_id }},\n       '{{ $json.trace_id }}'::uuid,\n       'classify_document',\n       'email_attachment',\n       (SELECT id FROM upserted),\n       'report_parser',\n       'claude-haiku-4-5-20251001',\n       $pl${{ $json.ai_raw }}$pl$,\n       $pl${{ $json.outcome_json }}$pl$::jsonb,\n       '1.0',\n       '{{ $json.outcome.status }}'\nRETURNING id AS audit_id;",
+          "options": {}
+        },
+        "credentials": {
+          "postgres": {
+            "id": "iTuuNfsqHY49MGhk",
+            "name": "HomeAI Postgres"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Webhook (report-ingestion)": {
+        "main": [
+          [
+            {
+              "node": "Validate Event",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Validate Event": {
+        "main": [
+          [
+            {
+              "node": "Idempotency Check",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Idempotency Check": {
+        "main": [
+          [
+            {
+              "node": "Already Processed?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Already Processed?": {
+        "main": [
+          [
+            {
+              "node": "Skip \u2014 Already Done",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Vault: Gmail Creds",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Vault: Gmail Creds": {
+        "main": [
+          [
+            {
+              "node": "Vault: Signing Key",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Vault: Signing Key": {
+        "main": [
+          [
+            {
+              "node": "Vault: Anthropic Key",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Vault: Anthropic Key": {
+        "main": [
+          [
+            {
+              "node": "OAuth: Refresh Access Token",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OAuth: Refresh Access Token": {
+        "main": [
+          [
+            {
+              "node": "Gmail: Fetch Attachment",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gmail: Fetch Attachment": {
+        "main": [
+          [
+            {
+              "node": "Decode + Build Form",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Decode + Build Form": {
+        "main": [
+          [
+            {
+              "node": "pdfplumber: extract",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "pdfplumber: extract": {
+        "main": [
+          [
+            {
+              "node": "Sanitise + Build Prompt",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Sanitise + Build Prompt": {
+        "main": [
+          [
+            {
+              "node": "Classify via Haiku",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Classify via Haiku": {
+        "main": [
+          [
+            {
+              "node": "Build OutcomeObject",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build OutcomeObject": {
+        "main": [
+          [
+            {
+              "node": "Upsert Attachment + Audit",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "saveDataErrorExecution": "all",
+      "saveExecutionProgress": true
+    },
+    "staticData": null,
+    "meta": null,
+    "pinData": null,
+    "versionId": "f314654a-f332-4b76-b5f5-fe1eb400ff2a",
+    "activeVersionId": "f314654a-f332-4b76-b5f5-fe1eb400ff2a",
+    "versionCounter": 6,
+    "triggerCount": 1,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-05-08T22:15:14.633Z",
+        "createdAt": "2026-05-08T22:15:14.633Z",
+        "role": "workflow:owner",
+        "workflowId": "report-ingestion-v1",
+        "projectId": "mrS0xwM1mSrSan63",
+        "project": {
+          "updatedAt": "2026-05-01T17:08:53.977Z",
+          "createdAt": "2026-05-01T16:45:56.945Z",
+          "id": "mrS0xwM1mSrSan63",
+          "name": "jolyon sandercock <jolyon.sandercock@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "creatorId": "8e8d0968-3b92-4b54-ad56-ee4b3b72dffc"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]

@@ -1,0 +1,245 @@
+{
+  "id": "invoice-pipeline-v1",
+  "name": "Invoice Pipeline (P2)",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "nodes": [
+    {
+      "id": "p2-0001-webhook",
+      "name": "Webhook (invoice-pipeline)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "invoice-pipeline",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "invoice-pipeline",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "p2-0002-validate",
+      "name": "Validate Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300],
+      "parameters": {
+        "jsCode": "// Master Router POSTs the events row body. Pull payload, verify shape.\n// Pipeline 2 trigger event is `invoice.detected` from gmail-ingest-v1,\n// payload contains: gmail_message_id, email_id, source='email', entity_id.\n// Attachment metadata (filename, mime_type, attachment_id) is NOT in this\n// event — gmail-ingest-v1 emits it separately as document.received. So\n// we look up the most recent unprocessed attachment for this email and\n// process it. If multiple attachments, the workflow will fire once per\n// document.received event via P9; this pipeline targets the *invoice*\n// classification specifically.\nconst raw = $input.first().json;\nconst body = raw.body || raw;\nconst payload = (body.payload && typeof body.payload === 'object')\n  ? body.payload\n  : (typeof body.payload === 'string' ? JSON.parse(body.payload) : {});\n\nconst event_id  = body.id || raw.id;\nconst trace_id  = body.trace_id || raw.trace_id;\nconst gmail_message_id = payload.gmail_message_id;\nconst email_id  = payload.email_id ?? null;\nconst entity_id = payload.entity_id ?? null;\nconst account   = payload.account || 'personal1';\n\nif (!event_id)         throw new Error('missing event id');\nif (!trace_id)         throw new Error('missing trace_id');\nif (!gmail_message_id) throw new Error('payload missing gmail_message_id');\nif (!entity_id)        throw new Error('payload missing entity_id (from email classifier)');\n\nreturn [{ json: { event_id, trace_id, gmail_message_id, email_id, entity_id, account } }];"
+      }
+    },
+    {
+      "id": "p2-0003-find-attach",
+      "name": "Find Attachment",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [620, 300],
+      "credentials": { "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" } },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Look up the first PDF/image attachment for this gmail message via the\n-- document.received events the Poller emits. Filter to types we can extract.\n-- If none found, the next node will throw and the pipeline fails closed.\nSET LOCAL app.current_entity = 'all';\nSELECT payload->>'attachment_id' AS attachment_id,\n       payload->>'filename'      AS filename,\n       payload->>'mime_type'     AS mime_type,\n       (payload->>'size')::int   AS attachment_size\n  FROM events\n WHERE event_type = 'document.received'\n   AND payload->>'gmail_message_id' = '{{ $json.gmail_message_id }}'\n ORDER BY created_at DESC\n LIMIT 1;",
+        "options": {}
+      }
+    },
+    {
+      "id": "p2-0004-merge-meta",
+      "name": "Merge Attachment Meta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [820, 300],
+      "parameters": {
+        "jsCode": "// Combine validate-event context with the attachment metadata; pick the\n// right downstream extractor (pdfplumber for PDFs, MarkItDown for everything\n// else MarkItDown handles — image/Word/HTML/etc).\nconst v = $('Validate Event').first().json;\nconst att = $input.first().json;\nif (!att.attachment_id) {\n  throw new Error(`no document.received event found for ${v.gmail_message_id} — invoice has no attachment to extract`);\n}\nconst mime = String(att.mime_type || '').toLowerCase();\nconst filename = String(att.filename || '').toLowerCase();\nlet extractor_url;\nif (mime === 'application/pdf' || filename.endsWith('.pdf')) {\n  extractor_url = 'http://homeai-pdfplumber:8003/extract-pdf';\n} else {\n  extractor_url = 'http://homeai-markitdown:8004/convert';\n}\nreturn [{ json: { ...v, ...att, extractor_url } }];"
+      }
+    },
+    {
+      "id": "p2-0005-vault-gmail",
+      "name": "Vault: Gmail Creds",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1020, 300],
+      "credentials": { "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" } },
+      "parameters": {
+        "method": "GET",
+        "url": "=http://vault:8200/v1/secret/data/gmail/{{ $('Merge Attachment Meta').first().json.account }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      }
+    },
+    {
+      "id": "p2-0006-vault-signing",
+      "name": "Vault: Signing Key",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1220, 300],
+      "credentials": { "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" } },
+      "parameters": {
+        "method": "GET",
+        "url": "http://vault:8200/v1/secret/data/signing",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      }
+    },
+    {
+      "id": "p2-0007-vault-anthropic",
+      "name": "Vault: Anthropic Key",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1420, 300],
+      "credentials": { "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" } },
+      "parameters": {
+        "method": "GET",
+        "url": "http://vault:8200/v1/secret/data/anthropic",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      }
+    },
+    {
+      "id": "p2-0008-oauth-refresh",
+      "name": "OAuth: Refresh Access Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1620, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://oauth2.googleapis.com/token",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "client_id",     "value": "={{ $('Vault: Gmail Creds').first().json.data.data.client_id }}" },
+            { "name": "client_secret", "value": "={{ $('Vault: Gmail Creds').first().json.data.data.client_secret }}" },
+            { "name": "refresh_token", "value": "={{ $('Vault: Gmail Creds').first().json.data.data.refresh_token }}" },
+            { "name": "grant_type",    "value": "refresh_token" }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      }
+    },
+    {
+      "id": "p2-0009-fetch-attach",
+      "name": "Gmail: Fetch Attachment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1820, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $('Merge Attachment Meta').first().json.gmail_message_id }}/attachments/{{ $('Merge Attachment Meta').first().json.attachment_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $('OAuth: Refresh Access Token').first().json.access_token }}" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      }
+    },
+    {
+      "id": "p2-0010-decode",
+      "name": "Decode + Build Form",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2020, 300],
+      "parameters": {
+        "jsCode": "const att = $input.first().json;\nif (!att.data) throw new Error('Gmail attachment fetch returned no data');\nconst b64 = att.data.replace(/-/g, '+').replace(/_/g, '/');\nconst pad = b64.length % 4;\nconst b64padded = pad ? b64 + '='.repeat(4 - pad) : b64;\nconst buffer = Buffer.from(b64padded, 'base64');\nif (buffer.length > 25 * 1024 * 1024) {\n  throw new Error(`attachment too large: ${buffer.length} bytes`);\n}\nconst v = $('Merge Attachment Meta').first().json;\nreturn [{\n  json: { ...v, attachment_size: buffer.length },\n  binary: { file: { data: buffer.toString('base64'), fileName: v.filename, mimeType: v.mime_type } }\n}];"
+      }
+    },
+    {
+      "id": "p2-0011-extract",
+      "name": "Extract Text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2220, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Merge Attachment Meta').first().json.extractor_url }}",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            { "parameterType": "formBinaryData", "name": "file", "inputDataFieldName": "file" }
+          ]
+        },
+        "options": { "timeout": 60000 }
+      }
+    },
+    {
+      "id": "p2-0012-prompt",
+      "name": "Build Extractor Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2420, 300],
+      "parameters": {
+        "jsCode": "// pdfplumber returns {text, content_hash}, MarkItDown returns the same.\n// Sanitise + cap to keep prompt + cost in line.\nconst out = $input.first().json;\nlet text = String(out.text || '').replace(/[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]/g, '').slice(0, 8000);\nconst v = $('Decode + Build Form').first().json;\nreturn [{ json: { ...v, extracted_text: text, content_hash: out.content_hash || null } }];"
+      }
+    },
+    {
+      "id": "p2-0013-classify",
+      "name": "Extract via Haiku",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2620, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 512, system: \"You are extracting structured data from invoice text for accounting purposes.\\nThe text has been pre-sanitised. Extract only what is explicitly stated.\\nDo NOT infer or calculate. Return null for any missing field.\\nFinancial amounts must be numbers (not strings). Dates must be YYYY-MM-DD.\\nReturn ONLY valid JSON. No markdown.\\nSchema: {\\n  \\\"supplier_name\\\":  string,\\n  \\\"invoice_number\\\": string,\\n  \\\"invoice_date\\\":   string (YYYY-MM-DD or null),\\n  \\\"due_date\\\":       string (YYYY-MM-DD or null),\\n  \\\"gross_amount\\\":   number,\\n  \\\"net_amount\\\":     number or null,\\n  \\\"vat_amount\\\":     number or null,\\n  \\\"currency\\\":       string (default 'GBP'),\\n  \\\"category\\\":       string (e.g. stock, utilities, services, other),\\n  \\\"confidence_score\\\": number (0-1),\\n  \\\"requires_human\\\": boolean,\\n  \\\"reasoning\\\":      string (max 200 chars)\\n}\", messages: [{ role: 'user', content: 'Filename: ' + $json.filename + '\\n\\n' + $json.extracted_text }] }) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $('Vault: Anthropic Key').first().json.data.data.api_key }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      }
+    },
+    {
+      "id": "p2-0014-outcome",
+      "name": "Build OutcomeObject + Idem Key",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2820, 300],
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst v = $('Build Extractor Prompt').first().json;\n\nlet ai;\ntry {\n  const text = item.content?.[0]?.text || '{}';\n  ai = JSON.parse(text);\n} catch (e) {\n  ai = { supplier_name: null, invoice_number: null, invoice_date: null,\n         due_date: null, gross_amount: 0, net_amount: null, vat_amount: null,\n         currency: 'GBP', category: 'other', confidence_score: 0,\n         requires_human: true, reasoning: 'parse error' };\n}\n\n// Coerce + bound\nconst gross = Number(ai.gross_amount) || 0;\nconst net   = ai.net_amount   == null ? null : Number(ai.net_amount);\nconst vat   = ai.vat_amount   == null ? null : Number(ai.vat_amount);\nconst confidence = Math.min(1, Math.max(0, Number(ai.confidence_score) || 0));\nconst supplier = String(ai.supplier_name || '').slice(0, 200).trim();\nconst invoice_date = (ai.invoice_date && /^\\d{4}-\\d{2}-\\d{2}$/.test(ai.invoice_date)) ? ai.invoice_date : null;\nconst due_date     = (ai.due_date     && /^\\d{4}-\\d{2}-\\d{2}$/.test(ai.due_date))     ? ai.due_date     : null;\n\nconst min_conf = 0.85;  // SPEC §6.2 P2 default — adjust per ai.thresholds.invoice_extractor\nconst status = confidence >= min_conf\n  ? 'success'\n  : confidence >= min_conf * 0.85\n    ? 'escalate'\n    : 'fail';\n\nconst outcome = {\n  status,\n  confidence,\n  reasoning: String(ai.reasoning || '').slice(0, 1000),\n  data: { supplier_name: supplier, invoice_number: ai.invoice_number || null,\n          invoice_date, due_date, gross_amount: gross, net_amount: net,\n          vat_amount: vat, currency: ai.currency || 'GBP',\n          category: ai.category || 'other' },\n  requires_human: status === 'fail' || !!ai.requires_human || !supplier || !invoice_date || !gross,\n  worker: 'invoice_extractor',\n  tier_used: 'haiku'\n};\n\n// Idempotency per the rewritten SPEC §6.2 P2:\n// invoice_{sha256(supplier_name+gross_amount+invoice_date+entity_id)}\nconst crypto = require('crypto');\nconst keyRaw = `${supplier}|${gross.toFixed(2)}|${invoice_date || ''}|${v.entity_id}`;\nconst keyHash = crypto.createHash('sha256').update(keyRaw).digest('hex');\nconst idem_key = 'invoice_' + keyHash;\n\n// Sign the invoice.extracted/unmatched payload\nconst signing_key = $('Vault: Signing Key').first().json.data.data.payload_hmac_key;\nconst eventPayload = {\n  invoice_idempotency_key: idem_key,\n  supplier_name: supplier,\n  invoice_number: ai.invoice_number || null,\n  invoice_date,\n  gross_amount: gross,\n  entity_id: v.entity_id,\n  email_id: v.email_id,\n  gmail_message_id: v.gmail_message_id,\n  filename: v.filename\n};\nconst canonical = JSON.stringify(eventPayload, Object.keys(eventPayload).sort());\nconst signature = crypto.createHmac('sha256', signing_key).update(canonical).digest('hex');\n\n// Pipeline 2 emits invoice.extracted on success, invoice.unmatched on\n// requires_human (Phase 1 — Xero match step is stubbed, emit unmatched\n// for everything until P3 exists).\nconst out_event_type = outcome.requires_human ? 'invoice.unmatched' : 'invoice.unmatched';\n// ^ keep both branches as 'invoice.unmatched' for now — when P3 (Xero) is\n//   added, success path becomes 'invoice.extracted' once a match succeeds.\n\nreturn [{\n  json: {\n    ...v,\n    outcome,\n    outcome_json: JSON.stringify(outcome),\n    idempotency_key: idem_key,\n    supplier_name: supplier,\n    invoice_number: ai.invoice_number || null,\n    invoice_date,\n    due_date,\n    gross_amount: gross,\n    net_amount: net,\n    vat_amount: vat,\n    currency: ai.currency || 'GBP',\n    category: ai.category || 'other',\n    confidence,\n    requires_human: outcome.requires_human,\n    out_event_type,\n    out_event_payload_json: JSON.stringify(eventPayload),\n    out_event_signature: signature,\n    out_event_idem_key: 'invoice_event_' + keyHash,\n    ai_raw: JSON.stringify(item.content || item)\n  }\n}];"
+      }
+    },
+    {
+      "id": "p2-0015-write",
+      "name": "Write Invoice + History + Event + Audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [3020, 300],
+      "credentials": { "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" } },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT set_config('app.current_entity', '{{ $json.entity_id }}', true);\n\nWITH new_inv AS (\n  INSERT INTO invoices\n    (idempotency_key, event_id, trace_id, entity_id, source,\n     supplier_name, invoice_number, invoice_date, due_date,\n     gross_amount, net_amount, vat_amount, currency, category,\n     status, confidence_score, requires_human)\n  VALUES\n    ('{{ $json.idempotency_key }}',\n     {{ $json.event_id }},\n     '{{ $json.trace_id }}'::uuid,\n     {{ $json.entity_id }},\n     'email_ocr',\n     $pl${{ $json.supplier_name }}$pl$,\n     $pl${{ $json.invoice_number }}$pl$,\n     {{ $json.invoice_date ? `'${$json.invoice_date}'::date` : 'NULL' }},\n     {{ $json.due_date     ? `'${$json.due_date}'::date`     : 'NULL' }},\n     {{ $json.gross_amount }},\n     {{ $json.net_amount ?? 'NULL' }},\n     {{ $json.vat_amount ?? 'NULL' }},\n     '{{ $json.currency }}',\n     '{{ $json.category }}',\n     'pending',\n     {{ $json.confidence }},\n     {{ $json.requires_human }})\n  ON CONFLICT (idempotency_key) DO NOTHING\n  RETURNING id\n),\nhist AS (\n  INSERT INTO supplier_invoice_history\n    (entity_id, supplier_name, invoice_month, avg_gross, min_gross, max_gross, invoice_count)\n  SELECT {{ $json.entity_id }},\n         $pl${{ $json.supplier_name }}$pl$,\n         {{ $json.invoice_date ? `date_trunc('month','${$json.invoice_date}'::date)::date` : 'NULL' }},\n         {{ $json.gross_amount }}, {{ $json.gross_amount }}, {{ $json.gross_amount }}, 1\n   WHERE EXISTS (SELECT 1 FROM new_inv) AND $pl${{ $json.supplier_name }}$pl$ <> ''\n     AND {{ $json.invoice_date ? 'TRUE' : 'FALSE' }}\n  ON CONFLICT (entity_id, supplier_name, invoice_month) DO UPDATE\n    SET avg_gross    = (supplier_invoice_history.avg_gross * supplier_invoice_history.invoice_count + EXCLUDED.avg_gross) / (supplier_invoice_history.invoice_count + 1),\n        min_gross    = LEAST(supplier_invoice_history.min_gross, EXCLUDED.min_gross),\n        max_gross    = GREATEST(supplier_invoice_history.max_gross, EXCLUDED.max_gross),\n        invoice_count = supplier_invoice_history.invoice_count + 1,\n        updated_at   = NOW()\n  RETURNING id\n),\nnew_event AS (\n  INSERT INTO events\n    (event_type, source, entity_id, payload, payload_signature,\n     status, idempotency_key, pipeline_version, parent_event_id, trace_id)\n  SELECT '{{ $json.out_event_type }}',\n         'invoice_pipeline',\n         {{ $json.entity_id }},\n         $pl${{ $json.out_event_payload_json }}$pl$::jsonb,\n         '{{ $json.out_event_signature }}',\n         'done',\n         '{{ $json.out_event_idem_key }}',\n         '1.0',\n         {{ $json.event_id }},\n         '{{ $json.trace_id }}'::uuid\n   WHERE NOT EXISTS (\n     SELECT 1 FROM events WHERE idempotency_key = '{{ $json.out_event_idem_key }}'\n   )\n  RETURNING id, trace_id\n),\naudit AS (\n  INSERT INTO audit_log\n    (pipeline, event_id, trace_id, action, entity_id, record_type, record_id,\n     ai_worker, ai_model, ai_raw_output, ai_parsed,\n     pipeline_version, result)\n  SELECT 'invoice_pipeline',\n         {{ $json.event_id }},\n         '{{ $json.trace_id }}'::uuid,\n         'extract_invoice',\n         {{ $json.entity_id }},\n         'invoice',\n         (SELECT id FROM new_inv),\n         'invoice_extractor',\n         'claude-haiku-4-5-20251001',\n         $pl${{ $json.ai_raw }}$pl$,\n         $pl${{ $json.outcome_json }}$pl$::jsonb,\n         '1.0',\n         '{{ $json.outcome.status }}'\n  RETURNING id AS audit_id\n)\nSELECT (SELECT id FROM new_inv)   AS invoice_id,\n       (SELECT id FROM new_event) AS event_id,\n       (SELECT id FROM audit)     AS audit_id,\n       '{{ $json.idempotency_key }}' AS idem_key;",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (invoice-pipeline)":   { "main": [[{ "node": "Validate Event", "type": "main", "index": 0 }]] },
+    "Validate Event":               { "main": [[{ "node": "Find Attachment", "type": "main", "index": 0 }]] },
+    "Find Attachment":              { "main": [[{ "node": "Merge Attachment Meta", "type": "main", "index": 0 }]] },
+    "Merge Attachment Meta":        { "main": [[{ "node": "Vault: Gmail Creds", "type": "main", "index": 0 }]] },
+    "Vault: Gmail Creds":           { "main": [[{ "node": "Vault: Signing Key", "type": "main", "index": 0 }]] },
+    "Vault: Signing Key":           { "main": [[{ "node": "Vault: Anthropic Key", "type": "main", "index": 0 }]] },
+    "Vault: Anthropic Key":         { "main": [[{ "node": "OAuth: Refresh Access Token", "type": "main", "index": 0 }]] },
+    "OAuth: Refresh Access Token":  { "main": [[{ "node": "Gmail: Fetch Attachment", "type": "main", "index": 0 }]] },
+    "Gmail: Fetch Attachment":      { "main": [[{ "node": "Decode + Build Form", "type": "main", "index": 0 }]] },
+    "Decode + Build Form":          { "main": [[{ "node": "Extract Text", "type": "main", "index": 0 }]] },
+    "Extract Text":                 { "main": [[{ "node": "Build Extractor Prompt", "type": "main", "index": 0 }]] },
+    "Build Extractor Prompt":       { "main": [[{ "node": "Extract via Haiku", "type": "main", "index": 0 }]] },
+    "Extract via Haiku":            { "main": [[{ "node": "Build OutcomeObject + Idem Key", "type": "main", "index": 0 }]] },
+    "Build OutcomeObject + Idem Key": { "main": [[{ "node": "Write Invoice + History + Event + Audit", "type": "main", "index": 0 }]] }
+  }
+}

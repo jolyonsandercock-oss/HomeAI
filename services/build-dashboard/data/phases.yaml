@@ -1,0 +1,42 @@
+# Phase definitions for the Master Progress bar (top-tier of the dashboard).
+# The dashboard reads this and renders one segment per phase, coloured by
+# state (emerald=done, amber=in-progress, slate=backlog, rose=blocked).
+#
+# Each phase has a list of `gates` — discrete deliverables. The phase's
+# completion percentage is computed as: gates done / gates total.
+# Status is derived: 100% = done, >0% = in_progress, 0% with blockers = blocked,
+# 0% otherwise = backlog.
+
+phases:
+  - id: 1
+    name: Foundation
+    description: Platform + ingestion + observability + Phase-1 pipelines
+    gates:
+      - { id: platform,      name: Platform foundation,           status: done }
+      - { id: vertical_b,    name: Vertical slice (Gate B),       status: done }
+      - { id: pipelines,     name: Pipelines 1-11,                status: in_progress, note: "P3/P5/P6/P7 user-blocked → U11" }
+      - { id: operability,   name: Operability + monitoring,      status: done }
+      - { id: backup_dr,     name: Backup + DR,                   status: in_progress, note: "NAS mount pending → U11" }
+      - { id: identity,      name: Multi-account Google identity, status: done, note: "U9 + U10-bis" }
+
+  - id: 2
+    name: Orchestration
+    description: Intelligence layer, sovereignty, hardening, secure access
+    gates:
+      - { id: hot_tier,      name: Hot-tier model + benchmarks,   status: done, note: "qwen2.5:7b 95.7% composite" }
+      - { id: dreaming,      name: Dreaming workflow H,           status: done }
+      - { id: hardening,     name: Vault auto-unseal + image pinning, status: backlog }
+      - { id: hooks,         name: PreToolUse hooks installed,    status: backlog }
+      - { id: authelia,      name: Authelia SSO bootstrap,        status: backlog, note: "scaffolded only" }
+      - { id: ci_autofix,    name: CI Auto-Fix (GitHub Actions),  status: blocked, blocker: "private repo not yet created" }
+
+  - id: 3
+    name: Autonomy
+    description: AI-driven operations, content generation, self-healing
+    gates:
+      - { id: calendar,      name: Calendar pipelines (digest enrichment), status: backlog }
+      - { id: drive,         name: Drive integration (invoice file storage), status: backlog }
+      - { id: sheets,        name: Sheets integration (cashing-up + dashboards), status: backlog }
+      - { id: lora,          name: LoRA fine-tune (golden records → adapter), status: backlog }
+      - { id: storyblok,     name: Storyblok pub website CMS,     status: backlog }
+      - { id: searxng,       name: SearXNG self-hosted research,  status: backlog }

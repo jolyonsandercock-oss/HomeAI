@@ -1,0 +1,49 @@
+{
+  "id": "gmail-poll-driver-v1",
+  "name": "Gmail Poll Driver",
+  "active": true,
+  "nodes": [
+    {
+      "id": "trig",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "minutes", "minutesInterval": 15 }] }
+      }
+    },
+    {
+      "id": "poll",
+      "name": "POST poll-and-emit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "parameters": {
+        "url": "http://google-fetch:8011/poll-and-emit",
+        "method": "POST",
+        "options": { "timeout": 300000 }
+      }
+    },
+    {
+      "id": "audit",
+      "name": "Audit Log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [720, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (pipeline, action, ai_worker, ai_parsed, result, provider) VALUES ('gmail-poll-driver', 'multi_account_poll', 'gmail-poll-driver', $pl${{ JSON.stringify($json) }}$pl$::jsonb, 'success', 'local') RETURNING id;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule":           { "main": [[{ "node": "POST poll-and-emit", "type": "main", "index": 0 }]] },
+    "POST poll-and-emit": { "main": [[{ "node": "Audit Log",          "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

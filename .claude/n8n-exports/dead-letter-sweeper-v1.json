@@ -1,0 +1,99 @@
+{
+  "id": "dead-letter-sweeper-v1",
+  "name": "Dead Letter Sweeper",
+  "active": true,
+  "nodes": [
+    {
+      "id": "trig",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 * * * *" }] }
+      }
+    },
+    {
+      "id": "sweep",
+      "name": "Sweep false positives",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [440, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH candidates AS (SELECT dl.id AS dl_id, dl.event_id, e.event_type, e.payload FROM dead_letter dl JOIN events e ON e.id = dl.event_id WHERE dl.resolved = false AND dl.pipeline = 'stale_lease_recovery' AND dl.created_at < NOW() - INTERVAL '5 minutes'), classified AS (SELECT c.dl_id, c.event_id, c.event_type, CASE WHEN c.event_type = 'email.received' AND EXISTS (SELECT 1 FROM emails em WHERE em.gmail_message_id = c.payload->>'gmail_message_id') THEN 'recovered_email' WHEN c.event_type = 'invoice.detected' AND EXISTS (SELECT 1 FROM invoices iv WHERE iv.event_id = c.event_id) THEN 'recovered_invoice' WHEN c.event_type = 'accommodation.report.detected' AND EXISTS (SELECT 1 FROM accommodation_daily ad WHERE ad.email_id = (c.payload->>'email_id')::bigint OR ad.source_event_id = c.event_id) THEN 'recovered_accom' WHEN c.event_type = 'epos.report.detected' AND EXISTS (SELECT 1 FROM epos_daily ed WHERE ed.email_id = (c.payload->>'email_id')::bigint OR ed.source_event_id = c.event_id) THEN 'recovered_epos' ELSE NULL END AS verdict FROM candidates c), updated AS (UPDATE dead_letter dl SET resolved = true, resolved_at = NOW(), resolution_notes = 'auto-swept by dead-letter-sweeper-v1: downstream data present (' || cl.verdict || ')' FROM classified cl WHERE dl.id = cl.dl_id AND cl.verdict IS NOT NULL RETURNING dl.id, dl.event_id), event_fix AS (UPDATE events e SET status = 'processed', processed_at = COALESCE(e.processed_at, NOW()) FROM updated u WHERE e.id = u.event_id AND e.status = 'failed' RETURNING e.id), audit_write AS (INSERT INTO audit_log (pipeline, event_id, action, ai_parsed, result) SELECT 'dead-letter-sweeper-v1', u.event_id, 'auto_resolved_dead_letter', jsonb_build_object('reason', 'downstream_data_present'), 'success' FROM updated u RETURNING 1) SELECT (SELECT COUNT(*) FROM updated) AS swept_count, (SELECT COUNT(*) FROM event_fix) AS event_status_fixed;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      }
+    },
+    {
+      "id": "alert",
+      "name": "Notify if swept",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [680, 300],
+      "parameters": {
+        "looseTypeValidation": true,
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            { "id": "c1",
+              "operator": { "type": "number", "operation": "gt" },
+              "leftValue": "={{ Number($json.swept_count) }}",
+              "rightValue": "0" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "vault",
+      "name": "Vault",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 220],
+      "parameters": {
+        "url": "http://vault:8200/v1/secret/data/telegram",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" }
+      }
+    },
+    {
+      "id": "send",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, 220],
+      "parameters": {
+        "url": "={{ 'https://api.telegram.org/bot' + $json.data.data.bot_token + '/sendMessage' }}",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "chat_id", "value": "={{ $json.data.data.chat_id }}" },
+            { "name": "text",    "value": "={{ '🧹 Dead-letter sweeper auto-resolved ' + ($('Sweep false positives').first().json.swept_count || 0) + ' false positive(s) — downstream data was already present. Event status fixed: ' + ($('Sweep false positives').first().json.event_status_fixed || 0) }}" },
+            { "name": "parse_mode", "value": "HTML" }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Schedule":              { "main": [[{ "node": "Sweep false positives", "type": "main", "index": 0 }]] },
+    "Sweep false positives": { "main": [[{ "node": "Notify if swept",     "type": "main", "index": 0 }]] },
+    "Notify if swept":       { "main": [
+      [{ "node": "Vault", "type": "main", "index": 0 }],
+      []
+    ]},
+    "Vault":                 { "main": [[{ "node": "Send Telegram",       "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

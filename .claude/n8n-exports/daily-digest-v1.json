@@ -1,0 +1,96 @@
+{
+  "id": "daily-digest-v1",
+  "name": "Daily Digest (P10)",
+  "active": true,
+  "nodes": [
+    {
+      "id": "tr-schedule",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "* * * * *" }] }
+      }
+    },
+    {
+      "id": "build-mode",
+      "name": "Build Mode",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const hourUTC = new Date().getUTCHours();\nconst label = (hourUTC >= 4 && hourUTC <= 6) ? 'morning'\n            : (hourUTC >= 21 && hourUTC <= 23) ? 'evening'\n            : 'manual';\nconst now = new Date();\nconst dayName = now.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });\nreturn [{ json: { mode: label, day: dayName } }];"
+      }
+    },
+    {
+      "id": "fetch-data",
+      "name": "Fetch Data",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [680, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH a AS (SELECT COUNT(*) FILTER (WHERE result='success') AS success, COUNT(*) FILTER (WHERE result='failure') AS failure, COUNT(*) FILTER (WHERE result='escalated') AS escalated, COUNT(*) FILTER (WHERE provider='local') AS local_calls, COUNT(*) FILTER (WHERE provider='anthropic') AS cloud_calls FROM audit_log WHERE created_at > NOW() - INTERVAL '24 hours'), e AS (SELECT COUNT(*) FILTER (WHERE status='processed') AS processed, COUNT(*) FILTER (WHERE status='failed') AS failed, COUNT(*) FILTER (WHERE status IN ('pending','processing')) AS in_flight FROM events WHERE created_at > NOW() - INTERVAL '24 hours'), al AS (SELECT COUNT(*) AS firing FROM system_alerts WHERE status='firing' AND acknowledged=FALSE), dl AS (SELECT COUNT(*) AS open FROM dead_letter WHERE resolved=FALSE), inv AS (SELECT COUNT(*) FILTER (WHERE status='needs_review' OR requires_human=TRUE) AS needs_review, COUNT(*) FILTER (WHERE status='matched') AS matched FROM invoices WHERE created_at > NOW() - INTERVAL '24 hours'), em AS (SELECT COUNT(*) AS classified_24h FROM emails WHERE received_at > NOW() - INTERVAL '24 hours'), s AS (SELECT COALESCE(SUM(cost_gbp),0)::numeric(10,4) AS gbp FROM model_usage_history WHERE provider='anthropic' AND ts >= date_trunc('month', NOW())) SELECT a.success AS audit_success, a.failure AS audit_failure, a.escalated AS audit_escalated, CASE WHEN (a.local_calls + a.cloud_calls) > 0 THEN ROUND(100.0 * a.local_calls / (a.local_calls + a.cloud_calls), 1) ELSE NULL END AS sovereignty_pct, a.local_calls, a.cloud_calls, e.processed AS events_processed, e.failed AS events_failed, e.in_flight AS events_in_flight, al.firing AS alerts_firing, dl.open AS dead_letters_open, inv.needs_review AS invoices_needs_review, inv.matched AS invoices_matched, em.classified_24h AS emails_24h, s.gbp AS mtd_spend_gbp FROM a, e, al, dl, inv, em, s;",
+        "options": {}
+      },
+      "credentials": { "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" } }
+    },
+    {
+      "id": "vault-tg",
+      "name": "Vault",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300],
+      "parameters": {
+        "url": "http://vault:8200/v1/secret/data/telegram",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "credentials": { "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" } }
+    },
+    {
+      "id": "format-msg",
+      "name": "Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const d = $('Fetch Data').first().json;\nconst m = $('Build Mode').first().json;\nconst tg = $input.first().json.data.data;\nconst label = m.mode === 'morning' ? 'Morning Brief' : m.mode === 'evening' ? 'Nightly Close' : 'Test Fire';\nconst sov = d.sovereignty_pct == null ? 'no AI calls' : `${d.sovereignty_pct}% local (${d.local_calls}/${d.local_calls + d.cloud_calls})`;\nconst lines = [\n  `<b>Home AI - ${label} - ${m.day}</b>`,\n  '',\n  '<b>Last 24h</b>',\n  `* ${d.audit_success}OK / ${d.audit_failure}FAIL / ${d.audit_escalated}ESC AI calls`,\n  `* ${d.events_processed} events processed, ${d.events_failed} failed, ${d.events_in_flight} in flight`,\n  `* ${d.alerts_firing} firing alerts, ${d.dead_letters_open} open dead letters`,\n  `* ${d.emails_24h} emails classified, ${d.invoices_needs_review} invoices need review`,\n  '',\n  '<b>Sovereignty &amp; spend</b>',\n  `* ${sov}`,\n  `* MTD cloud spend GBP ${Number(d.mtd_spend_gbp).toFixed(2)}`,\n];\nconst healthy = Number(d.audit_failure)===0 && Number(d.alerts_firing)===0 && Number(d.dead_letters_open)===0;\nlines.push('');\nlines.push(healthy ? '<i>System healthy</i>' : '<i>Items need attention</i>');\nreturn [{ json: { chat_id: tg.chat_id, bot_token: tg.bot_token, text: lines.join('\\n') } }];"
+      }
+    },
+    {
+      "id": "send-tg",
+      "name": "Send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 300],
+      "parameters": {
+        "url": "={{ 'https://api.telegram.org/bot' + $json.bot_token + '/sendMessage' }}",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "chat_id", "value": "={{ $json.chat_id }}" },
+            { "name": "text", "value": "={{ $json.text }}" },
+            { "name": "parse_mode", "value": "HTML" },
+            { "name": "disable_web_page_preview", "value": "true" }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Schedule":   { "main": [[{ "node": "Build Mode", "type": "main", "index": 0 }]] },
+    "Build Mode": { "main": [[{ "node": "Fetch Data", "type": "main", "index": 0 }]] },
+    "Fetch Data": { "main": [[{ "node": "Vault",      "type": "main", "index": 0 }]] },
+    "Vault":      { "main": [[{ "node": "Format",     "type": "main", "index": 0 }]] },
+    "Format":     { "main": [[{ "node": "Send",       "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

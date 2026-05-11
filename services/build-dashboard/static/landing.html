@@ -1,0 +1,31 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Home AI</title>
+<style>
+:root{color-scheme:dark}
+body{background:radial-gradient(ellipse at top,#0f172a,#020617 60%);color:#e2e8f0;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;margin:0;padding:3rem 1.5rem}
+.wrap{max-width:46rem;margin:0 auto}
+h1{font-size:1.6rem;margin:0 0 .5rem 0}
+.sub{color:#94a3b8;font-size:.85rem;margin-bottom:2rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:.75rem}
+.card{background:rgba(15,23,42,.7);border:1px solid rgba(148,163,184,.15);border-radius:.75rem;padding:1rem;text-decoration:none;color:inherit;transition:border-color .2s,transform .2s;display:block}
+.card:hover{border-color:rgba(56,189,248,.5);transform:translateY(-2px)}
+.card .ttl{font-weight:600;font-size:1rem}
+.card .desc{color:#94a3b8;font-size:.8rem;margin-top:.25rem;line-height:1.4}
+.tag{display:inline-block;font-size:.65rem;padding:.1rem .4rem;border-radius:.25rem;margin-left:.5rem;vertical-align:middle}
+.tag-ui{background:rgba(56,189,248,.15);color:#7dd3fc}
+.tag-svc{background:rgba(192,132,252,.15);color:#c084fc}
+footer{margin-top:3rem;color:#475569;font-size:.7rem;text-align:center}
+</style></head><body><div class="wrap">
+<h1>Home AI</h1>
+<div class="sub">Atlantic Road Trading · The Olde Malthouse · Tintagel</div>
+<div class="grid">
+<a class="card" href="/dashboard/"><div class="ttl">Build Dashboard<span class="tag tag-ui">UI</span></div><div class="desc">Phase progress, debt, recent activity, hardware, sovereignty.</div></a>
+<a class="card" href="/pub"><div class="ttl">Pub Live Ops<span class="tag tag-ui">UI</span></div><div class="desc">Today's EPoS, occupancy, bookings, channel mix.</div></a>
+<a class="card" href="/forensics"><div class="ttl">Forensics<span class="tag tag-ui">UI</span></div><div class="desc">Dead-letter triage with downstream verdict + resolve.</div></a>
+<a class="card" href="/playground"><div class="ttl">Playground<span class="tag tag-ui">UI</span></div><div class="desc">Test the email classifier on arbitrary input.</div></a>
+<a class="card" href="/search/"><div class="ttl">Search<span class="tag tag-svc">SearXNG</span></div><div class="desc">Private meta-search (HTML + JSON).</div></a>
+<a class="card" href="http://100.104.82.53:3000"><div class="ttl">Metabase<span class="tag tag-svc">BI</span></div><div class="desc">Reports + ad-hoc SQL.</div></a>
+<a class="card" href="http://100.104.82.53:5678"><div class="ttl">n8n<span class="tag tag-svc">flows</span></div><div class="desc">Workflow editor.</div></a>
+<a class="card" href="http://100.104.82.53:8080"><div class="ttl">Open WebUI<span class="tag tag-svc">chat</span></div><div class="desc">Local LLM chat (Ollama).</div></a>
+</div>
+<footer>Tailscale-only · all internal services</footer>
+</div></body></html>

@@ -1,0 +1,104 @@
+{
+  "id": "caterbook-pipeline-v1",
+  "name": "P6 Caterbook Pipeline",
+  "active": true,
+  "nodes": [
+    {
+      "id": "trig",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "*/15 * * * *" }] }
+      }
+    },
+    {
+      "id": "find-emails",
+      "name": "Find unprocessed Caterbook emails",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [480, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SET app.current_entity = 'all'; SELECT e.id AS email_id, e.gmail_message_id, e.from_address, e.subject, e.body_text, e.received_at FROM emails e WHERE e.from_address ILIKE '%@caterbook.%' AND e.received_at > NOW() - INTERVAL '7 days' AND NOT EXISTS (SELECT 1 FROM accommodation_daily ad WHERE ad.email_id = e.id) ORDER BY e.received_at DESC LIMIT 50;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      }
+    },
+    {
+      "id": "parse",
+      "name": "Parse Accommodation Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Caterbook report format (from benchmark fixtures):\n//   Caterbook Daily Report 2026-05-08\n//   Occupancy 78%\n//   Rooms occupied: 7 of 9\n//   ADR £92.50\n//   RevPAR £72.15\n//   Room revenue £647.50\n\nconst body = ($json.body_text || '').replace(/\\r/g, '');\n\nfunction money(label) {\n  const re = new RegExp(label + '\\\\s*[:\\\\s]?\\\\s*\\u00a3?\\\\s*([\\\\d,]+(?:\\\\.\\\\d{1,2})?)', 'i');\n  const m = body.match(re);\n  return m ? parseFloat(m[1].replace(/,/g, '')) : null;\n}\n\nlet reportDate = null;\n// ISO format first\nconst iso = body.match(/(\\d{4}-\\d{2}-\\d{2})/);\nif (iso) reportDate = iso[1];\nelse {\n  // UK format\n  const uk = body.match(/(\\d{1,2})[\\/\\-](\\d{1,2})[\\/\\-](\\d{4})/);\n  if (uk) reportDate = `${uk[3]}-${uk[2].padStart(2,'0')}-${uk[1].padStart(2,'0')}`;\n}\n\nconst occMatch  = body.match(/Occupancy\\s*[:\\s]?\\s*(\\d+(?:\\.\\d+)?)\\s*%/i);\nconst occupancy = occMatch ? parseFloat(occMatch[1]) : null;\n\nconst roomMatch = body.match(/(\\d+)\\s*(?:of|\\/)\\s*(\\d+)/i) || body.match(/Rooms?\\s*occupied[:\\s]+(\\d+)\\s*(?:of|\\/)\\s*(\\d+)/i);\nlet roomsOccupied = null, totalRooms = null;\nif (roomMatch) { roomsOccupied = parseInt(roomMatch[1], 10); totalRooms = parseInt(roomMatch[2], 10); }\n\nconst adr     = money('ADR');\nconst revpar  = money('RevPAR');\nconst revenue = money('Room\\\\s+revenue');\n\nconst parseable = !!(reportDate && occupancy !== null);\n\nreturn { json: {\n  email_id:       $json.email_id,\n  report_date:    reportDate,\n  occupancy_pct:  occupancy,\n  rooms_occupied: roomsOccupied,\n  total_rooms:    totalRooms,\n  adr:            adr,\n  revpar:         revpar,\n  room_revenue:   revenue,\n  raw_text:       body.substring(0, 2000),\n  parseable:      parseable,\n  from_address:   $json.from_address,\n  subject:        $json.subject,\n} };"
+      }
+    },
+    {
+      "id": "filter-parseable",
+      "name": "Parseable?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [960, 300],
+      "parameters": {
+        "looseTypeValidation": true,
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            { "id": "p1",
+              "operator": { "type": "boolean", "operation": "true" },
+              "leftValue": "={{ $json.parseable }}",
+              "rightValue": "" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "insert",
+      "name": "Insert accommodation_daily",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1200, 240],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SET app.current_entity = '1'; INSERT INTO accommodation_daily (entity_id, report_date, occupancy_pct, rooms_occupied, total_rooms, adr, revpar, room_revenue, email_id, raw_text) VALUES (1, '{{ $json.report_date }}', {{ $json.occupancy_pct ?? 'NULL' }}, {{ $json.rooms_occupied ?? 'NULL' }}, {{ $json.total_rooms ?? 'NULL' }}, {{ $json.adr ?? 'NULL' }}, {{ $json.revpar ?? 'NULL' }}, {{ $json.room_revenue ?? 'NULL' }}, {{ $json.email_id }}, $pl${{ $json.raw_text }}$pl$) ON CONFLICT (entity_id, report_date) DO UPDATE SET occupancy_pct = EXCLUDED.occupancy_pct, rooms_occupied = EXCLUDED.rooms_occupied, total_rooms = EXCLUDED.total_rooms, adr = EXCLUDED.adr, revpar = EXCLUDED.revpar, room_revenue = EXCLUDED.room_revenue, email_id = EXCLUDED.email_id, raw_text = EXCLUDED.raw_text RETURNING id; INSERT INTO audit_log (pipeline, action, ai_worker, ai_parsed, result, provider) VALUES ('p6-caterbook', 'parsed_accommodation_report', 'caterbook_parser', $pl${{ JSON.stringify({email_id: $json.email_id, report_date: $json.report_date, occupancy_pct: $json.occupancy_pct, rooms_occupied: $json.rooms_occupied}) }}$pl$::jsonb, 'success', 'local') RETURNING id;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      }
+    },
+    {
+      "id": "log-skip",
+      "name": "Log unparseable",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1200, 380],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (pipeline, action, ai_worker, ai_parsed, result, provider) VALUES ('p6-caterbook', 'unparseable', 'caterbook_parser', $pl${{ JSON.stringify({email_id: $json.email_id, from_address: $json.from_address, subject: $json.subject, raw_preview: ($json.raw_text || '').substring(0, 200)}) }}$pl$::jsonb, 'failure', 'local') RETURNING id;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule":                              { "main": [[{ "node": "Find unprocessed Caterbook emails", "type": "main", "index": 0 }]] },
+    "Find unprocessed Caterbook emails":     { "main": [[{ "node": "Parse Accommodation Report", "type": "main", "index": 0 }]] },
+    "Parse Accommodation Report":            { "main": [[{ "node": "Parseable?", "type": "main", "index": 0 }]] },
+    "Parseable?":                            { "main": [
+      [{ "node": "Insert accommodation_daily", "type": "main", "index": 0 }],
+      [{ "node": "Log unparseable",   "type": "main", "index": 0 }]
+    ]}
+  },
+  "settings": { "executionOrder": "v1" }
+}

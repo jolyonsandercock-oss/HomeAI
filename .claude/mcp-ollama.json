@@ -1,0 +1,54 @@
+{
+  "_comment_top": "MCP server config for exposing the local Ollama instance as a Claude Code tool. Paste the inner mcpServers block into ~/.claude.json (or merge with what's already there). Restart Claude Code for changes to take effect. The local model becomes a callable tool named local_worker.",
+
+  "mcpServers": {
+    "local_worker": {
+      "_comment": "Ollama-MCP shim — exposes the local instance as a tool. Uses npm package @modelcontextprotocol/server-ollama (community-maintained 2026 stable). Adjust the model env to whichever you want as default; the tool can override per-call.",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-ollama"
+      ],
+      "env": {
+        "OLLAMA_HOST": "http://100.104.82.53:11434",
+        "OLLAMA_DEFAULT_MODEL": "qwen2.5:7b",
+        "MCP_TOOL_NAME": "local_worker",
+        "MCP_DESCRIPTION": "Local Ollama worker on RTX 3060. Use for: high-volume summarisation, log analysis, schema validation, JSON re-formatting. Reserve Cloud (Opus 4.7 / Sonnet) for: code surgery, multi-file pivots, high-stakes reasoning. Free; ~70 t/s on the loaded hot tier."
+      }
+    }
+  },
+
+  "_routing_guidance": {
+    "use_local_for": [
+      "summarising audit_log entries",
+      "classifying or tagging log lines",
+      "JSON shape validation / reformatting",
+      "extracting structured fields from short prose",
+      "high-volume batch tasks where a 65% accuracy is acceptable + Haiku is the escalation backstop"
+    ],
+    "use_cloud_for": [
+      "multi-file refactors",
+      "writing or reviewing migrations",
+      "design decisions involving the SPEC",
+      "anything that touches production data flow",
+      "anything where wrong output costs more than 30 seconds of review"
+    ]
+  },
+
+  "_install_steps": [
+    "1. Open ~/.claude.json (or its equivalent on this machine)",
+    "2. Merge the mcpServers block above into the file's mcpServers section",
+    "3. Restart Claude Code (exit + re-enter the project)",
+    "4. Verify with /mcp list — local_worker should appear",
+    "5. From any session, ask: 'Have local_worker summarise the last 50 audit_log entries' to test"
+  ],
+
+  "_models_available_now": [
+    "qwen2.5:7b  (loaded, ~5.1 GB VRAM, ~70 t/s — the hot tier)"
+  ],
+
+  "_models_pull_when_ready": [
+    "phi4:14b      (~8.5 GB — recommended for medium tier per SPEC §6a)",
+    "llama3.3:70b  (~42 GB — heavy tier; pull overnight)"
+  ]
+}

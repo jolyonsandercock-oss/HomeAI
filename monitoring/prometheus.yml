@@ -1,0 +1,41 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: [homeai-alertmanager:9093]
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: [localhost:9090]
+
+  # PostgreSQL is scraped via the postgres_exporter sidecar (port 9187),
+  # not the Postgres SQL port — Postgres has no native /metrics endpoint.
+  - job_name: postgres
+    static_configs:
+      - targets: [homeai-postgres-exporter:9187]
+
+  - job_name: n8n
+    metrics_path: /metrics
+    static_configs:
+      - targets: [homeai-n8n:5678]
+
+  # Vault metrics — vault.hcl now has `telemetry { unauthenticated_metrics_access = true }`
+  # in the listener block (U14, 2026-05-10). Telemetry config in Vault 1.15 is
+  # NOT hot-reloadable, so this scrape job stays commented until the next time
+  # vault is restarted (typically a host reboot via start.sh). After that
+  # restart, uncomment the four lines below and run:
+  #   docker restart homeai-prometheus
+  #
+  # - job_name: vault
+  #   metrics_path: /v1/sys/metrics
+  #   params:
+  #     format: [prometheus]
+  #   static_configs:
+  #     - targets: [homeai-vault:8200]

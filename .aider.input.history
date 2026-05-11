@@ -1,0 +1,54 @@
+
+# 2026-05-07 12:56:50.775413
++y
+
+# 2026-05-07 12:57:29.111253
++n
+
+# 2026-05-07 12:59:34.752908
++Build a tiered model routing stack for the home-ai system with the following layers:
++
++**Tier 1 – Local fast (default):** Ollama running locally. Use the best available 
++model (prefer qwen2.5:7b or phi4:14b). Endpoint: http://localhost:11434. Use for 
++routine classification, summarisation, short generation, and internal tool calls 
++where latency matters.
++
++**Tier 2 – Local capable:** Ollama with llama3.3:70b. Use for tasks requiring 
++stronger reasoning but where cloud escalation is undesirable — sensitive data, 
++offline operation, or cost control.
++
++**Tier 3 – DeepSeek V3 via API:** Use for complex multi-step reasoning, long-context 
++tasks, and code generation where local models are struggling. Endpoint via 
++DeepSeek's OpenAI-compatible API (https://api.deepseek.com/v1). Model string: 
++deepseek-chat.
++
++**Tier 4 – Claude (escalation ceiling):** Anthropic API, claude-sonnet-4-20250514. 
++Use only when lower tiers fail, timeout, or produce low-confidence output. Also 
++used for任务 requiring tool use with complex JSON schemas.
++
++Requirements:
++- Router lives in /home_ai/core/model_router.py
++- Accepts: prompt, task_type (enum: classify|generate|reason|code|embed), 
++  max_tier (1-4, default 4), context_length, and optional confidence_threshold
++- Returns: response text, model used, tier used, latency_ms
++- Routing logic: attempt tier 1 first; escalate if response is empty, contains 
++  an apology/refusal pattern, latency exceeds threshold, or confidence_score 
++  (if available) is below threshold
++- All credentials loaded from environment variables (DEEPSEEK_API_KEY, 
++  ANTHROPIC_API_KEY) — never hardcoded
++- Async throughout (asyncio/httpx)
++- Structured logging to match existing home-ai log format
++- Unit tests in /home_ai/tests/test_model_router.py covering each tier 
++  and escalation paths
++
++Do not use LangChain or LlamaIndex. Implement direct API calls only.
+
+# 2026-05-07 12:59:39.664433
++y
+
+# 2026-05-07 13:01:00.777088
++echo $DEEPSEEK_API_KEY
++echo $OPENROUTER_API_KEY
+
+# 2026-05-07 13:02:22.513248
++/exit

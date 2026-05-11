@@ -1,0 +1,16 @@
+---
+# Authelia file-based user database. One entry per user.
+#
+# Fill via /home_ai/scripts/authelia-bootstrap.sh which generates an argon2id
+# hash from the password the user types. Do NOT hand-edit `password` field —
+# write a plain password into a temp file then run the bootstrap script.
+
+users:
+  jo:
+    disabled: false
+    displayname: 'Jo'
+    # Replace this hash by running: ./scripts/authelia-bootstrap.sh
+    password: '$argon2id$v=19$m=65536,t=3,p=4$REPLACE_ME$REPLACE_ME'
+    email: 'jolyon.sandercock@gmail.com'
+    groups:
+      - admin

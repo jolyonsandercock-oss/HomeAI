@@ -1,0 +1,66 @@
+# Phase 1 progress checklist — used to compute the headline percentage.
+# Each item has status: done | in_progress | blocked | todo
+# blocked items don't count toward total — they're waiting on user input
+# (treated as "not yet possible to do" and excluded from the denominator).
+
+categories:
+  - name: Platform foundation
+    items:
+      - { id: vault,        title: Vault unsealed + secrets loaded,        status: done }
+      - { id: postgres,     title: PostgreSQL schema + RLS policies,       status: done }
+      - { id: docker,       title: Docker compose + all services healthy,  status: done }
+      - { id: tailscale,    title: Tailscale + UFW restricted to tailnet,  status: done }
+      - { id: start_sh,     title: start.sh handles every reboot cleanly,  status: done }
+
+  - name: Vertical slice (Gate B)
+    items:
+      - { id: ollama_hot,   title: Ollama hot tier (qwen2.5:7b),           status: done }
+      - { id: pdfplumber,   title: pdfplumber service,                     status: done }
+      - { id: model_eval,   title: Model evaluator service deployed,       status: done }
+      - { id: master_router,title: Master Router routing,                  status: done }
+      - { id: gmail_ingest, title: Pipeline 1 — Gmail Ingest,              status: done }
+      - { id: metabase,     title: Metabase + Email Review Queue card,     status: done }
+
+  - name: Pipelines (Gate C)
+    items:
+      - { id: p2,  title: P2  Invoice Pipeline (pdfplumber+MarkItDown+Haiku), status: done }
+      - { id: p3,  title: P3  Xero Sync,                                   status: blocked, blocker: Xero OAuth }
+      - { id: p4,  title: P4  Bank CSV Import,                             status: done }
+      - { id: p5,  title: P5  ICRTouch EPoS,                               status: blocked, blocker: Gmail account routing decision }
+      - { id: p6,  title: P6  Caterbook,                                   status: blocked, blocker: Gmail account routing decision }
+      - { id: p7,  title: P7  Cashing Up,                                  status: blocked, blocker: Google Sheets OAuth }
+      - { id: p8,  title: P8  Nanny,                                       status: done }
+      - { id: p9,  title: P9  Report Ingestion,                            status: done }
+      - { id: p10, title: P10 Daily Digest,                                status: blocked, blocker: Telegram bot + SMTP }
+      - { id: p11, title: P11 Monthly Partition Creation,                  status: done }
+
+  - name: Operability
+    items:
+      - { id: prometheus,   title: Prometheus + custom postgres metrics,   status: done }
+      - { id: grafana,      title: Grafana baseline + pipeline dashboards, status: done }
+      - { id: alerts,       title: Alert rules + Alertmanager + sink,      status: done }
+      - { id: auto_pause,   title: Dead-letter flood auto-pause,           status: done }
+      - { id: hmac,         title: HMAC signature verifier daily cron,     status: done }
+      - { id: rls_tests,    title: RLS test suite,                         status: done }
+      - { id: open_webui,   title: Open WebUI admin signup,                status: done }
+      - { id: monitoring,   title: Step 17 Monitoring (Phase 1 close),     status: done }
+
+  - name: Backup + DR
+    items:
+      - { id: nightly,      title: Nightly Restic backup (local),          status: done }
+      - { id: weekly,       title: Weekly DR backup (backup-all.sh),       status: done }
+      - { id: nas_mount,    title: Restic repointed at NAS,                status: blocked, blocker: NAS mount on host }
+      - { id: bootstrap,    title: bootstrap.sh draft,                     status: done }
+      - { id: restore,      title: restore.sh draft,                       status: done }
+
+  - name: Phase 2 hardening (deferred per SPEC v5.3)
+    items:
+      - { id: auto_unseal,  title: Vault auto-unseal,                      status: todo, phase2: true }
+      - { id: authelia,     title: Authelia SSO (scaffolded — bootstrap pending), status: in_progress, phase2: true }
+      - { id: benchmarks,   title: Model evaluator benchmark suite,         status: done, phase2: true }
+      - { id: dreaming,     title: Dreaming Workflow H (active),           status: done, phase2: true }
+      - { id: diagnostics,  title: Daily diagnostics workflow,             status: done, phase2: true }
+      - { id: cleanup,      title: Weekly maintenance/cleanup workflow,    status: done, phase2: true }
+      - { id: slo_dash,     title: Grafana SLO/SLA dashboard,              status: done, phase2: true }
+      - { id: para_vault,   title: PARA knowledge-base structure,          status: done, phase2: true }
+      - { id: ci_autofix,   title: CI Auto-Fix (GitHub Actions),           status: todo, phase2: true }

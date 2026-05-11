@@ -1,0 +1,128 @@
+{
+  "id": "pub-anomaly-alerter-v1",
+  "name": "Pub Anomaly Alerter",
+  "active": true,
+  "nodes": [
+    {
+      "id": "trig",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 * * * *" }] }
+      }
+    },
+    {
+      "id": "metrics",
+      "name": "Compare to trailing window",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [440, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SET app.current_entity = 'all'; WITH today_epos AS (SELECT COALESCE(SUM(gross),0)::numeric(10,2) AS gross, COALESCE(SUM(covers),0) AS covers FROM epos_daily WHERE report_date = CURRENT_DATE), trail AS (SELECT AVG(daily.gross)::numeric(10,2) AS gross_avg, COUNT(*) AS samples, AVG(daily.covers)::numeric(8,2) AS covers_avg FROM (SELECT report_date, SUM(gross) AS gross, SUM(covers) AS covers FROM epos_daily WHERE report_date BETWEEN CURRENT_DATE - 15 AND CURRENT_DATE - 1 AND extract(dow from report_date) = extract(dow from CURRENT_DATE) GROUP BY report_date) daily), today_occ AS (SELECT occupancy_pct FROM accommodation_daily WHERE report_date = CURRENT_DATE LIMIT 1), trailing_occ AS (SELECT AVG(occupancy_pct)::numeric(5,2) AS occ_avg FROM accommodation_daily WHERE report_date BETWEEN CURRENT_DATE - 15 AND CURRENT_DATE - 1 AND extract(dow from report_date) = extract(dow from CURRENT_DATE)), already_alerted AS (SELECT COUNT(*) AS today_alerts FROM audit_log WHERE pipeline = 'pub-anomaly-alerter-v1' AND result = 'anomaly' AND created_at::date = CURRENT_DATE) SELECT today_epos.gross AS today_gross, today_epos.covers AS today_covers, trail.gross_avg, trail.samples AS sample_n, trail.covers_avg, today_occ.occupancy_pct AS today_occ, trailing_occ.occ_avg AS occ_avg, already_alerted.today_alerts, extract(hour from NOW())::int AS hour_utc FROM today_epos, trail, trailing_occ, already_alerted LEFT JOIN today_occ ON true;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      }
+    },
+    {
+      "id": "detect",
+      "name": "Detect anomaly",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const r = $input.first().json;\nconst hour = Number(r.hour_utc);\n\nif (hour < 12 || hour >= 22) {\n  return [{ json: { should_alert: false, anomaly: false, reason: 'outside_compare_window', hour, snapshot: r } }];\n}\nif (Number(r.today_alerts || 0) > 0) {\n  return [{ json: { should_alert: false, anomaly: false, reason: 'already_alerted_today', hour, snapshot: r } }];\n}\n\nconst todayGross   = Number(r.today_gross || 0);\nconst trailingAvg  = Number(r.gross_avg || 0);\nconst todayCovers  = Number(r.today_covers || 0);\nconst coversAvg    = Number(r.covers_avg || 0);\nconst todayOcc     = r.today_occ == null ? null : Number(r.today_occ);\nconst occAvg       = Number(r.occ_avg || 0);\nconst sampleN      = Number(r.sample_n || 0);\n\nconst issues = [];\n\n// Only check if we have a reasonable baseline (≥ 2 same-DOW samples)\nif (sampleN >= 2 && trailingAvg > 50) {\n  const deviation = (todayGross - trailingAvg) / trailingAvg;\n  if (deviation < -0.30 && hour >= 14) {\n    issues.push({ kind: 'epos_below', deviation: Math.round(deviation * 100), today_gross: todayGross.toFixed(2), avg: trailingAvg.toFixed(2) });\n  }\n  if (deviation > 0.80) {\n    issues.push({ kind: 'epos_spike', deviation: Math.round(deviation * 100), today_gross: todayGross.toFixed(2), avg: trailingAvg.toFixed(2) });\n  }\n}\nif (sampleN >= 2 && coversAvg > 5) {\n  const cdev = (todayCovers - coversAvg) / coversAvg;\n  if (cdev < -0.40 && hour >= 14) {\n    issues.push({ kind: 'covers_below', deviation: Math.round(cdev * 100), today: todayCovers, avg: coversAvg.toFixed(0) });\n  }\n}\nif (todayOcc != null && occAvg > 10) {\n  const odev = (todayOcc - occAvg) / occAvg;\n  if (odev < -0.40) {\n    issues.push({ kind: 'occ_below', deviation: Math.round(odev * 100), today: todayOcc, avg: occAvg.toFixed(1) });\n  }\n}\n\nreturn [{ json: { should_alert: issues.length > 0, anomaly: issues.length > 0, issues, hour, snapshot: r } }];"
+      }
+    },
+    {
+      "id": "should-alert",
+      "name": "Should alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [920, 300],
+      "parameters": {
+        "looseTypeValidation": true,
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            { "id": "c1",
+              "operator": { "type": "boolean", "operation": "true" },
+              "leftValue": "={{ $json.should_alert }}",
+              "rightValue": "" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "log-alert",
+      "name": "Log anomaly",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1160, 220],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SET app.current_entity = 'all'; INSERT INTO audit_log (pipeline, action, ai_parsed, result, provider) VALUES ('pub-anomaly-alerter-v1', 'fired_alert', $pl${{ JSON.stringify({hour: $json.hour, issues: $json.issues}) }}$pl$::jsonb, 'anomaly', 'local') RETURNING id;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      }
+    },
+    {
+      "id": "vault",
+      "name": "Vault",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 220],
+      "parameters": {
+        "url": "http://vault:8200/v1/secret/data/telegram",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" }
+      }
+    },
+    {
+      "id": "send",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1640, 220],
+      "parameters": {
+        "url": "={{ 'https://api.telegram.org/bot' + $json.data.data.bot_token + '/sendMessage' }}",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "chat_id",    "value": "={{ $json.data.data.chat_id }}" },
+            { "name": "text",       "value": "={{ '⚡ <b>Pub anomaly — ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'}) + ' UTC</b>\\n\\n' + ($('Detect anomaly').first().json.issues || []).map(i => { if (i.kind === 'epos_below')  return '• EPoS ' + i.deviation + '% below same-day trailing avg (today £' + i.today_gross + ' vs avg £' + i.avg + ')'; if (i.kind === 'epos_spike')  return '• EPoS ' + i.deviation + '% above avg — possible double-post (today £' + i.today_gross + ')'; if (i.kind === 'covers_below') return '• Covers ' + i.deviation + '% below avg (today ' + i.today + ' vs avg ' + i.avg + ')'; if (i.kind === 'occ_below')    return '• Occupancy ' + i.deviation + '% below avg (today ' + i.today + '% vs avg ' + i.avg + '%)'; return '• ' + i.kind; }).join('\\n') }}" },
+            { "name": "parse_mode", "value": "HTML" },
+            { "name": "disable_web_page_preview", "value": "true" }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Schedule":                  { "main": [[{ "node": "Compare to trailing window", "type": "main", "index": 0 }]] },
+    "Compare to trailing window":{ "main": [[{ "node": "Detect anomaly", "type": "main", "index": 0 }]] },
+    "Detect anomaly":            { "main": [[{ "node": "Should alert?", "type": "main", "index": 0 }]] },
+    "Should alert?":             { "main": [
+      [{ "node": "Log anomaly", "type": "main", "index": 0 }],
+      []
+    ]},
+    "Log anomaly":               { "main": [[{ "node": "Vault", "type": "main", "index": 0 }]] },
+    "Vault":                     { "main": [[{ "node": "Send Telegram", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

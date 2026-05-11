@@ -1,0 +1,794 @@
+[
+  {
+    "updatedAt": "2026-05-08T21:36:53.952Z",
+    "createdAt": "2026-05-06T09:40:55.756Z",
+    "id": "gmail-ingest-v1",
+    "name": "Gmail Ingest Pipeline",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "id": "ep-001",
+        "name": "Email Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 1,
+        "position": [
+          240,
+          300
+        ],
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "email-pipeline",
+          "responseMode": "onReceived",
+          "options": {}
+        },
+        "webhookId": "0c324104-da02-4768-92d8-5dff5853d51a"
+      },
+      {
+        "id": "ep-002",
+        "name": "Idempotency Check",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          460,
+          300
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "iTuuNfsqHY49MGhk",
+            "name": "HomeAI Postgres"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT EXISTS(\n  SELECT 1 FROM emails\n  WHERE gmail_message_id = '{{ $json.gmail_message_id || $json.id }}'\n) AS already_processed",
+          "options": {}
+        }
+      },
+      {
+        "id": "ep-003",
+        "name": "Already Processed?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          680,
+          300
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true
+            },
+            "conditions": [
+              {
+                "id": "idem-check",
+                "leftValue": "={{ $json.already_processed }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "ep-004",
+        "name": "Stop \u2014 Already Done",
+        "type": "n8n-nodes-base.noOp",
+        "typeVersion": 1,
+        "position": [
+          900,
+          180
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "ep-005",
+        "name": "Sanitise Email",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          900,
+          420
+        ],
+        "parameters": {
+          "jsCode": "\nconst item = $('Normalise Payload').first().json;\n\nfunction sanitiseForPrompt(text) {\n  if (!text) return '';\n  return String(text)\n    .replace(/<[^>]*>/g, '')\n    .replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]/g, '')\n    .replace(/\\{\\{[\\s\\S]*?\\}\\}/g, '[TEMPLATE_REMOVED]')\n    .replace(/\\bignore\\s+(?:all\\s+)?previous\\s+instructions?\\b/gi, '[INJECTION_ATTEMPT]')\n    .substring(0, 4000)\n    .trim();\n}\n\nfunction sqlEsc(v) {\n  return String(v == null ? '' : v).replace(/'/g, \"''\").replace(/\\x00/g, '');\n}\n\nreturn [{\n  json: {\n    gmail_message_id: item.gmail_message_id || item.id || '',\n    account:          item.account || 'jolyon.sandercock@gmail.com',\n    from_address:     item.from?.value?.[0]?.address || item.from_address || '',\n    from_name:        item.from?.value?.[0]?.name    || item.from_name    || '',\n    subject:          item.subject  || '',\n    body_text:        item.text     || item.body_text || '',\n    received_at:      item.date     || item.received_at || new Date().toISOString(),\n    has_attachment:   !!(item.attachments && item.attachments.length > 0) || !!item.has_attachment,\n    body_text_safe:   sanitiseForPrompt(item.text || item.body_text || ''),\n    sql_gmail_message_id: sqlEsc(item.gmail_message_id || item.id || ''),\n    sql_account:      sqlEsc(item.account || 'jolyon.sandercock@gmail.com'),\n    sql_from_address: sqlEsc(item.from?.value?.[0]?.address || item.from_address || ''),\n    sql_from_name:    sqlEsc(item.from?.value?.[0]?.name    || item.from_name    || ''),\n    sql_subject:      sqlEsc(item.subject || ''),\n    sql_body_text:    sqlEsc(item.text || item.body_text || ''),\n    sql_received_at:  sqlEsc(item.date || item.received_at || new Date().toISOString()),\n  }\n}];\n"
+        }
+      },
+      {
+        "id": "ep-006",
+        "name": "Fetch Vault Keys",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1120,
+          420
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "http://vault:8200/v1/secret/data/signing",
+          "options": {},
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth"
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "0wPA4DCDuehPC9Mf",
+            "name": "vault-token-header"
+          }
+        }
+      },
+      {
+        "id": "ep-007",
+        "name": "Fetch AI Thresholds",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          1340,
+          420
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "iTuuNfsqHY49MGhk",
+            "name": "HomeAI Postgres"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SELECT value FROM static_context WHERE key = 'ai.thresholds'",
+          "options": {}
+        }
+      },
+      {
+        "id": "ep-008",
+        "name": "Classify Email (Ollama)",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1560,
+          420
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "http://homeai-ollama:11434/api/generate",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ model: 'qwen2.5:7b', system: \"You are an email classification system for Jo, a business owner.\\nJo runs: The Olde Malthouse pub (Tintagel, Cornwall), a property company (7 properties),\\nand manages personal and family matters.\\n\\nClassify into exactly one category:\\n  invoice | action-required | report-attachment | school-medical | property | pub | fyi | junk\\n\\nDetermine entity_id: 1=Trading (pub), 2=Estates (property), 3=Personal, 4=Family\\n\\nReturn ONLY valid JSON. No markdown. No explanation.\\nSchema: {\\\"category\\\": string, \\\"entity_id\\\": number, \\\"confidence_score\\\": number (0-1), \\\"summary\\\": string (max 100 chars), \\\"requires_human\\\": boolean}\", prompt: 'From: ' + $('Sanitise Email').first().json.from_address + '\\nSubject: ' + $('Sanitise Email').first().json.subject + '\\n\\n' + $('Sanitise Email').first().json.body_text_safe, stream: false, format: 'json' }) }}",
+          "options": {
+            "timeout": 30000
+          }
+        }
+      },
+      {
+        "id": "ep-009",
+        "name": "Parse Ollama Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1780,
+          420
+        ],
+        "parameters": {
+          "jsCode": "\nconst item = $input.first().json;\nconst threshRow = $('Fetch AI Thresholds').first().json;\nconst thresholds = typeof threshRow.value === 'string'\n  ? JSON.parse(threshRow.value)\n  : threshRow.value;\nconst minConf = thresholds?.email_classifier?.min_confidence ?? 0.80;\n\nlet ai;\ntry {\n  ai = JSON.parse(item.response || '{}');\n} catch(e) {\n  ai = { category: 'fyi', entity_id: 3, confidence_score: 1.0,\n         summary: 'Parse error \u2014 defaulted to fyi', requires_human: true };\n}\n\nconst validCats = ['invoice','action-required','report-attachment',\n                   'school-medical','property','pub','fyi','junk'];\nconst category   = validCats.includes(ai.category) ? ai.category : 'fyi';\nconst entityId   = [1,2,3,4].includes(Number(ai.entity_id)) ? Number(ai.entity_id) : 3;\nconst confidence = Math.min(1, Math.max(0, Number(ai.confidence_score) || 0));\nconst summary    = String(ai.summary || '').substring(0, 500);\n\n\n\n// OUTCOME_PATCH_v1\nconst status = confidence >= minConf\n  ? 'success'\n  : confidence >= minConf * 0.85\n    ? 'escalate'\n    : 'fail';\n\nconst outcome = {\n  status,\n  confidence,\n  reasoning:    String(ai.reasoning || ai.summary || '').substring(0, 1000),\n  data:         { category, entity_id: entityId, summary,\n                  requires_human: !!ai.requires_human },\n  requires_human: status === 'fail' || !!ai.requires_human || confidence < minConf,\n  worker:       'email_classifier',\n  tier_used:    'hot'\n};\n\nconst emailData = $('Sanitise Email').first().json;\nreturn [{\n  json: {\n    ...emailData,\n    ai_category:      category,\n    ai_entity_id:     entityId,\n    ai_confidence:    confidence,\n    ai_summary:       summary,\n    ai_requires_human: !!ai.requires_human || confidence < minConf,\n    ai_worker:        'email_classifier',\n    ai_model:         'qwen2.5:7b',\n    ai_raw_output:    JSON.stringify(ai),\n    needs_escalation: confidence < minConf,\n    email_threshold:  minConf,\n    outcome,\n  }\n}];\n"
+        }
+      },
+      {
+        "id": "ep-010",
+        "name": "Confidence OK?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          2000,
+          420
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {},
+            "conditions": [
+              {
+                "id": "conf-check",
+                "leftValue": "={{ $json.ai_confidence }}",
+                "rightValue": "={{ $json.email_threshold }}",
+                "operator": {
+                  "type": "number",
+                  "operation": "gte"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "ep-011",
+        "name": "Fetch Anthropic Key",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2220,
+          560
+        ],
+        "parameters": {
+          "method": "GET",
+          "url": "http://vault:8200/v1/secret/data/anthropic",
+          "options": {},
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth"
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "0wPA4DCDuehPC9Mf",
+            "name": "vault-token-header"
+          }
+        }
+      },
+      {
+        "id": "ep-012",
+        "name": "Escalate to Haiku",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2440,
+          560
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.anthropic.com/v1/messages",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 256, system: \"You are an email classification system for Jo, a business owner.\\nJo runs: The Olde Malthouse pub (Tintagel, Cornwall), a property company (7 properties),\\nand manages personal and family matters.\\n\\nClassify into exactly one category:\\n  invoice | action-required | report-attachment | school-medical | property | pub | fyi | junk\\n\\nDetermine entity_id: 1=Trading (pub), 2=Estates (property), 3=Personal, 4=Family\\n\\nReturn ONLY valid JSON. No markdown. No explanation.\\nSchema: {\\\"category\\\": string, \\\"entity_id\\\": number, \\\"confidence_score\\\": number (0-1), \\\"summary\\\": string (max 100 chars), \\\"requires_human\\\": boolean}\", messages: [{ role: 'user', content: 'From: ' + $('Sanitise Email').first().json.from_address + '\\nSubject: ' + $('Sanitise Email').first().json.subject + '\\n\\n' + $('Sanitise Email').first().json.body_text_safe }] }) }}",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "x-api-key",
+                "value": "={{ $('Fetch Anthropic Key').first().json.data.data.api_key }}"
+              },
+              {
+                "name": "anthropic-version",
+                "value": "2023-06-01"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "options": {
+            "timeout": 30000
+          }
+        }
+      },
+      {
+        "id": "ep-013",
+        "name": "Parse Haiku Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2660,
+          560
+        ],
+        "parameters": {
+          "jsCode": "\nconst item = $input.first().json;\nconst vaultResp = $('Fetch Anthropic Key').first().json;\nconst anthropicKey = vaultResp.data?.data?.api_key || '';\n\nlet ai;\ntry {\n  const text = item.content?.[0]?.text || '{}';\n  ai = JSON.parse(text);\n} catch(e) {\n  ai = { category: 'fyi', entity_id: 3, confidence_score: 1.0,\n         summary: 'Haiku parse error \u2014 defaulted to fyi', requires_human: true };\n}\n\nconst validCats = ['invoice','action-required','report-attachment',\n                   'school-medical','property','pub','fyi','junk'];\nconst category   = validCats.includes(ai.category) ? ai.category : 'fyi';\nconst entityId   = [1,2,3,4].includes(Number(ai.entity_id)) ? Number(ai.entity_id) : 3;\nconst confidence = Math.min(1, Math.max(0, Number(ai.confidence_score) || 0));\nconst summary    = String(ai.summary || '').substring(0, 500);\n\nconst emailData = $('Sanitise Email').first().json;\nconst threshold = $('Parse Ollama Response').first().json.email_threshold || 0.80;\n\n// OUTCOME_PATCH_v1\nconst status = confidence >= threshold\n  ? 'success'\n  : confidence >= threshold * 0.85\n    ? 'escalate'\n    : 'fail';\n\nconst outcome = {\n  status,\n  confidence,\n  reasoning:    String(ai.reasoning || ai.summary || '').substring(0, 1000),\n  data:         { category, entity_id: entityId, summary,\n                  requires_human: !!ai.requires_human },\n  requires_human: status === 'fail' || !!ai.requires_human || confidence < threshold,\n  worker:       'email_classifier',\n  tier_used:    'haiku'\n};\n\nreturn [{\n  json: {\n    ...emailData,\n    ai_category:      category,\n    ai_entity_id:     entityId,\n    ai_confidence:    confidence,\n    ai_summary:       summary,\n    ai_requires_human: !!ai.requires_human || confidence < threshold,\n    ai_worker:        'email_classifier',\n    ai_model:         'claude-haiku-4-5-20251001',\n    ai_raw_output:    JSON.stringify(ai),\n    needs_escalation: false,\n    email_threshold:  threshold,\n    outcome,\n  }\n}];\n"
+        }
+      },
+      {
+        "id": "ep-014",
+        "name": "Merge AI Output",
+        "type": "n8n-nodes-base.merge",
+        "typeVersion": 3,
+        "position": [
+          2880,
+          420
+        ],
+        "parameters": {
+          "mode": "append"
+        }
+      },
+      {
+        "id": "ep-015",
+        "name": "INSERT emails",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          3100,
+          420
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "iTuuNfsqHY49MGhk",
+            "name": "HomeAI Postgres"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SET app.current_entity = '{{ $json.ai_entity_id }}';\nINSERT INTO emails (\n  gmail_message_id, account, from_address, from_name, subject,\n  body_text, body_text_safe, received_at, classification, confidence_score,\n  entity_id, has_attachment, requires_human, action_required, processed\n) VALUES (\n  '{{ $json.sql_gmail_message_id }}',\n  '{{ $json.sql_account }}',\n  '{{ $json.sql_from_address }}',\n  '{{ $json.sql_from_name }}',\n  '{{ $json.sql_subject }}',\n  '{{ $json.sql_body_text }}',\n  '{{ $json.body_text_safe.replace(/'/g, \"''\") }}',\n  '{{ $json.sql_received_at }}',\n  '{{ $json.ai_category }}',\n  {{ $json.ai_confidence }},\n  {{ $json.ai_entity_id }},\n  {{ !!$json.has_attachment }},\n  {{ !!$json.ai_requires_human }},\n  {{ $json.ai_category === 'action-required' }},\n  false\n) RETURNING id, trace_id;\nRESET app.current_entity;",
+          "options": {
+            "allowMultipleStatements": true
+          }
+        }
+      },
+      {
+        "id": "ep-016",
+        "name": "Capture Email ID",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3320,
+          420
+        ],
+        "parameters": {
+          "jsCode": "// INSERT RETURNING gives the row; SET/RESET give empty results.\n// n8n returns the last non-empty result from allowMultipleStatements.\nconst rows = $input.all();\nconst row = rows.find(r => r.json.id != null) || rows[0];\nconst emailData = $('Sanitise Email').first().json;\nconst aiData = $('Merge AI Output').first().json;\nreturn [{ json: { ...emailData, ...aiData, email_db_id: row?.json?.id, trace_id: row?.json?.trace_id || null } }];"
+        }
+      },
+      {
+        "id": "ep-017",
+        "name": "Sign Payloads",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3540,
+          420
+        ],
+        "parameters": {
+          "jsCode": "\nconst crypto = require('crypto');\nconst item = $input.first().json;\nconst signingKey = $('Fetch Vault Keys').first().json.data.data.payload_hmac_key;\nconst traceId = crypto.randomUUID();\nconst emailId = item.email_db_id;\nconst gmailId = item.gmail_message_id;\n\nfunction sign(payload) {\n  const s = JSON.stringify(payload);\n  return 'hmac-sha256:' + crypto.createHmac('sha256', signingKey).update(s).digest('hex');\n}\n\nconst rcvd = { gmail_message_id: gmailId, email_id: emailId,\n  from_address: item.from_address, subject: item.subject,\n  has_attachment: item.has_attachment, received_at: item.received_at };\n\nconst clsf = { gmail_message_id: gmailId, email_id: emailId,\n  category: item.ai_category, entity_id: item.ai_entity_id,\n  confidence_score: item.ai_confidence, summary: item.ai_summary,\n  requires_human: item.ai_requires_human,\n  ai_worker: item.ai_worker, model_used: item.ai_model };\n\nconst inv = { gmail_message_id: gmailId, email_id: emailId,\n  source: 'email', entity_id: item.ai_entity_id };\n\nconst child = { gmail_message_id: gmailId, email_id: emailId,\n  source: 'email', entity_id: item.ai_entity_id,\n  from_address: item.from_address, subject: item.subject,\n  body_text_safe: item.body_text_safe || '',\n  classification: item.ai_category,\n  ai_summary: item.ai_summary,\n  detected_at: new Date().toISOString() };\n\n\n\n// OUTCOME_PATCH_v1\nconst outcome_json = JSON.stringify(item.outcome || {});\n\nreturn [{\n  json: {\n    ...item,\n    trace_id: traceId,\n    rcvd_payload:   JSON.stringify(rcvd),  rcvd_sig:  sign(rcvd),\n    clsf_payload:   JSON.stringify(clsf),  clsf_sig:  sign(clsf),\n    inv_payload:    JSON.stringify(inv),   inv_sig:   sign(inv),\n    child_payload:  JSON.stringify(child), child_sig: sign(child),  // CHILD_EVENT_PATCH_v1\n    idem_email:     'email_' + gmailId,\n    idem_classified:'email_classified_' + gmailId,\n    idem_invoice:   'invoice_from_email_' + gmailId,\n    idem_child:     'child_event_from_email_' + gmailId,\n    outcome_json,\n  }\n}];\n"
+        }
+      },
+      {
+        "id": "ep-018",
+        "name": "INSERT email.received",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          3760,
+          420
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "iTuuNfsqHY49MGhk",
+            "name": "HomeAI Postgres"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SET app.current_entity = '{{ $json.ai_entity_id }}';\nINSERT INTO events (event_type, source, entity_id, payload, payload_signature,\n                   trace_id, idempotency_key, status, pipeline_version)\nSELECT 'email.received', 'gmail', {{ $json.ai_entity_id }},\n       '{{ $json.rcvd_payload }}'::jsonb, '{{ $json.rcvd_sig }}',\n       '{{ $json.trace_id }}'::uuid, '{{ $json.idem_email }}',\n       'processed', '1.0'\n WHERE NOT EXISTS (\n   SELECT 1 FROM events WHERE idempotency_key = '{{ $json.idem_email }}'\n )\nRETURNING id;",
+          "options": {}
+        }
+      },
+      {
+        "id": "ep-019",
+        "name": "INSERT email.classified",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          3980,
+          420
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "iTuuNfsqHY49MGhk",
+            "name": "HomeAI Postgres"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SET app.current_entity = '{{ $('Sign Payloads').first().json.ai_entity_id }}';\nINSERT INTO events (event_type, source, entity_id, payload, payload_signature,\n                   trace_id, idempotency_key, status, pipeline_version)\nSELECT 'email.classified', 'email_pipeline', {{ $('Sign Payloads').first().json.ai_entity_id }},\n       '{{ $('Sign Payloads').first().json.clsf_payload }}'::jsonb,\n       '{{ $('Sign Payloads').first().json.clsf_sig }}',\n       '{{ $('Sign Payloads').first().json.trace_id }}'::uuid,\n       '{{ $('Sign Payloads').first().json.idem_classified }}',\n       'processed', '1.0'\n WHERE NOT EXISTS (\n   SELECT 1 FROM events WHERE idempotency_key = '{{ $('Sign Payloads').first().json.idem_classified }}'\n )\nRETURNING id;",
+          "options": {}
+        }
+      },
+      {
+        "id": "ep-020",
+        "name": "Invoice or Report?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          4200,
+          420
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {},
+            "conditions": [
+              {
+                "id": "inv-check-1",
+                "leftValue": "={{ $('Sign Payloads').first().json.ai_category }}",
+                "rightValue": "invoice",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              },
+              {
+                "id": "inv-check-2",
+                "leftValue": "={{ $('Sign Payloads').first().json.ai_category }}",
+                "rightValue": "report-attachment",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "or"
+          }
+        }
+      },
+      {
+        "id": "ep-021",
+        "name": "INSERT invoice.detected",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          4420,
+          300
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "iTuuNfsqHY49MGhk",
+            "name": "HomeAI Postgres"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SET app.current_entity = '{{ $(\"Sign Payloads\").first().json.ai_entity_id }}';\nINSERT INTO events (event_type, source, entity_id, payload, payload_signature,\n                   trace_id, idempotency_key, status, pipeline_version,\n                   parent_event_id)\nSELECT 'invoice.detected', 'email_pipeline', {{ $('Sign Payloads').first().json.ai_entity_id }},\n       '{{ $('Sign Payloads').first().json.inv_payload }}'::jsonb,\n       '{{ $('Sign Payloads').first().json.inv_sig }}',\n       '{{ $('Sign Payloads').first().json.trace_id }}'::uuid,\n       '{{ $('Sign Payloads').first().json.idem_invoice }}',\n       'pending', '1.0', NULL\n WHERE NOT EXISTS (\n   SELECT 1 FROM events WHERE idempotency_key = '{{ $('Sign Payloads').first().json.idem_invoice }}'\n );",
+          "options": {}
+        }
+      },
+      {
+        "id": "ep-022",
+        "name": "Write Audit Log",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          4640,
+          420
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "iTuuNfsqHY49MGhk",
+            "name": "HomeAI Postgres"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SET app.current_entity = '{{ $(\"Sign Payloads\").first().json.ai_entity_id }}';\nINSERT INTO audit_log (pipeline, action, entity_id, record_type, record_id,\n                      ai_worker, ai_model, ai_raw_output, ai_parsed,\n                      trace_id, pipeline_version, result)\nVALUES ('email_pipeline', 'classify_email',\n        {{ $('Sign Payloads').first().json.ai_entity_id }},\n        'email', {{ $('Sign Payloads').first().json.email_db_id }},\n        '{{ $('Sign Payloads').first().json.ai_worker }}',\n        '{{ $('Sign Payloads').first().json.ai_model }}',\n        '{{ $('Sign Payloads').first().json.ai_raw_output.replace(/'/g, \"''\") }}',\n        '{{ $('Sign Payloads').first().json.outcome_json }}'::jsonb, -- OUTCOME_PATCH_v1\n        '{{ $('Sign Payloads').first().json.trace_id }}'::uuid,\n        '1.0', 'success');",
+          "options": {}
+        }
+      },
+      {
+        "id": "ep-norm-001",
+        "name": "Normalise Payload",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          480,
+          300
+        ],
+        "parameters": {
+          "jsCode": "// Webhook wraps POST body under .body; flatten it once.\n// Then merge the events.payload JSONB to top level so downstream nodes\n// see gmail_message_id/from_address/subject/body_text without descending\n// into .payload \u2014 matches what Sanitise Email expects.\nconst raw = $input.first().json;\nconst eventRow = (raw.body && typeof raw.body === 'object') ? raw.body : raw;\nconst eventPayload = (eventRow.payload && typeof eventRow.payload === 'object') ? eventRow.payload : {};\nreturn [{ json: { ...eventRow, ...eventPayload } }];"
+        }
+      },
+      {
+        "id": "gi-child-event-insert",
+        "name": "INSERT child.event.detected",
+        "type": "n8n-nodes-base.postgres",
+        "typeVersion": 2.5,
+        "position": [
+          2200,
+          600
+        ],
+        "credentials": {
+          "postgres": {
+            "id": "iTuuNfsqHY49MGhk",
+            "name": "HomeAI Postgres"
+          }
+        },
+        "parameters": {
+          "operation": "executeQuery",
+          "query": "SET app.current_entity = '{{ $('Sign Payloads').first().json.ai_entity_id }}';\n-- Emit child.event.detected only when classifier marked it school-medical.\nINSERT INTO events\n  (event_type, source, entity_id, payload, payload_signature,\n   trace_id, idempotency_key, status, pipeline_version)\nSELECT 'child.event.detected',\n       'email_pipeline',\n       {{ $('Sign Payloads').first().json.ai_entity_id }},\n       $pl${{ $('Sign Payloads').first().json.child_payload }}$pl$::jsonb,\n       '{{ $('Sign Payloads').first().json.child_sig }}',\n       '{{ $('Sign Payloads').first().json.trace_id }}'::uuid,\n       '{{ $('Sign Payloads').first().json.idem_child }}',\n       'pending', '1.0'\n WHERE '{{ $('Sign Payloads').first().json.ai_category }}' = 'school-medical'\n   AND NOT EXISTS (\n     SELECT 1 FROM events\n      WHERE idempotency_key = '{{ $('Sign Payloads').first().json.idem_child }}'\n   )\nRETURNING id;",
+          "options": {}
+        }
+      }
+    ],
+    "connections": {
+      "Email Webhook": {
+        "main": [
+          [
+            {
+              "node": "Normalise Payload",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Idempotency Check": {
+        "main": [
+          [
+            {
+              "node": "Already Processed?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Already Processed?": {
+        "main": [
+          [
+            {
+              "node": "Stop \u2014 Already Done",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Sanitise Email",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Sanitise Email": {
+        "main": [
+          [
+            {
+              "node": "Fetch Vault Keys",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch Vault Keys": {
+        "main": [
+          [
+            {
+              "node": "Fetch AI Thresholds",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch AI Thresholds": {
+        "main": [
+          [
+            {
+              "node": "Classify Email (Ollama)",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Classify Email (Ollama)": {
+        "main": [
+          [
+            {
+              "node": "Parse Ollama Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse Ollama Response": {
+        "main": [
+          [
+            {
+              "node": "Confidence OK?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Confidence OK?": {
+        "main": [
+          [
+            {
+              "node": "Merge AI Output",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Fetch Anthropic Key",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Fetch Anthropic Key": {
+        "main": [
+          [
+            {
+              "node": "Escalate to Haiku",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Escalate to Haiku": {
+        "main": [
+          [
+            {
+              "node": "Parse Haiku Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse Haiku Response": {
+        "main": [
+          [
+            {
+              "node": "Merge AI Output",
+              "type": "main",
+              "index": 1
+            }
+          ]
+        ]
+      },
+      "Merge AI Output": {
+        "main": [
+          [
+            {
+              "node": "INSERT emails",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "INSERT emails": {
+        "main": [
+          [
+            {
+              "node": "Capture Email ID",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Capture Email ID": {
+        "main": [
+          [
+            {
+              "node": "Sign Payloads",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Sign Payloads": {
+        "main": [
+          [
+            {
+              "node": "INSERT email.received",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "INSERT email.received": {
+        "main": [
+          [
+            {
+              "node": "INSERT email.classified",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "INSERT email.classified": {
+        "main": [
+          [
+            {
+              "node": "INSERT child.event.detected",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Invoice or Report?": {
+        "main": [
+          [
+            {
+              "node": "INSERT invoice.detected",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Write Audit Log",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "INSERT invoice.detected": {
+        "main": [
+          [
+            {
+              "node": "Write Audit Log",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normalise Payload": {
+        "main": [
+          [
+            {
+              "node": "Idempotency Check",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "INSERT child.event.detected": {
+        "main": [
+          [
+            {
+              "node": "Invoice or Report?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "meta": null,
+    "pinData": null,
+    "versionId": "aef6883d-c816-44d2-82b8-4c59fb565be2",
+    "activeVersionId": "aef6883d-c816-44d2-82b8-4c59fb565be2",
+    "versionCounter": 81,
+    "triggerCount": 1,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-05-06T09:40:55.756Z",
+        "createdAt": "2026-05-06T09:40:55.756Z",
+        "role": "workflow:owner",
+        "workflowId": "gmail-ingest-v1",
+        "projectId": "mrS0xwM1mSrSan63",
+        "project": {
+          "updatedAt": "2026-05-01T17:08:53.977Z",
+          "createdAt": "2026-05-01T16:45:56.945Z",
+          "id": "mrS0xwM1mSrSan63",
+          "name": "jolyon sandercock <jolyon.sandercock@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "creatorId": "8e8d0968-3b92-4b54-ad56-ee4b3b72dffc"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": null,
+      "description": null
+    }
+  }
+]

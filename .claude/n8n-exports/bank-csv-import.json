@@ -1,0 +1,161 @@
+{
+  "id": "bank-csv-import-v1",
+  "name": "Bank CSV Import",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "nodes": [
+    {
+      "id": "bci-0001-webhook",
+      "name": "Webhook (bank-csv)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "bank-csv-import",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bank-csv",
+        "responseMode": "lastNode",
+        "options": {
+          "binaryData": true,
+          "binaryPropertyName": "csv"
+        }
+      }
+    },
+    {
+      "id": "bci-0002-validate",
+      "name": "Validate Form Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst body = item.json.body || item.json;\n\nconst bank_account_id = parseInt(body.bank_account_id, 10);\nif (!Number.isFinite(bank_account_id) || bank_account_id <= 0) {\n  throw new Error('bank_account_id form field must be a positive integer');\n}\n\n// Confirm a CSV binary attachment is present.\nconst binary = item.binary || {};\nconst csvKey = binary.csv ? 'csv' : Object.keys(binary)[0];\nif (!csvKey || !binary[csvKey]) {\n  throw new Error('multipart upload missing the csv file (expected form field name: csv)');\n}\nconst f = binary[csvKey];\nif ((f.fileSize || (f.data ? f.data.length : 0)) > 5 * 1024 * 1024) {\n  throw new Error('csv file exceeds 5MB safety cap');\n}\n\nreturn [{\n  json: { bank_account_id, csv_filename: f.fileName || 'upload.csv' },\n  binary: { csv: f }\n}];"
+      }
+    },
+    {
+      "id": "bci-0003-pdfplumber",
+      "name": "pdfplumber: parse-csv",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://homeai-pdfplumber:8003/parse-csv",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "csv"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "bci-0004-map-rows",
+      "name": "Map CSV Columns",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300],
+      "parameters": {
+        "jsCode": "// Maps pdfplumber's parsed rows (column names from CSV header) to the\n// {transaction_date, amount, description, reference, balance} schema that\n// import_bank_transactions() expects. Tries common UK-bank column variants.\n//\n// Returns the mapped rows + a hash of the input for event idempotency.\n\nconst pdfp = $input.first().json;\nconst rows = pdfp.data;\nif (!Array.isArray(rows) || rows.length === 0) {\n  throw new Error('pdfplumber returned no rows — empty CSV?');\n}\nif (rows.length > 10000) {\n  throw new Error(`pdfplumber returned ${rows.length} rows — exceeds 10000-row safety cap`);\n}\n\nconst lc = s => String(s).toLowerCase().trim();\nconst sample = rows[0];\nconst cols = Object.fromEntries(Object.keys(sample).map(k => [lc(k), k]));\n\nconst pickCol = (...candidates) => {\n  for (const c of candidates) {\n    if (cols[lc(c)] !== undefined) return cols[lc(c)];\n  }\n  return null;\n};\n\nconst dateCol  = pickCol('transaction_date', 'date', 'transaction date', 'posted date', 'value date');\nconst amtCol   = pickCol('amount', 'value');\nconst inCol    = pickCol('money in', 'credit', 'paid in');\nconst outCol   = pickCol('money out', 'debit', 'paid out');\nconst descCol  = pickCol('description', 'narrative', 'details', 'transaction description');\nconst refCol   = pickCol('reference', 'reference_id', 'ref');\nconst balCol   = pickCol('balance', 'running balance');\n\nif (!dateCol) throw new Error(`CSV missing date column (looked for: transaction_date/date/transaction date/posted date)`);\nif (!amtCol && !(inCol || outCol)) {\n  throw new Error('CSV missing amount column (need either \"amount\" OR \"money in\"+\"money out\")');\n}\n\nconst toIsoDate = v => {\n  if (!v) return null;\n  const s = String(v).trim();\n  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return s;\n  const m = s.match(/^(\\d{2})[/-](\\d{2})[/-](\\d{4})$/);\n  if (m) return `${m[3]}-${m[2]}-${m[1]}`; // assume DD/MM/YYYY (UK)\n  const m2 = s.match(/^(\\d{4})[/-](\\d{2})[/-](\\d{2})$/);\n  if (m2) return `${m2[1]}-${m2[2]}-${m2[3]}`;\n  return null;\n};\n\nconst toNumber = v => {\n  if (v === null || v === undefined || v === '') return null;\n  const n = Number(String(v).replace(/[£$,\\s]/g, ''));\n  return Number.isFinite(n) ? n : null;\n};\n\nconst mapped = [];\nfor (const [i, r] of rows.entries()) {\n  const td = toIsoDate(r[dateCol]);\n  if (!td) throw new Error(`row ${i}: cannot parse date '${r[dateCol]}'`);\n\n  let amount;\n  if (amtCol) {\n    amount = toNumber(r[amtCol]);\n  } else {\n    const moneyIn  = toNumber(r[inCol]) || 0;\n    const moneyOut = toNumber(r[outCol]) || 0;\n    amount = moneyIn - moneyOut;\n  }\n  if (amount === null || !Number.isFinite(amount)) {\n    throw new Error(`row ${i}: cannot parse amount`);\n  }\n\n  mapped.push({\n    transaction_date: td,\n    amount,\n    description: descCol ? String(r[descCol] || '') : '',\n    reference:   refCol  ? String(r[refCol]  || '') : null,\n    balance:     balCol  ? toNumber(r[balCol])      : null\n  });\n}\n\nconst crypto = require('crypto');\nconst input_hash = crypto.createHash('sha256')\n  .update(JSON.stringify({ bank_account_id: $('Validate Form Input').first().json.bank_account_id, rows: mapped }))\n  .digest('hex')\n  .slice(0, 16);\n\nreturn [{\n  json: {\n    bank_account_id: $('Validate Form Input').first().json.bank_account_id,\n    rows_json:       JSON.stringify(mapped),\n    input_hash,\n    row_count:       mapped.length\n  }\n}];"
+      }
+    },
+    {
+      "id": "bci-0005-vault-signing",
+      "name": "Vault: Signing Key",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "0wPA4DCDuehPC9Mf",
+          "name": "vault-token-header"
+        }
+      },
+      "parameters": {
+        "method": "GET",
+        "url": "http://vault:8200/v1/secret/data/signing",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      }
+    },
+    {
+      "id": "bci-0006-import",
+      "name": "Import Transactions",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1340, 300],
+      "credentials": {
+        "postgres": {
+          "id": "iTuuNfsqHY49MGhk",
+          "name": "HomeAI Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM import_bank_transactions(\n  {{ $('Map CSV Columns').first().json.bank_account_id }},\n  $pl${{ $('Map CSV Columns').first().json.rows_json }}$pl$::jsonb\n);",
+        "options": {}
+      }
+    },
+    {
+      "id": "bci-0007-sign-event",
+      "name": "Build + Sign Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300],
+      "parameters": {
+        "jsCode": "// One bank.imported summary event per upload. Per-row bank.transaction\n// events are deferred until bank_pipeline (Xero matching) is built —\n// emitting them now would just queue events the router has nowhere to send.\n\nconst crypto = require('crypto');\n\nconst vaultData = $('Vault: Signing Key').first().json;\nconst signing_key = vaultData?.data?.data?.payload_hmac_key;\nif (!signing_key) {\n  throw new Error('signing key not returned by vault — check vault-token-header credential scope');\n}\n\nconst summary = $input.first().json;\nconst inputData = $('Map CSV Columns').first().json;\n\nconst payload = {\n  bank_account_id: summary.bank_account_id,\n  entity_id:       summary.entity_id,\n  rows_received:   summary.rows_received,\n  rows_inserted:   summary.rows_inserted,\n  date_min:        summary.date_min,\n  date_max:        summary.date_max,\n  source:          'csv_upload'\n};\n\nconst canonical = JSON.stringify(payload, Object.keys(payload).sort());\nconst signature = crypto.createHmac('sha256', signing_key)\n                        .update(canonical)\n                        .digest('hex');\n\nreturn [{\n  json: {\n    event_type:        'bank.imported',\n    source:            'bank_csv_import',\n    entity_id:         summary.entity_id,\n    payload_json:      JSON.stringify(payload),\n    payload_signature: signature,\n    idempotency_key:   'bank_imported_' + inputData.input_hash,\n    pipeline_version:  '1.0',\n    bank_account_id:   summary.bank_account_id,\n    rows_received:     summary.rows_received,\n    rows_inserted:     summary.rows_inserted,\n    date_min:          summary.date_min,\n    date_max:          summary.date_max\n  }\n}];"
+      }
+    },
+    {
+      "id": "bci-0008-write-event-audit",
+      "name": "Write Event + Audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1780, 300],
+      "credentials": {
+        "postgres": {
+          "id": "iTuuNfsqHY49MGhk",
+          "name": "HomeAI Postgres"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT set_config('app.current_entity', '{{ $json.entity_id }}', true);\n\nWITH new_event AS (\n  INSERT INTO events\n    (event_type, source, entity_id, payload, payload_signature,\n     status, idempotency_key, pipeline_version)\n  SELECT '{{ $json.event_type }}',\n         '{{ $json.source }}',\n         {{ $json.entity_id }},\n         $pl${{ $json.payload_json }}$pl$::jsonb,\n         '{{ $json.payload_signature }}',\n         'done',\n         '{{ $json.idempotency_key }}',\n         '{{ $json.pipeline_version }}'\n   WHERE NOT EXISTS (\n     SELECT 1 FROM events WHERE idempotency_key = '{{ $json.idempotency_key }}'\n   )\n  RETURNING id, trace_id\n),\naudit AS (\n  INSERT INTO audit_log\n    (pipeline, event_id, trace_id, action, entity_id,\n     record_type, pipeline_version, result)\n  SELECT 'bank_csv_import', ne.id, ne.trace_id,\n         'csv_imported', {{ $json.entity_id }},\n         'bank_transaction_batch', '{{ $json.pipeline_version }}', 'success'\n    FROM new_event ne\n  RETURNING id\n)\nSELECT (SELECT id FROM new_event)  AS event_id,\n       (SELECT id FROM audit)      AS audit_id,\n       {{ $json.bank_account_id }} AS bank_account_id,\n       {{ $json.rows_received }}   AS rows_received,\n       {{ $json.rows_inserted }}   AS rows_inserted,\n       '{{ $json.date_min }}'::date AS date_min,\n       '{{ $json.date_max }}'::date AS date_max;",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (bank-csv)": {
+      "main": [[{ "node": "Validate Form Input", "type": "main", "index": 0 }]]
+    },
+    "Validate Form Input": {
+      "main": [[{ "node": "pdfplumber: parse-csv", "type": "main", "index": 0 }]]
+    },
+    "pdfplumber: parse-csv": {
+      "main": [[{ "node": "Map CSV Columns", "type": "main", "index": 0 }]]
+    },
+    "Map CSV Columns": {
+      "main": [[{ "node": "Vault: Signing Key", "type": "main", "index": 0 }]]
+    },
+    "Vault: Signing Key": {
+      "main": [[{ "node": "Import Transactions", "type": "main", "index": 0 }]]
+    },
+    "Import Transactions": {
+      "main": [[{ "node": "Build + Sign Event", "type": "main", "index": 0 }]]
+    },
+    "Build + Sign Event": {
+      "main": [[{ "node": "Write Event + Audit", "type": "main", "index": 0 }]]
+    }
+  }
+}

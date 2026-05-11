@@ -1,0 +1,123 @@
+{
+  "id": "cornwall-news-briefing-v1",
+  "name": "Cornwall News Briefing",
+  "active": true,
+  "nodes": [
+    {
+      "id": "trig",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 7 * * *" }] }
+      }
+    },
+    {
+      "id": "search",
+      "name": "SearXNG query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300],
+      "parameters": {
+        "url": "http://homeai-searxng:8080/search",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "q",         "value": "Tintagel OR \"North Cornwall\" news" },
+            { "name": "format",    "value": "json" },
+            { "name": "categories","value": "news" },
+            { "name": "time_range","value": "day" },
+            { "name": "language",  "value": "en" }
+          ]
+        },
+        "options": { "timeout": 20000 }
+      }
+    },
+    {
+      "id": "shortlist",
+      "name": "Top 5 + summarise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const data = $input.first().json;\nconst results = (data.results || []).slice(0, 5);\n// Build a single text block for the LLM to summarise\nconst blob = results.map((r, i) =>\n  `[${i+1}] ${r.title}\\n${r.url}\\n${(r.content || '').substring(0, 400)}`\n).join('\\n\\n');\nreturn [{ json: { count: results.length, blob, results } }];"
+      }
+    },
+    {
+      "id": "summarise",
+      "name": "Summarise via Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300],
+      "parameters": {
+        "url": "http://homeai-ollama:11434/api/generate",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen2.5:7b', system: 'You are a local news editor for Tintagel, North Cornwall. Summarise the news items below into 3-5 bullet points, in the order of importance to a local pub/property owner. Each bullet: one short sentence. Skip national news, ads, and items not about the locality. If nothing is locally relevant, just say \"Nothing local today.\" Plain text only, no markdown bold or bullets prefix — just plain lines starting with •.', prompt: 'Items:\\n\\n' + $('Top 5 + summarise').first().json.blob, stream: false }) }}",
+        "options": { "timeout": 60000 }
+      }
+    },
+    {
+      "id": "format",
+      "name": "Format brief",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const sl = $('Top 5 + summarise').first().json;\nconst sumResp = $input.first().json.response || '(no summary)';\nconst date = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });\nlet body = `<b>Cornwall briefing — ${date}</b>\\n\\n${sumResp.trim()}`;\nif (sl.count > 0) {\n  body += `\\n\\n<i>Sources (${sl.count}):</i>`;\n  for (const [i, r] of sl.results.entries()) {\n    body += `\\n${i+1}. <a href=\"${r.url}\">${r.title.substring(0, 80)}</a>`;\n  }\n} else {\n  body = `<b>Cornwall briefing — ${date}</b>\\n\\nNo news items returned by the search backend today.`;\n}\nreturn [{ json: { text: body } }];"
+      }
+    },
+    {
+      "id": "vault",
+      "name": "Vault",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 300],
+      "parameters": {
+        "url": "http://vault:8200/v1/secret/data/telegram",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" }
+      }
+    },
+    {
+      "id": "send",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1640, 300],
+      "parameters": {
+        "url": "={{ 'https://api.telegram.org/bot' + $json.data.data.bot_token + '/sendMessage' }}",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "chat_id",    "value": "={{ $json.data.data.chat_id }}" },
+            { "name": "text",       "value": "={{ $('Format brief').first().json.text }}" },
+            { "name": "parse_mode", "value": "HTML" },
+            { "name": "disable_web_page_preview", "value": "true" }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Schedule":           { "main": [[{ "node": "SearXNG query",        "type": "main", "index": 0 }]] },
+    "SearXNG query":      { "main": [[{ "node": "Top 5 + summarise",   "type": "main", "index": 0 }]] },
+    "Top 5 + summarise":  { "main": [[{ "node": "Summarise via Ollama","type": "main", "index": 0 }]] },
+    "Summarise via Ollama":{ "main": [[{ "node": "Format brief",       "type": "main", "index": 0 }]] },
+    "Format brief":       { "main": [[{ "node": "Vault",               "type": "main", "index": 0 }]] },
+    "Vault":              { "main": [[{ "node": "Send Telegram",       "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

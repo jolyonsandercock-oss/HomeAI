@@ -1,0 +1,169 @@
+{
+  "id": "nanny-v1",
+  "name": "Nanny (P8)",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "nodes": [
+    {
+      "id": "p8-0001-webhook",
+      "name": "Webhook (nanny)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "nanny",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nanny",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "p8-0002-validate",
+      "name": "Validate Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = raw.body || raw;\n\nconst payload = (body.payload && typeof body.payload === 'object')\n  ? body.payload\n  : (typeof body.payload === 'string' ? JSON.parse(body.payload) : {});\n\nconst event_id = body.id || raw.id;\nconst trace_id = body.trace_id || raw.trace_id;\nconst gmail_message_id = payload.gmail_message_id;\nconst email_id = payload.email_id || null;\nconst from_address = payload.from_address || '';\nconst subject = payload.subject || '';\nconst body_text_safe = String(payload.body_text_safe || payload.body_text || '').slice(0, 4000);\n\nif (!event_id)         throw new Error('missing event id');\nif (!trace_id)         throw new Error('missing trace_id');\nif (!gmail_message_id) throw new Error('payload missing gmail_message_id');\n\nreturn [{\n  json: {\n    event_id, trace_id, email_id, gmail_message_id,\n    from_address, subject, body_text_safe,\n    parent_event_id: event_id\n  }\n}];"
+      }
+    },
+    {
+      "id": "p8-0003-fetch-children",
+      "name": "Fetch Children",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [680, 300],
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, name, date_of_birth, school_email_domain FROM children ORDER BY id;",
+        "options": {}
+      }
+    },
+    {
+      "id": "p8-0004-vault-signing",
+      "name": "Vault: Signing Key",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300],
+      "credentials": {
+        "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" }
+      },
+      "parameters": {
+        "method": "GET",
+        "url": "http://vault:8200/v1/secret/data/signing",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      }
+    },
+    {
+      "id": "p8-0005-vault-anthropic",
+      "name": "Vault: Anthropic Key",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 300],
+      "credentials": {
+        "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" }
+      },
+      "parameters": {
+        "method": "GET",
+        "url": "http://vault:8200/v1/secret/data/anthropic",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      }
+    },
+    {
+      "id": "p8-0006-build-prompt",
+      "name": "Build Classifier Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300],
+      "parameters": {
+        "jsCode": "// Aggregate children into the Haiku system prompt so the classifier picks\n// the right child_id when the email mentions a name or school domain.\nconst children = $('Fetch Children').first().json;\nconst rows = Array.isArray(children) ? children : ($input.all().map(i => i.json));\n\nconst childrenList = rows.map(c =>\n  `  ${c.id}: ${c.name}` +\n  (c.school_email_domain ? ` (school: ${c.school_email_domain})` : '') +\n  (c.date_of_birth ? ` (dob: ${c.date_of_birth})` : '')\n).join('\\n');\n\nconst v = $('Validate Event').first().json;\nreturn [{ json: { ...v, children_list: childrenList } }];"
+      }
+    },
+    {
+      "id": "p8-0007-classify",
+      "name": "Classify via Haiku",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 384, system: \"You are a school + medical email classifier for Jo's children.\\nKnown children:\\n\" + $json.children_list + \"\\n\\nClassify the email into ONE event_type:\\n  appointment | school_letter | school_event | medical_visit | medication | report_card | absence | unknown\\n\\nReturn ONLY valid JSON. No markdown.\\nSchema: {\\n  \\\"child_id\\\": number (one of the IDs above, or null if uncertain),\\n  \\\"event_type\\\": string,\\n  \\\"event_date\\\": string (YYYY-MM-DD or null),\\n  \\\"deadline\\\": string (YYYY-MM-DD or null),\\n  \\\"urgency\\\": number (1-5),\\n  \\\"summary\\\": string (max 200 chars),\\n  \\\"requires_human\\\": boolean,\\n  \\\"is_medical\\\": boolean,\\n  \\\"confidence_score\\\": number (0-1)\\n}\", messages: [{ role: 'user', content: 'From: ' + $json.from_address + '\\nSubject: ' + $json.subject + '\\n\\n' + $json.body_text_safe }] }) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $('Vault: Anthropic Key').first().json.data.data.api_key }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      }
+    },
+    {
+      "id": "p8-0008-outcome",
+      "name": "Build OutcomeObject",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 300],
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst v = $('Build Classifier Prompt').first().json;\n\nlet ai;\ntry {\n  const text = item.content?.[0]?.text || '{}';\n  ai = JSON.parse(text);\n} catch (e) {\n  ai = { event_type: 'unknown', confidence_score: 0,\n         summary: 'parse error', requires_human: true, urgency: 1 };\n}\n\nconst validTypes = ['appointment','school_letter','school_event','medical_visit',\n                    'medication','report_card','absence','unknown'];\nconst event_type = validTypes.includes(ai.event_type) ? ai.event_type : 'unknown';\nconst child_id   = Number.isFinite(Number(ai.child_id)) ? Number(ai.child_id) : null;\nconst urgency    = Math.max(1, Math.min(5, parseInt(ai.urgency, 10) || 1));\nconst confidence = Math.min(1, Math.max(0, Number(ai.confidence_score) || 0));\nconst summary    = String(ai.summary || '').slice(0, 200);\nconst is_medical = !!ai.is_medical || event_type === 'medical_visit' || event_type === 'medication';\nconst event_date = (ai.event_date && /^\\d{4}-\\d{2}-\\d{2}$/.test(ai.event_date)) ? ai.event_date : null;\nconst deadline   = (ai.deadline   && /^\\d{4}-\\d{2}-\\d{2}$/.test(ai.deadline))   ? ai.deadline   : null;\n\nconst min_conf = 0.85; // SPEC §6.2 P8 threshold\nconst status = confidence >= min_conf\n  ? 'success'\n  : confidence >= min_conf * 0.85\n    ? 'escalate'\n    : 'fail';\n\nconst outcome = {\n  status,\n  confidence,\n  reasoning:    summary,\n  data:         { child_id, event_type, event_date, deadline, urgency, is_medical },\n  requires_human: status === 'fail' || !!ai.requires_human || child_id === null,\n  worker:       'nanny_classifier',\n  tier_used:    'haiku'\n};\n\n// Idempotency: child_{gmail_message_id}_{child_id-or-NA}\nconst idem_key = 'child_' + v.gmail_message_id + '_' + (child_id ?? 'na');\n\nreturn [{\n  json: {\n    ...v,\n    outcome,\n    outcome_json: JSON.stringify(outcome),\n    ai_raw: JSON.stringify(item.content || item),\n    child_id,\n    event_type,\n    event_date,\n    deadline,\n    urgency,\n    summary,\n    requires_human: outcome.requires_human,\n    is_medical,\n    idempotency_key: idem_key\n  }\n}];"
+      }
+    },
+    {
+      "id": "p8-0009-write",
+      "name": "Insert child_events + Audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2000, 300],
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH new_ce AS (\n  INSERT INTO child_events\n    (idempotency_key, event_id, trace_id, child_id, event_type, event_date,\n     deadline, urgency, summary, requires_human, source_email_id, status)\n  VALUES\n    ('{{ $json.idempotency_key }}',\n     {{ $json.event_id }},\n     '{{ $json.trace_id }}'::uuid,\n     {{ $json.child_id ?? 'NULL' }},\n     '{{ $json.event_type }}',\n     {{ $json.event_date ? `'${$json.event_date}'::date` : 'NULL' }},\n     {{ $json.deadline   ? `'${$json.deadline}'::date`   : 'NULL' }},\n     {{ $json.urgency }},\n     $pl${{ $json.summary }}$pl$,\n     {{ $json.requires_human }},\n     {{ $json.email_id ?? 'NULL' }},\n     'pending')\n  ON CONFLICT (idempotency_key) DO NOTHING\n  RETURNING id\n),\nnew_med AS (\n  INSERT INTO medical_history\n    (child_id, event_id, event_date, event_type, source_email_id, notes)\n  SELECT {{ $json.child_id ?? 'NULL' }},\n         {{ $json.event_id }},\n         {{ $json.event_date ? `'${$json.event_date}'::date` : 'NULL' }},\n         '{{ $json.event_type }}',\n         {{ $json.email_id ?? 'NULL' }},\n         $pl${{ $json.summary }}$pl$\n   WHERE {{ $json.is_medical }} = true\n     AND {{ $json.child_id ?? 'NULL' }} IS NOT NULL\n     AND EXISTS (SELECT 1 FROM new_ce)\n  RETURNING id\n)\nINSERT INTO audit_log\n  (pipeline, event_id, trace_id, action, record_type, record_id,\n   ai_worker, ai_model, ai_raw_output, ai_parsed,\n   pipeline_version, result)\nSELECT 'nanny_pipeline',\n       {{ $json.event_id }},\n       '{{ $json.trace_id }}'::uuid,\n       'classify_child_event',\n       'child_event',\n       (SELECT id FROM new_ce),\n       'nanny_classifier',\n       'claude-haiku-4-5-20251001',\n       $pl${{ $json.ai_raw }}$pl$,\n       $pl${{ $json.outcome_json }}$pl$::jsonb,\n       '1.0',\n       '{{ $json.outcome.status }}'\nRETURNING id AS audit_id;",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (nanny)": {
+      "main": [[{ "node": "Validate Event", "type": "main", "index": 0 }]]
+    },
+    "Validate Event": {
+      "main": [[{ "node": "Fetch Children", "type": "main", "index": 0 }]]
+    },
+    "Fetch Children": {
+      "main": [[{ "node": "Vault: Signing Key", "type": "main", "index": 0 }]]
+    },
+    "Vault: Signing Key": {
+      "main": [[{ "node": "Vault: Anthropic Key", "type": "main", "index": 0 }]]
+    },
+    "Vault: Anthropic Key": {
+      "main": [[{ "node": "Build Classifier Prompt", "type": "main", "index": 0 }]]
+    },
+    "Build Classifier Prompt": {
+      "main": [[{ "node": "Classify via Haiku", "type": "main", "index": 0 }]]
+    },
+    "Classify via Haiku": {
+      "main": [[{ "node": "Build OutcomeObject", "type": "main", "index": 0 }]]
+    },
+    "Build OutcomeObject": {
+      "main": [[{ "node": "Insert child_events + Audit", "type": "main", "index": 0 }]]
+    }
+  }
+}

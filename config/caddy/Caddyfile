@@ -1,0 +1,93 @@
+{
+    auto_https off
+}
+
+# Direct port-passthrough proxies (existing services on their familiar ports)
+http://100.104.82.53:5678 {
+    reverse_proxy homeai-n8n:5678
+}
+
+http://100.104.82.53:3000 {
+    reverse_proxy homeai-metabase:3000
+}
+
+http://100.104.82.53:8080 {
+    reverse_proxy homeai-open-webui:8080
+}
+
+# Path-based routing on port 80 — single Tailscale URL, multiple internal services.
+# Reachable as http://100.104.82.53/dashboard, /markitdown, /healthz, /auth.
+http://:80 {
+    handle_path /dashboard/* {
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /dashboard {
+        redir /dashboard/ permanent
+    }
+
+    # U18 — pub-side live ops board, served by the same build-dashboard
+    # FastAPI service (different routes). Caddy strips the /pub prefix so
+    # internal links from pub.html resolve cleanly to /api/pub/*.
+    handle /pub {
+        rewrite * /pub
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /pub/* {
+        reverse_proxy homeai-build-dashboard:8090
+    }
+
+    # U20 — forensics UI (also build-dashboard)
+    handle /forensics {
+        rewrite * /forensics
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /forensics/* {
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /api/forensics/* {
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /api/pub/* {
+        reverse_proxy homeai-build-dashboard:8090
+    }
+
+    # U22 — Classifier prompt playground
+    handle /playground {
+        rewrite * /playground
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /api/playground/* {
+        reverse_proxy homeai-build-dashboard:8090
+    }
+
+    handle_path /markitdown/* {
+        reverse_proxy homeai-markitdown:8004
+    }
+    handle /markitdown {
+        redir /markitdown/ permanent
+    }
+
+    handle_path /auth/* {
+        respond "Authelia not yet bootstrapped (U12 Stage D)" 503
+    }
+    handle /auth {
+        respond "Authelia not yet bootstrapped (U12 Stage D)" 503
+    }
+
+    # U21 — SearXNG private search
+    handle_path /search/* {
+        reverse_proxy homeai-searxng:8080
+    }
+    handle /search {
+        redir /search/ permanent
+    }
+
+    handle /healthz {
+        respond "ok" 200
+    }
+
+    handle / {
+        rewrite * /landing
+        reverse_proxy homeai-build-dashboard:8090
+    }
+}

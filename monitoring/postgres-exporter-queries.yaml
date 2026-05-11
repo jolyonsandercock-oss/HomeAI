@@ -1,0 +1,173 @@
+# Custom queries for postgres_exporter — Home AI business metrics.
+#
+# Each block becomes a metric family. The 'query' is run on every scrape
+# (15s by default) so keep it cheap. All counts/aggregates only — no joins
+# across large tables. Metrics are exposed at /metrics on the exporter.
+
+events_pending:
+  query: "SELECT event_type, count(*)::float AS count FROM events WHERE status = 'pending' GROUP BY event_type"
+  master: true
+  metrics:
+    - event_type:
+        usage: "LABEL"
+        description: "Type of event"
+    - count:
+        usage: "GAUGE"
+        description: "Number of events with status='pending' by event_type"
+
+events_status:
+  query: "SELECT status, count(*)::float AS count FROM events GROUP BY status"
+  master: true
+  metrics:
+    - status:
+        usage: "LABEL"
+        description: "Event status"
+    - count:
+        usage: "GAUGE"
+        description: "Number of events grouped by status"
+
+events_overflow:
+  query: "SELECT count(*)::float AS count FROM events_overflow"
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Rows in events_overflow partition (should always be 0)"
+
+dead_letter:
+  query: "SELECT count(*)::float AS count FROM dead_letter"
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Total rows in dead_letter table"
+
+dead_letter_recent:
+  query: "SELECT count(*)::float AS count FROM dead_letter WHERE created_at > NOW() - INTERVAL '1 hour'"
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Dead-letter rows added in the last hour"
+
+audit_log_recent:
+  # Fallback row '_none_' / '_none_' / 0 ensures the metric is always emitted,
+  # even when no audit activity in the last hour. Otherwise postgres_exporter
+  # drops the whole metric family and dashboards / alert rules silently miss it.
+  query: |
+    SELECT * FROM (
+      SELECT pipeline, result, count(*)::float AS count
+        FROM audit_log
+       WHERE created_at > NOW() - INTERVAL '1 hour'
+       GROUP BY pipeline, result
+      UNION ALL
+      SELECT '_none_'::text, '_none_'::text, 0::float
+    ) x
+  master: true
+  metrics:
+    - pipeline:
+        usage: "LABEL"
+        description: "Pipeline name"
+    - result:
+        usage: "LABEL"
+        description: "success | failure | escalate | etc"
+    - count:
+        usage: "GAUGE"
+        description: "audit_log rows in the last hour by pipeline+result"
+
+bank_unreconciled:
+  query: "SELECT count(*)::float AS count FROM bank_transactions WHERE reconciled = false"
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Bank transactions awaiting reconciliation"
+
+emails_review_queue:
+  query: |
+    SELECT count(*)::float AS count
+      FROM emails
+     WHERE requires_human = true
+        OR confidence_score < 0.75
+        OR NOT processed
+        OR action_required = true
+  master: true
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Emails currently in the human review queue"
+
+events_partition_rows:
+  # One row per child partition of `events`. Cheap because pg_class.reltuples
+  # is the planner's row estimate (no full scan). Updates on autovacuum.
+  query: |
+    SELECT child.relname AS partition,
+           pg_class_apply.reltuples::float AS reltuples
+      FROM pg_inherits i
+      JOIN pg_class parent      ON parent.oid = i.inhparent
+      JOIN pg_class child       ON child.oid  = i.inhrelid
+      JOIN pg_class pg_class_apply ON pg_class_apply.oid = child.oid
+     WHERE parent.relname = 'events'
+  master: true
+  metrics:
+    - partition:
+        usage: "LABEL"
+        description: "Partition name (events_YYYY_MM or events_overflow)"
+    - reltuples:
+        usage: "GAUGE"
+        description: "Estimated row count (pg_class.reltuples)"
+
+hmac_verification_recent:
+  # From audit_log rows written by hmac-verifier-v1 daily run.
+  query: |
+    SELECT
+      COALESCE(SUM((ai_parsed->>'verified')::int), 0)::float AS verified_24h,
+      COALESCE(SUM((ai_parsed->>'failed')::int),   0)::float AS failed_24h,
+      COALESCE(SUM((ai_parsed->>'sample_size')::int), 0)::float AS sample_24h
+    FROM audit_log
+    WHERE pipeline = 'hmac_verifier'
+      AND created_at > NOW() - INTERVAL '24 hours'
+  master: true
+  metrics:
+    - verified_24h:
+        usage: "GAUGE"
+        description: "HMAC signatures verified in last 24h"
+    - failed_24h:
+        usage: "GAUGE"
+        description: "HMAC signature verification failures in last 24h"
+    - sample_24h:
+        usage: "GAUGE"
+        description: "Total events sampled for HMAC verification in last 24h"
+
+stale_lease_recovery_recent:
+  # Counts of recover_stale_leases activity in the last hour, derived from
+  # the JSONB ai_parsed column written by V14.
+  query: |
+    SELECT
+      COALESCE(SUM((ai_parsed->>'recovered_count')::int), 0)::float     AS recovered_recent,
+      COALESCE(SUM((ai_parsed->>'dead_lettered_count')::int), 0)::float AS dead_lettered_recent
+    FROM audit_log
+    WHERE pipeline = 'master_router'
+      AND action   = 'stale_lease_recovery'
+      AND created_at > NOW() - INTERVAL '1 hour'
+  master: true
+  metrics:
+    - recovered_recent:
+        usage: "GAUGE"
+        description: "Stale leases recovered in the last hour"
+    - dead_lettered_recent:
+        usage: "GAUGE"
+        description: "Events dead-lettered by stale lease recovery in the last hour"
+
+events_processing_lease_age:
+  # Max processing age of in-flight events. If this grows unbounded, leases
+  # are stuck — recover_stale_leases() should be running.
+  query: |
+    SELECT COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(processing_started_at))), 0)::float AS oldest_seconds
+      FROM events
+     WHERE status = 'processing'
+  master: true
+  metrics:
+    - oldest_seconds:
+        usage: "GAUGE"
+        description: "Age in seconds of the oldest in-flight processing lease (0 when no in-flight events)"

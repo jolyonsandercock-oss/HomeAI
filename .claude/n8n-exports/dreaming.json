@@ -1,0 +1,158 @@
+{
+  "id": "dreaming-v1",
+  "name": "Dreaming (Workflow H)",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": false
+  },
+  "nodes": [
+    {
+      "id": "dr-0001-schedule",
+      "name": "Daily 02:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 2 * * *" }] }
+      }
+    },
+    {
+      "id": "dr-0002-vault",
+      "name": "Vault: Anthropic Key",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": { "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" } },
+      "parameters": {
+        "method": "GET",
+        "url": "http://vault:8200/v1/secret/data/anthropic",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      }
+    },
+    {
+      "id": "dr-0003-aggregate",
+      "name": "Aggregate Failures (24h)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [680, 300],
+      "credentials": { "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" } },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Group failures by pipeline + reasoning fragment.\n-- Each row is one observed failure pattern in the last 24 hours.\nSELECT pipeline,\n       result,\n       count(*)::int                         AS occurrences,\n       ai_worker,\n       array_agg(DISTINCT (ai_parsed->>'reasoning'))\n         FILTER (WHERE ai_parsed->>'reasoning' IS NOT NULL\n                   AND length(ai_parsed->>'reasoning') > 0)\n         AS reasonings,\n       array_agg(DISTINCT error_msg)\n         FILTER (WHERE error_msg IS NOT NULL)\n         AS error_msgs\n  FROM audit_log\n WHERE created_at > NOW() - INTERVAL '24 hours'\n   AND result IN ('fail','failure','escalate','partial_failure')\n GROUP BY pipeline, result, ai_worker\n HAVING count(*) >= 1\n ORDER BY count(*) DESC\n LIMIT 25;",
+        "options": {}
+      }
+    },
+    {
+      "id": "dr-0004-build-prompt",
+      "name": "Build Dreaming Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300],
+      "parameters": {
+        "jsCode": "// Build a compact prompt for Haiku — the goal is *patterns*, not raw\n// failure counts. Capped at 2KB output so Master Router can prepend it\n// to AI worker system prompts without blowing context budgets.\nconst rows = $input.all().map(i => i.json);\nif (rows.length === 0) {\n  return [{ json: { skip: true, reason: 'no failures in last 24h' } }];\n}\n\nconst lines = rows.slice(0, 25).map(r => {\n  const reasonings = (r.reasonings || []).filter(x => x).slice(0, 3)\n    .map(s => String(s).slice(0, 200)).join(' | ');\n  const errs = (r.error_msgs || []).filter(x => x).slice(0, 2)\n    .map(s => String(s).slice(0, 200)).join(' | ');\n  return `${r.pipeline} (${r.result}, ${r.occurrences}x, worker=${r.ai_worker || 'n/a'}): ` +\n         (reasonings || errs || '(no detail)');\n});\n\nconst input = lines.join('\\n');\n\nconst sys = `You distil 24 hours of pipeline failures into ≤8 short heuristics that a future AI worker can apply to avoid repeating the failure. Output is read by AI workers as part of their system prompt.\n\nRules:\n- Each heuristic is a single sentence, ≤140 chars, imperative voice.\n- Mention the specific pattern (e.g. \"Treat St Austell Brewery invoices over £2000 as anomalous — flag for human review\").\n- Skip generic advice. Skip apologies.\n- If the failures are too noisy or generic to extract patterns, return an empty list.\n\nReturn ONLY a JSON array of strings, max 8 entries.`;\n\nreturn [{\n  json: {\n    skip: false,\n    raw_failures: input,\n    prompt_system: sys,\n    failure_count: rows.length\n  }\n}];"
+      }
+    },
+    {
+      "id": "dr-0005-skip-check",
+      "name": "Anything to Dream About?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1120, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "leftValue": "", "caseSensitive": true, "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [{
+            "operator": { "type": "boolean", "operation": "false" },
+            "leftValue": "={{ $json.skip === true }}",
+            "rightValue": ""
+          }]
+        }
+      }
+    },
+    {
+      "id": "dr-0006-noop",
+      "name": "Quiet Day — No Update",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1340, 200],
+      "parameters": {}
+    },
+    {
+      "id": "dr-0007-haiku",
+      "name": "Haiku: Distil Heuristics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1024, system: $json.prompt_system, messages: [{ role: 'user', content: $json.raw_failures }] }) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $('Vault: Anthropic Key').first().json.data.data.api_key }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "options": { "timeout": 45000 }
+      }
+    },
+    {
+      "id": "dr-0008-format",
+      "name": "Format heuristics.md",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 400],
+      "parameters": {
+        "jsCode": "// Parse Haiku JSON array → markdown bullets, capped at 2KB.\nconst item = $input.first().json;\nlet heuristics = [];\ntry {\n  let text = item.content?.[0]?.text || '[]';\n  if (text.startsWith('```')) text = text.replace(/^```[a-z]*\\n?/, '').replace(/```\\s*$/, '').trim();\n  heuristics = JSON.parse(text);\n  if (!Array.isArray(heuristics)) heuristics = [];\n} catch (e) {\n  heuristics = [];\n}\nheuristics = heuristics.filter(h => typeof h === 'string' && h.trim().length > 0).slice(0, 8);\n\nconst now = new Date().toISOString();\nconst failureCount = $('Build Dreaming Prompt').first().json.failure_count;\n\nlet md = `# Heuristics — Dreaming Workflow H\\n\\n` +\n         `Auto-generated nightly by \\`dreaming-v1\\`. Do not hand-edit —\\n` +\n         `your edits are overwritten on the next 02:00 run.\\n\\n` +\n         `Master Router reads this file at start-of-batch (capped at 2KB)\\n` +\n         `and prepends the most recent entries to AI worker system prompts.\\n\\n` +\n         `Generated: ${now}\\n` +\n         `Source: ${failureCount} failure groups in audit_log over last 24h\\n\\n` +\n         `---\\n\\n`;\n\nif (heuristics.length === 0) {\n  md += '_(Haiku found no actionable patterns from this run — quiet day or noisy failures.)_\\n';\n} else {\n  md += heuristics.map(h => `- ${h}`).join('\\n') + '\\n';\n}\n\n// Cap whole file at 2KB so Master Router can paste it cheaply\nconst FILE_CAP = 2048;\nif (md.length > FILE_CAP) md = md.slice(0, FILE_CAP - 1) + '…';\n\nreturn [{\n  json: {\n    file_path: '/data/storage/dreaming/heuristics.md',\n    content: md,\n    heuristics_count: heuristics.length,\n    failure_count: failureCount,\n  },\n  binary: { data: { data: Buffer.from(md, 'utf8').toString('base64'),\n                    fileName: 'heuristics.md', mimeType: 'text/markdown' } }\n}];"
+      }
+    },
+    {
+      "id": "dr-0009-write",
+      "name": "Write heuristics.md",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [1780, 400],
+      "parameters": {
+        "fileName": "=/data/storage/dreaming/heuristics.md",
+        "options": {}
+      }
+    },
+    {
+      "id": "dr-0010-audit",
+      "name": "Audit Dream Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2000, 400],
+      "credentials": { "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" } },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (pipeline, action, pipeline_version, result, ai_worker, ai_model, ai_parsed)\nVALUES ('dreaming', 'distil_heuristics', '1.0', 'success',\n        'dreaming_distiller', 'claude-haiku-4-5-20251001',\n        jsonb_build_object('heuristics_count', {{ $('Format heuristics.md').first().json.heuristics_count }},\n                           'failure_groups', {{ $('Format heuristics.md').first().json.failure_count }}))\nRETURNING id;",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Daily 02:00":              { "main": [[{ "node": "Vault: Anthropic Key", "type": "main", "index": 0 }]] },
+    "Vault: Anthropic Key":     { "main": [[{ "node": "Aggregate Failures (24h)", "type": "main", "index": 0 }]] },
+    "Aggregate Failures (24h)": { "main": [[{ "node": "Build Dreaming Prompt", "type": "main", "index": 0 }]] },
+    "Build Dreaming Prompt":    { "main": [[{ "node": "Anything to Dream About?", "type": "main", "index": 0 }]] },
+    "Anything to Dream About?": {
+      "main": [
+        [{ "node": "Haiku: Distil Heuristics", "type": "main", "index": 0 }],
+        [{ "node": "Quiet Day — No Update",    "type": "main", "index": 0 }]
+      ]
+    },
+    "Haiku: Distil Heuristics": { "main": [[{ "node": "Format heuristics.md", "type": "main", "index": 0 }]] },
+    "Format heuristics.md":     { "main": [[{ "node": "Write heuristics.md", "type": "main", "index": 0 }]] },
+    "Write heuristics.md":      { "main": [[{ "node": "Audit Dream Run", "type": "main", "index": 0 }]] }
+  }
+}

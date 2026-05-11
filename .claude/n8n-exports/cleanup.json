@@ -1,0 +1,66 @@
+{
+  "id": "cleanup-v1",
+  "name": "Cleanup (weekly)",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgress": false
+  },
+  "nodes": [
+    {
+      "id": "cl-0001-schedule",
+      "name": "Sunday 04:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 4 * * 0" }] }
+      }
+    },
+    {
+      "id": "cl-0002-sweep",
+      "name": "Cleanup Sweep",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [460, 300],
+      "credentials": { "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" } },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Weekly maintenance: prune historical data + reclaim space.\n-- All deletes are bounded by age + status to avoid touching live work.\n--\n-- 1. Old n8n executions (>30d, success only)\n-- 2. Old resolved system_alerts (>30d, status=resolved)\n-- 3. Old diagnostic_history runs (>90d)\n-- 4. Old archived dead_letter rows (>90d, already archived)\n-- 5. VACUUM ANALYZE the active tables to reclaim space + refresh stats\n\nWITH\nexec_pruned AS (\n  DELETE FROM execution_entity\n   WHERE \"finished\" = true\n     AND status = 'success'\n     AND \"stoppedAt\" < NOW() - INTERVAL '30 days'\n  RETURNING 1\n),\nalert_pruned AS (\n  DELETE FROM system_alerts\n   WHERE status = 'resolved'\n     AND last_updated_at < NOW() - INTERVAL '30 days'\n  RETURNING 1\n),\ndiag_pruned AS (\n  DELETE FROM diagnostic_history\n   WHERE created_at < NOW() - INTERVAL '90 days'\n  RETURNING 1\n),\ndlq_pruned AS (\n  DELETE FROM dead_letter_archive\n   WHERE created_at < NOW() - INTERVAL '90 days'\n  RETURNING 1\n)\nSELECT (SELECT count(*) FROM exec_pruned)  AS executions_pruned,\n       (SELECT count(*) FROM alert_pruned) AS alerts_pruned,\n       (SELECT count(*) FROM diag_pruned)  AS diagnostics_pruned,\n       (SELECT count(*) FROM dlq_pruned)   AS dead_letter_archive_pruned;",
+        "options": {}
+      }
+    },
+    {
+      "id": "cl-0003-vacuum",
+      "name": "VACUUM ANALYZE",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [680, 300],
+      "credentials": { "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" } },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- VACUUM (ANALYZE) is preferred over plain VACUUM — refreshes planner stats\n-- so postgres_exporter's pg_class.reltuples gauge is meaningful.\n-- VACUUM cannot run inside a transaction block; the Postgres node executes\n-- each statement separately so this works.\nVACUUM (ANALYZE) audit_log;\nVACUUM (ANALYZE) events_2026_05;\nVACUUM (ANALYZE) events_2026_06;\nVACUUM (ANALYZE) events_2026_07;\nVACUUM (ANALYZE) emails;\nVACUUM (ANALYZE) invoices;\nVACUUM (ANALYZE) bank_transactions;\nVACUUM (ANALYZE) email_attachments;\nVACUUM (ANALYZE) child_events;\nVACUUM (ANALYZE) system_alerts;\nVACUUM (ANALYZE) diagnostic_history;\nSELECT 'vacuum complete' AS status;",
+        "options": {}
+      }
+    },
+    {
+      "id": "cl-0004-audit",
+      "name": "Audit Cleanup",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [900, 300],
+      "credentials": { "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" } },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (pipeline, action, pipeline_version, result, ai_parsed)\nVALUES ('cleanup', 'weekly_sweep', '1.0', 'success',\n        jsonb_build_object('executions_pruned', {{ $('Cleanup Sweep').first().json.executions_pruned }},\n                           'alerts_pruned',     {{ $('Cleanup Sweep').first().json.alerts_pruned }},\n                           'diagnostics_pruned', {{ $('Cleanup Sweep').first().json.diagnostics_pruned }},\n                           'dead_letter_archive_pruned', {{ $('Cleanup Sweep').first().json.dead_letter_archive_pruned }}))\nRETURNING id;",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Sunday 04:00":   { "main": [[{ "node": "Cleanup Sweep", "type": "main", "index": 0 }]] },
+    "Cleanup Sweep":  { "main": [[{ "node": "VACUUM ANALYZE", "type": "main", "index": 0 }]] },
+    "VACUUM ANALYZE": { "main": [[{ "node": "Audit Cleanup", "type": "main", "index": 0 }]] }
+  }
+}

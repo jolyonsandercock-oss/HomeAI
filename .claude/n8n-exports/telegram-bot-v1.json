@@ -1,0 +1,164 @@
+{
+  "id": "telegram-bot-v1",
+  "name": "Telegram Bot (commands)",
+  "active": true,
+  "nodes": [
+    {
+      "id": "trig",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "parameters": {
+        "rule": { "interval": [{ "field": "minutes", "minutesInterval": 1 }] }
+      }
+    },
+    {
+      "id": "load-state",
+      "name": "Load offset",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [420, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT last_update_id FROM telegram_bot_state WHERE bot_id = 'homeai';",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      }
+    },
+    {
+      "id": "vault",
+      "name": "Vault",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300],
+      "parameters": {
+        "url": "http://vault:8200/v1/secret/data/telegram",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": { "id": "0wPA4DCDuehPC9Mf", "name": "vault-token-header" }
+      }
+    },
+    {
+      "id": "get-updates",
+      "name": "getUpdates",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 300],
+      "parameters": {
+        "url": "={{ 'https://api.telegram.org/bot' + $json.data.data.bot_token + '/getUpdates' }}",
+        "method": "GET",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "offset",  "value": "={{ ($('Load offset').first().json.last_update_id || 0) + 1 }}" },
+            { "name": "timeout", "value": "5" },
+            { "name": "allowed_updates", "value": "[\"message\"]" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "fetch-stats",
+      "name": "Fetch stats",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1080, 300],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SET app.current_entity = 'all'; WITH a AS (SELECT COUNT(*) FILTER (WHERE result='success') AS success, COUNT(*) FILTER (WHERE result='failure') AS failure, COUNT(*) FILTER (WHERE provider='local') AS local_calls, COUNT(*) FILTER (WHERE provider='anthropic') AS cloud_calls FROM audit_log WHERE created_at > NOW() - INTERVAL '24 hours'), e AS (SELECT COUNT(*) FILTER (WHERE status='processed') AS processed, COUNT(*) FILTER (WHERE status='failed') AS failed, COUNT(*) FILTER (WHERE status IN ('pending','processing')) AS in_flight FROM events WHERE created_at > NOW() - INTERVAL '24 hours'), al AS (SELECT COUNT(*) AS firing FROM system_alerts WHERE status='firing' AND acknowledged=FALSE), dl AS (SELECT COUNT(*) AS open FROM dead_letter WHERE resolved=FALSE), inv AS (SELECT COUNT(*) FILTER (WHERE status='needs_review' OR requires_human=TRUE) AS needs_review FROM invoices WHERE created_at > NOW() - INTERVAL '24 hours'), em AS (SELECT COUNT(*) AS classified_24h FROM emails WHERE received_at > NOW() - INTERVAL '24 hours') SELECT a.success, a.failure, a.local_calls, a.cloud_calls, e.processed, e.failed, e.in_flight, al.firing, dl.open, inv.needs_review, em.classified_24h FROM a, e, al, dl, inv, em;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      }
+    },
+    {
+      "id": "dispatch",
+      "name": "Dispatch commands",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const updates    = $('getUpdates').first().json.result || [];\nconst tg         = $('Vault').first().json.data.data;\nconst stats      = $('Fetch stats').first().json;\nconst configChat = String(tg.chat_id);\n\nconst out = [];\nlet maxUpdateId = $('Load offset').first().json.last_update_id || 0;\n\nfunction renderDigest(s) {\n  const total = Number(s.local_calls) + Number(s.cloud_calls);\n  const sov = total === 0 ? 'no AI calls' : `${(100 * s.local_calls / total).toFixed(1)}% local (${s.local_calls}/${total})`;\n  return [\n    '<b>Home AI — current snapshot</b>',\n    '',\n    '<b>Last 24h</b>',\n    `• ${s.success}OK / ${s.failure}FAIL AI calls`,\n    `• ${s.processed} events processed, ${s.failed} failed, ${s.in_flight} in flight`,\n    `• ${s.firing} firing alerts, ${s.open} open dead letters`,\n    `• ${s.classified_24h} emails classified, ${s.needs_review} invoices need review`,\n    '',\n    `<b>Sovereignty:</b> ${sov}`,\n  ].join('\\n');\n}\n\nfunction renderQueue(s) {\n  return [\n    '<b>Home AI — queue</b>',\n    '',\n    `• Open dead letters: ${s.open}`,\n    `• Invoices needing review: ${s.needs_review}`,\n    `• Events in flight: ${s.in_flight}`,\n    `• Failing alerts: ${s.firing}`,\n  ].join('\\n');\n}\n\nfunction renderHelp() {\n  return [\n    '<b>Home AI — commands</b>',\n    '/digest — current snapshot of last 24h activity',\n    '/queue  — open dead letters + items needing review',\n    '/help   — show this list',\n  ].join('\\n');\n}\n\nfor (const u of updates) {\n  if (u.update_id > maxUpdateId) maxUpdateId = u.update_id;\n  const m = u.message;\n  if (!m || !m.text) continue;\n  const fromChat = String(m.chat?.id ?? '');\n  if (fromChat !== configChat) continue;\n  const text = m.text.trim();\n  if (!text.startsWith('/')) continue;\n  const cmd = text.split(/\\s+/)[0].split('@')[0].toLowerCase();\n\n  let reply;\n  if      (cmd === '/digest') reply = renderDigest(stats);\n  else if (cmd === '/queue')  reply = renderQueue(stats);\n  else if (cmd === '/help' || cmd === '/start') reply = renderHelp();\n  else reply = `Unknown command: ${cmd}\\nTry /help`;\n\n  out.push({ json: { _kind: 'reply', chat_id: tg.chat_id, bot_token: tg.bot_token, text: reply } });\n}\n\n// Always emit a control item so the offset gets persisted even when no commands ran.\nout.push({ json: { _kind: 'control', max_update_id: maxUpdateId } });\nreturn out;"
+      }
+    },
+    {
+      "id": "split",
+      "name": "Reply or persist?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1520, 300],
+      "parameters": {
+        "looseTypeValidation": true,
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            { "id": "c1",
+              "operator": { "type": "string", "operation": "equals", "name": "filter.operator.equals" },
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "control" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "send",
+      "name": "Send reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1760, 380],
+      "parameters": {
+        "url": "={{ 'https://api.telegram.org/bot' + $json.bot_token + '/sendMessage' }}",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "chat_id", "value": "={{ $json.chat_id }}" },
+            { "name": "text",    "value": "={{ $json.text }}" },
+            { "name": "parse_mode", "value": "HTML" },
+            { "name": "disable_web_page_preview", "value": "true" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "persist",
+      "name": "Persist offset",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1760, 220],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE telegram_bot_state SET last_update_id = GREATEST(last_update_id, {{ $json.max_update_id }}), updated_at = NOW() WHERE bot_id = 'homeai';",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": { "id": "iTuuNfsqHY49MGhk", "name": "HomeAI Postgres" }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule":           { "main": [[{ "node": "Load offset",   "type": "main", "index": 0 }]] },
+    "Load offset":        { "main": [[{ "node": "Vault",         "type": "main", "index": 0 }]] },
+    "Vault":              { "main": [[{ "node": "getUpdates",    "type": "main", "index": 0 }]] },
+    "getUpdates":         { "main": [[{ "node": "Fetch stats",   "type": "main", "index": 0 }]] },
+    "Fetch stats":        { "main": [[{ "node": "Dispatch commands", "type": "main", "index": 0 }]] },
+    "Dispatch commands":  { "main": [[{ "node": "Reply or persist?", "type": "main", "index": 0 }]] },
+    "Reply or persist?":  { "main": [
+      [{ "node": "Persist offset", "type": "main", "index": 0 }],
+      [{ "node": "Send reply",     "type": "main", "index": 0 }]
+    ]}
+  },
+  "settings": { "executionOrder": "v1" }
+}
