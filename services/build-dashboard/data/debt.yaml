@@ -12,11 +12,23 @@ items:
   #     (receipt) when body matches payment-notification regexes.
   #   Verify weekly: SELECT COUNT(*) FROM dead_letter WHERE pipeline='invoice_pipeline' AND resolved=false AND created_at > NOW() - INTERVAL '7 days';
 
+  # ✓ P5 TouchOffice — RESOLVED 2026-05-11 (U27). Browser scrape + 3-widget
+  #   INSERTs + 3am cron live. Backfill running (30d → 3y). Surfaced on
+  #   /touchoffice dashboard page.
   - severity: medium
-    title: P5/P6 need Playwright-based scraping (no email export available)
-    detail: User confirmed 2026-05-11 — neither TouchOffice nor Caterbook can email daily reports. Both portals are browser-only. Current Pipeline 5/6 (Gmail-trigger + Haiku report_parser) cannot fire. Scoped as U27 sprint — build a Playwright scraper service (headless Chromium in a container on ai-internal), cron-triggered daily, that logs into touchoffice.net + Caterbook, extracts the same fields the existing parsers expect, and emits epos.report.received / accommodation.received events. Existing parser/validator/INSERT nodes stay; only the trigger + source change. Old debt note about "format unknown from fixtures" is moot — Playwright extracts directly from the rendered HTML.
-    unblocks: Useful epos_daily / accommodation_daily rows
-    estimate: 4-6h (see /home_ai/.claude/sprints/U27-playwright-p5-p6.md)
+    title: P6 Caterbook — email-driven pipeline not yet built
+    detail: >
+      Caterbook sends a daily "Arrivals and Departures" email with a PDF
+      attachment to stay@malthousetintagel.com (received in
+      info@malthousetintagel.com). Browser scraping is parked — the email
+      route is strictly better. New pipeline needs to: filter Gmail by
+      subject + recipient, fetch the PDF via homeai-google-fetch, parse via
+      pdfplumber, explode each booking into per-night rows in
+      caterbook_room_nights, plus a daily snapshot for the dashboard. Cron
+      at 07:00. Backfill via Gmail search going as far back as the inbox
+      holds. Full plan at .claude/sprints/U28-caterbook-email-pipeline.md.
+    unblocks: Per-room revenue trend, arrivals/stayovers/departures dashboard
+    estimate: 4-5h (V28 migration + n8n workflow + /caterbook dashboard page)
 
   # ▸ NAS off-host backup — POSTPONED 2026-05-11 (user decision).
   #   GitHub off-host-backup (U26 option 9) provides text-config DR; the actual

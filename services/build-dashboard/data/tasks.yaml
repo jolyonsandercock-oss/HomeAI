@@ -23,10 +23,11 @@ needs_user:
     detail: Register at developer.xero.com, run OAuth Playground for refresh tokens (one for Trading, one for Estates), store at secret/xero/{trading,estates}.
     estimate: 30 min
 
-  - id: scraper-creds
-    title: TouchOffice + Caterbook credentials for Playwright scraper (U27)
-    detail: Email-export reports aren't offered by either vendor (confirmed 2026-05-11) — P5/P6 pivot to browser scraping. Need username + password for touchoffice.net and Caterbook portal stashed to Vault at secret/touchoffice and secret/caterbook. Flag any 2FA / captcha so the login flow plans around it.
-    estimate: 5 min
+  # ✓ scraper-creds completed 2026-05-11 — TouchOffice + Caterbook creds in Vault.
+  # ✓ TouchOffice scraper + ingest live; daily 03:00 cron installed. Backfill
+  #   in progress (30 days first, then 3 years). See /touchoffice in dashboard.
+  # → Caterbook pivoted from browser scrape to email-driven pipeline.
+  #   Plan in .claude/sprints/U28-caterbook-email-pipeline.md.
 
   - id: gsheets-oauth
     title: P7 Cashing Up — Google Sheets OAuth
