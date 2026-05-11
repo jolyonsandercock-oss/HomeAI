@@ -85,17 +85,24 @@ def _resolve_date(d: str | None) -> str:
 async def scrape_touchoffice_z(
     report_date: str | None = Query(None, alias="date"),
 ) -> dict[str, Any]:
-    """Stub — chunk 3 of U27 fills in the actual scrape.
+    """Scrape the daily Department Sales report from touchoffice.net.
 
-    When implemented: read secret/touchoffice → launch Chromium → login at
-    touchoffice.net → navigate to Z-report for `report_date` → extract table
-    → return {report_date, session, net_sales, vat, gross_sales, covers,
-    transactions, raw_html_path}.
+    (The endpoint name is historical — kept so existing n8n nodes don't break.
+    Will be renamed to /scrape/touchoffice-department-sales in a later pass.)
     """
+    from scrapers import touchoffice
     target = _resolve_date(report_date)
     creds = await vault_read("secret/touchoffice")
-    log.info("touchoffice scrape requested for %s (user=%s)", target, creds["username"])
-    raise HTTPException(501, "touchoffice-z scrape not implemented yet — U27 chunk 3")
+    log.info("touchoffice scrape: date=%s user=%s", target, creds["username"])
+    try:
+        return await touchoffice.scrape(
+            username=creds["username"],
+            password=creds["password"],
+            report_date=target,
+        )
+    except RuntimeError as e:
+        # Diagnostic-friendly failures (e.g. report didn't render) → 502.
+        raise HTTPException(502, str(e))
 
 
 @app.post("/scrape/caterbook-arrivals")
