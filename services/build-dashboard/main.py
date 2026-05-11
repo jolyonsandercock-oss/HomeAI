@@ -1143,6 +1143,84 @@ async def pub_board():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# U28 — Caterbook email-driven accommodation data (Pipeline 6)
+# ─────────────────────────────────────────────────────────────────────────────
+@app.get("/caterbook")
+async def caterbook_page():
+    return FileResponse(str(STATIC / "caterbook.html"))
+
+
+@app.get("/api/caterbook/overview")
+async def api_caterbook_overview(days: int = 30):
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        coverage = await c.fetchrow("""
+          SELECT COUNT(DISTINCT report_date) AS days_loaded,
+                 MIN(report_date) AS earliest,
+                 MAX(report_date) AS latest,
+                 COUNT(*) AS email_count
+            FROM caterbook_email_reports
+        """)
+        latest = await c.fetchrow("""
+          SELECT report_date, arrivals, stayovers, departures,
+                 arrivals_count, stayovers_count, departures_count,
+                 in_house_count, revenue_in_house
+            FROM caterbook_daily_snapshots
+           ORDER BY report_date DESC LIMIT 1
+        """)
+        per_day = await c.fetch("""
+          SELECT report_date, arrivals_count, stayovers_count, departures_count,
+                 in_house_count, revenue_in_house
+            FROM caterbook_daily_snapshots
+           WHERE report_date >= CURRENT_DATE - ($1::int)
+           ORDER BY report_date DESC
+        """, days)
+        # Revenue per room per night, last N days, summed.
+        per_room = await c.fetch("""
+          SELECT room, COUNT(*) AS nights,
+                 ROUND(SUM(rate_per_night)::numeric, 2) AS revenue,
+                 ROUND(AVG(rate_per_night)::numeric, 2) AS avg_rate
+            FROM caterbook_room_nights
+           WHERE night_date >= CURRENT_DATE - ($1::int)
+           GROUP BY room ORDER BY revenue DESC NULLS LAST
+        """, days)
+        # Heatmap data: room × night_date matrix of rate_per_night
+        heatmap = await c.fetch("""
+          SELECT room, night_date, rate_per_night
+            FROM caterbook_room_nights
+           WHERE night_date >= CURRENT_DATE - ($1::int)
+           ORDER BY room, night_date
+        """, days)
+        recent_imports = await c.fetch("""
+          SELECT report_date, source_email_id, account, received_at,
+                 arrivals_count, stayovers_count, departures_count
+            FROM caterbook_email_reports
+           ORDER BY received_at DESC LIMIT 30
+        """)
+
+    def _row(r):
+        if r is None:
+            return None
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"):     out[k] = v.isoformat()
+            elif hasattr(v, "to_eng_string"): out[k] = str(v)
+            else: out[k] = v
+        return out
+
+    return {
+        "window_days":     days,
+        "coverage":        _row(coverage),
+        "latest_snapshot": _row(latest),
+        "per_day":         [_row(r) for r in per_day],
+        "per_room":        [_row(r) for r in per_room],
+        "heatmap":         [_row(r) for r in heatmap],
+        "recent_imports":  [_row(r) for r in recent_imports],
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # U27 — TouchOffice browser-scraped data (Pipeline 5)
 # ─────────────────────────────────────────────────────────────────────────────
 @app.get("/touchoffice")

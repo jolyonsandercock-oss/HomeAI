@@ -370,18 +370,227 @@ async def ingest_touchoffice(
 async def scrape_caterbook_arrivals(
     report_date: str | None = Query(None, alias="date"),
 ) -> dict[str, Any]:
-    """Stub — chunk 4 of U27 fills in the actual scrape.
+    """PARKED — Caterbook is ingested from email (U28), not browser-scraped.
 
-    When implemented: read secret/caterbook (account_id + username + password)
-    → launch Chromium → login at app.caterbook.net → navigate to arrivals/
-    daily summary for `report_date` → extract → return {report_date,
-    occupancy_pct, rooms_sold, rooms_available, room_revenue, ...,
-    raw_html_path}.
+    See POST /ingest/caterbook for the email-driven path. This endpoint stays
+    as a 501 so any old wiring fails loudly rather than silently.
     """
-    target = _resolve_date(report_date)
-    creds = await vault_read("secret/caterbook")
-    log.info(
-        "caterbook scrape requested for %s (account=%s, user=%s)",
-        target, creds["account_id"], creds["username"],
+    raise HTTPException(501, "caterbook browser scrape parked — use /ingest/caterbook (email-driven)")
+
+
+# ─── /ingest/caterbook — pull an email's PDF, parse, INSERT observations ──
+GOOGLE_FETCH_URL = os.environ.get("GOOGLE_FETCH_URL", "http://google-fetch:8011")
+PDFPLUMBER_URL   = os.environ.get("PDFPLUMBER_URL",   "http://homeai-pdfplumber:8003")
+
+
+async def _gf_message_meta(account: str, message_id: str) -> dict[str, Any]:
+    r = await app.state.http.get(
+        f"{GOOGLE_FETCH_URL}/message/{account}/{message_id}", timeout=15.0,
     )
-    raise HTTPException(501, "caterbook-arrivals scrape not implemented yet — U27 chunk 4")
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, f"google-fetch message: {r.text[:300]}")
+    return r.json()
+
+
+async def _gf_attachment(account: str, message_id: str, attachment_id: str) -> bytes:
+    import base64
+    r = await app.state.http.get(
+        f"{GOOGLE_FETCH_URL}/attachment/{account}/{message_id}/{attachment_id}",
+        timeout=60.0,
+    )
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, f"google-fetch attachment: {r.text[:300]}")
+    b = r.json()["data_b64url"]
+    pad = "=" * (-len(b) % 4)
+    return base64.urlsafe_b64decode(b + pad)
+
+
+def _find_pdf_attachment(payload: dict[str, Any]) -> tuple[str, str] | None:
+    """Walk the Gmail payload tree to find the first application/pdf part.
+    Returns (filename, attachment_id) or None."""
+    def walk(part: dict[str, Any]) -> tuple[str, str] | None:
+        mt = part.get("mimeType", "")
+        body = part.get("body") or {}
+        if mt == "application/pdf" and body.get("attachmentId"):
+            return part.get("filename") or "attachment.pdf", body["attachmentId"]
+        for sub in part.get("parts", []) or []:
+            r = walk(sub)
+            if r is not None:
+                return r
+        return None
+    return walk(payload)
+
+
+@app.post("/ingest/caterbook")
+async def ingest_caterbook(
+    account: str = Query("info"),
+    message_id: str = Query(...),
+) -> dict[str, Any]:
+    """Fetch a Caterbook 'Arrivals and Departures' email by message_id,
+    parse the PDF, INSERT observations + email report + daily snapshot.
+
+    Idempotent: ON CONFLICT DO NOTHING + UNIQUE constraints across all writes.
+    """
+    if app.state.pool is None:
+        raise HTTPException(503, "postgres pool not configured")
+
+    from scrapers.caterbook import parse_pdf_text
+
+    msg = await _gf_message_meta(account, message_id)
+    pdf_info = _find_pdf_attachment(msg.get("payload", {}))
+    if pdf_info is None:
+        raise HTTPException(422, "no PDF attachment in this message")
+    filename, attachment_id = pdf_info
+
+    pdf_bytes = await _gf_attachment(account, message_id, attachment_id)
+
+    # Persist the raw PDF to /host-tmp for replay/debug.
+    pdf_dir = "/host-tmp/caterbook"
+    os.makedirs(pdf_dir, exist_ok=True)
+    raw_pdf_path = f"{pdf_dir}/{message_id}.pdf"
+    with open(raw_pdf_path, "wb") as f:
+        f.write(pdf_bytes)
+
+    # PDF → text via pdfplumber.
+    files = {"file": (filename, pdf_bytes, "application/pdf")}
+    r = await app.state.http.post(f"{PDFPLUMBER_URL}/extract-pdf", files=files, timeout=60.0)
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, f"pdfplumber: {r.text[:300]}")
+    pdf_text = r.json()["text"]
+    raw_text_path = f"{pdf_dir}/{message_id}.txt"
+    with open(raw_text_path, "w") as f:
+        f.write(pdf_text)
+
+    parsed = parse_pdf_text(pdf_text)
+    report_date_obj: date | None = parsed["report_date"]
+    observations = parsed["observations"]
+    if report_date_obj is None:
+        raise HTTPException(422, "could not extract report_date from PDF")
+
+    # Received_at — parse from message header (RFC 2822) or fall back to internalDate.
+    received_at = None
+    hdrs = {h["name"].lower(): h["value"]
+            for h in msg.get("payload", {}).get("headers", [])}
+    date_hdr = hdrs.get("date")
+    if date_hdr:
+        try:
+            from email.utils import parsedate_to_datetime
+            received_at = parsedate_to_datetime(date_hdr)
+        except Exception:  # noqa: BLE001
+            pass
+    if received_at is None:
+        try:
+            received_at = datetime.fromtimestamp(int(msg.get("internalDate", "0")) / 1000)
+        except Exception:  # noqa: BLE001
+            received_at = datetime.utcnow()
+
+    arrivals  = [o for o in observations if o.section == "arrivals"]
+    stayovers = [o for o in observations if o.section == "stayovers"]
+    departs   = [o for o in observations if o.section == "departures"]
+
+    import hashlib
+
+    def _ikey(*parts: Any) -> str:
+        return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()[:32]
+
+    def _obs_dict(o):
+        return {
+            "ref": o.ref, "room": o.room, "guest": o.guest_name,
+            "type": o.room_type, "rate": o.rate_code, "guests": o.guests_code,
+            "contact": o.contact, "status": o.status,
+            "balance": o.balance,
+            "dep": o.departure_date_seen.isoformat() if o.departure_date_seen else None,
+        }
+
+    inserted_obs = 0
+    skipped_obs  = 0
+    async with app.state.pool.acquire() as conn:
+        # 1. Email report row.
+        email_report_id = None
+        async with conn.transaction():
+            await conn.execute("SET LOCAL app.current_entity = '1'")
+            email_report_id = await conn.fetchval(
+                """
+                INSERT INTO caterbook_email_reports
+                  (idempotency_key, source_email_id, account, report_date, received_at,
+                   arrivals_count, stayovers_count, departures_count,
+                   total_balance_seen, raw_pdf_path, raw_text_path)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                ON CONFLICT (source_email_id) DO UPDATE SET ingested_at = now()
+                RETURNING id
+                """,
+                f"cb_email_{message_id}",
+                message_id, account, report_date_obj, received_at,
+                len(arrivals), len(stayovers), len(departs),
+                sum((o.balance or 0) for o in observations),
+                raw_pdf_path, raw_text_path,
+            )
+
+        # 2. Observation rows.
+        async with conn.transaction():
+            await conn.execute("SET LOCAL app.current_entity = '1'")
+            for o in observations:
+                ikey = f"cb_obs_{_ikey(report_date_obj.isoformat(), o.ref, o.room, o.section)}"
+                n = await conn.fetchval(
+                    """
+                    INSERT INTO caterbook_observations
+                      (idempotency_key, email_report_id, report_date, section,
+                       guest_name, room, ref, room_type, rate_code, guests_code,
+                       contact, status, balance, departure_date_seen, raw_cells)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
+                    ON CONFLICT (report_date, ref, room, section) DO NOTHING
+                    RETURNING 1
+                    """,
+                    ikey, email_report_id, report_date_obj, o.section,
+                    o.guest_name, o.room, o.ref, o.room_type, o.rate_code, o.guests_code,
+                    o.contact, o.status, o.balance, o.departure_date_seen,
+                    json.dumps({"raw_line": o.raw_line}),
+                )
+                if n:
+                    inserted_obs += 1
+                else:
+                    skipped_obs += 1
+
+        # 3. Daily snapshot row.
+        async with conn.transaction():
+            await conn.execute("SET LOCAL app.current_entity = '1'")
+            await conn.execute(
+                """
+                INSERT INTO caterbook_daily_snapshots
+                  (idempotency_key, email_report_id, report_date,
+                   arrivals, stayovers, departures,
+                   arrivals_count, stayovers_count, departures_count,
+                   in_house_count, revenue_in_house)
+                VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7,$8,$9,$10,$11)
+                ON CONFLICT (report_date) DO UPDATE SET
+                  email_report_id  = EXCLUDED.email_report_id,
+                  arrivals         = EXCLUDED.arrivals,
+                  stayovers        = EXCLUDED.stayovers,
+                  departures       = EXCLUDED.departures,
+                  arrivals_count   = EXCLUDED.arrivals_count,
+                  stayovers_count  = EXCLUDED.stayovers_count,
+                  departures_count = EXCLUDED.departures_count,
+                  in_house_count   = EXCLUDED.in_house_count,
+                  revenue_in_house = EXCLUDED.revenue_in_house
+                """,
+                f"cb_snap_{report_date_obj.isoformat()}",
+                email_report_id, report_date_obj,
+                json.dumps([_obs_dict(o) for o in arrivals]),
+                json.dumps([_obs_dict(o) for o in stayovers]),
+                json.dumps([_obs_dict(o) for o in departs]),
+                len(arrivals), len(stayovers), len(departs),
+                len(arrivals) + len(stayovers),
+                sum((o.balance or 0) for o in arrivals + stayovers),
+            )
+
+    return {
+        "report_date": report_date_obj.isoformat(),
+        "source_email_id": message_id,
+        "email_report_id": email_report_id,
+        "observations_inserted": inserted_obs,
+        "observations_skipped": skipped_obs,
+        "arrivals": len(arrivals),
+        "stayovers": len(stayovers),
+        "departures": len(departs),
+        "raw_pdf_path": raw_pdf_path,
+    }
