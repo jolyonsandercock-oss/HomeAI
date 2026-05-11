@@ -18,9 +18,11 @@ hands_off:
     estimate: 45 min once repo exists
 
 needs_user:
+  # All three remaining user-blocked items are scoped together as U29
+  # (Phase 1 close-out). See /home_ai/.claude/sprints/U29-phase1-closeout.md.
   - id: xero-oauth
-    title: P3 Xero OAuth + P2 matching unlock
-    detail: Register at developer.xero.com, run OAuth Playground for refresh tokens (one for Trading, one for Estates), store at secret/xero/{trading,estates}.
+    title: P3 Xero OAuth + P2 matching unlock (U29 chunk 1)
+    detail: Register at developer.xero.com, run OAuth Playground for refresh tokens (one for Trading, one for Estates), store at secret/xero/{trading,estates}. After tokens land, run scripts/u29-xero-creds.sh (will be written this sprint).
     estimate: 30 min
 
   # ✓ scraper-creds completed 2026-05-11 — TouchOffice + Caterbook creds in Vault.
