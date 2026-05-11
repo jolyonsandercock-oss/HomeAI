@@ -483,7 +483,7 @@ All secrets loaded as of May 2026 session:
 | secret/natwest/openbanking | client_id, client_secret, access_token, consent_id | ⏳ Phase 2 |
 | secret/rbs/openbanking | client_id, client_secret, access_token, consent_id | ⏳ Phase 2 |
 | secret/garmin | email, password | ⏳ Phase 2 |
-| ~~secret/dext~~ | ~~api_key~~ | ❌ **Removed 2026-05-08** — Dext has no public API; manual review tool only |
+| secret/dext | api_key | ⏳ Register first |
 | secret/github | personal_access_token | ⏳ Phase 5 |
 | secret/google/calendar | oauth credentials | ⏳ Phase 3 |
 | secret/google/sheets | oauth credentials | ⏳ Phase 3 |
@@ -1304,6 +1304,52 @@ more appropriate — no cloud dependency for business-critical data processing.
 - "CI Auto-Fix and M365 agents available in this environment" — CI Auto-Fix requires GitHub
   Actions, not a local environment feature. M365 add-ins are not relevant to this build.
 
+### 3.13 Paperless-ngx — Physical Document Digitisation (Phase 3)
+
+**What it is:** Open-source document management system. Handles scan intake, OCR,
+intelligent document splitting, ML auto-tagging, full-text search, and REST API.
+Runs as a Docker container on the P620. The Home AI system enriches and routes
+documents downstream. Build in Phase 3 alongside document control.
+
+**Hardware:** Brother ADS-2800W connects via SMB (Scan to Network) directly to
+a Samba consume folder on the P620. One touchscreen button — no PC required.
+
+**The document separation problem (solved three ways):**
+
+| Approach | How | When |
+|---|---|---|
+| **Blank page separators** (start here) | Insert blank sheet between docs before loading ADF. Set "Skip Blank Page: OFF" | Now — simple, reliable, free |
+| **Barcode separators** (upgrade) | Print Patch-T barcode pages, insert between docs | When blank pages cause false splits |
+| **AI boundary detection** (Phase 5) | `gemma4:e4b` analyses each page for letterhead/date/type changes | Phase 5 — no physical separators |
+
+**Scanner one-touch setup (ADS-2800W web interface):**
+- Profile: "AI BATCH" | SMB to P620 Tailscale IP | Store to `paperless-consume`
+- File type: Searchable PDF | 300 DPI | Skip Blank Page: OFF | Duplex: ON
+
+**Weekly workflow (5 minutes of human time):**
+1. Sort correspondence, insert blank separators between documents
+2. Load ADF, press "AI BATCH" touchscreen button
+3. Walk away — Paperless splits, OCRs, auto-tags
+4. Once per week: open Paperless inbox (port 8011), verify AI tags (2 min), Archive
+
+**Integration with Home AI (n8n Workflow I):**
+- Paperless calls n8n webhook on each new document
+- Haiku enriches: entity_id, category, action_required, deadline, summary
+- Invoice detected? → Invoice Pipeline
+- Compliance date? → compliance_alerts table
+- All documents: PostgreSQL + Obsidian vault + rclone → Google Drive
+
+**Phase 5 AI boundary detection:**
+```python
+# gemma4:e4b vision pre-processor (no physical separators needed)
+# Analyses each page, identifies document boundaries:
+# letterhead change, new sender/recipient, different document type, date jump
+# Splits PDF automatically before Paperless consumes it
+```
+
+**Port:** 8011. **Vault secrets:** secret/paperless (api_token, db_password, secret_key).
+**Full implementation:** SPEC v5.4 Section 8.1b.
+
 ---
 
 ## SECTION 4 — PENDING DECISIONS
@@ -1319,7 +1365,7 @@ Items that came up during build requiring a decision before proceeding.
 | Docker image pinning | All services currently use :latest | Pin all services before Phase 2 (risk of future breakage) |
 | NatWest Open Banking | Developer registration takes 1-2 weeks | Start registration now — needed for Phase 2 |
 | ICRTouch PLU tracking | Per-flavour tracking not yet configured | Configure TouchOffice before Phase 2 build — required for Ice Cream Oracle + Menu Engineering |
-| ~~Dext API key~~ | ~~Not yet registered~~ | ✓ Resolved 2026-05-08 — Dext has no public API. Pipeline 2 (Invoice) now uses pdfplumber/MarkItDown + Haiku as the *only* automated extraction path. Dext stays as Jo's manual review tool — compare outputs for first 60 days. |
+| Dext API key | Not yet registered | Register at api.dext.com before Phase 1 Step 11 (Invoice Pipeline needs it) |
 | WhatsApp blacklist numbers | Blacklist framework built, numbers not populated | Add actual numbers to static_context before Phase 4 |
 | Garmin credentials | Stored in Vault but not yet tested | Test Garmin service connectivity before Phase 2 |
 | init_placeholder HMAC bug | static_context_change trigger uses fake signature | Fix in dedicated step — do not fix inline |
@@ -1338,7 +1384,8 @@ Items that came up during build requiring a decision before proceeding.
 | May 2026 (session 4) | SearXNG self-hosted search added (Section 3.5) — Phase 1/2 addition, powers Open WebUI web search and Phase 5 research pipeline. Multi-tool routing guide added (Section 3.6) — Claude Code for complex build, Aider+DeepSeek for targeted fixes, Open WebUI+Qwen3+SearXNG for web research. Google Colab integration added (Section 3.8) — LoRA fine-tuning with Unsloth (free T4, 7B models, export GGUF to Ollama) and heavy batch analytics with Prophet via n8n data air-gap. Storyblok headless CMS added (Section 3.9) — Phase 5 addition for Olde Malthouse public website: MCP integration for natural-language content updates, Ice Cream Oracle auto-sync to website flavour list, Storyblok Management API via n8n. |
 | May 2026 (session 5) | Pre-flight upgraded to full Environmental Sensing Protocol (6 senses: OS, GPU, Tailscale, Vault, n8n logs, build state) with Claude Code opening prompt. Ghost Loop failure mode documented. Dead Man's Switch added (Section 3.1) — secondary monitor for P620 offline >48hrs. 90-day Vault rekey automation added (Section 3.1). llama4:scout added as hot tier candidate (Section 2.3) — MoE, multimodal, ~10GB. Dynamic thinking escalation added (Section 2.3) — auto /think when confidence <0.85. Docker image version pinning task added (Section 3.2). SearXNG Cornwall News use case added (Section 3.2). GM photo → gemma4:e4b → Storyblok vision workflow added (Section 3.9, Path B). Corrected: no gemma4:9b variant exists, use gemma4:e4b. Filtered: DeepSeek V4 Pro, Kimi K2.6, qwen3.6:35b-a3b are cloud/API-only or need 24GB GPU — not current local candidates. |
 | May 2026 (session 6) | Disaster recovery section added (Section 3.11): backup-all.sh (weekly PostgreSQL + Vault + n8n export), bootstrap.sh (fresh Ubuntu 26.04 setup), restore.sh (full data restore from backup). Target: 2-3 hours active time to fully running system on new hardware, ~45 min manual re-auth. Corresponding Section 7.3 added to SPEC v5.2. |
-| May 2026 (session 7) | Outcome-Native pipeline pattern integrated into SPEC v5.3 Section 6.2 (construction rules for all Milestone C pipelines). Local Dreaming Workflow added as Phase 2 deliverable (Workflow H, nightly 02:00). CI Auto-Fix GitHub Actions added as Phase 2 hardening. Stretch doc Section 3.12 added with distinction between Anthropic platform features vs local implementations. |
+| May 2026 (session 7) | Paperless-ngx added (Section 3.13) — physical document digitisation: Brother ADS-2800W SMB → consume folder → split/OCR/tag → n8n enrichment → PostgreSQL + Obsidian + Google Drive. Three separator approaches: blank page (now), barcode (upgrade), AI boundary detection with gemma4:e4b (Phase 5). Corresponding SPEC v5.4 Section 8.1b. |
+| May 2026 (session 8) | Outcome-Native pipeline pattern integrated into SPEC v5.3 Section 6.2 (construction rules for all Milestone C pipelines). Local Dreaming Workflow added as Phase 2 deliverable (Workflow H, nightly 02:00). CI Auto-Fix GitHub Actions added as Phase 2 hardening. Stretch doc Section 3.12 added with distinction between Anthropic platform features vs local implementations. |
 
 ---
 
