@@ -26,8 +26,8 @@ categories:
       - { id: p2,  title: P2  Invoice Pipeline (pdfplumber+MarkItDown+Haiku), status: done }
       - { id: p3,  title: P3  Xero Sync,                                   status: blocked, blocker: Xero OAuth }
       - { id: p4,  title: P4  Bank CSV Import,                             status: done }
-      - { id: p5,  title: P5  ICRTouch EPoS,                               status: blocked, blocker: Gmail account routing decision }
-      - { id: p6,  title: P6  Caterbook,                                   status: blocked, blocker: Gmail account routing decision }
+      - { id: p5,  title: P5  ICRTouch EPoS,                               status: blocked, blocker: Playwright scraper build (U27 — no email export from TouchOffice) }
+      - { id: p6,  title: P6  Caterbook,                                   status: blocked, blocker: Playwright scraper build (U27 — no email export from Caterbook) }
       - { id: p7,  title: P7  Cashing Up,                                  status: blocked, blocker: Google Sheets OAuth }
       - { id: p8,  title: P8  Nanny,                                       status: done }
       - { id: p9,  title: P9  Report Ingestion,                            status: done }
@@ -49,7 +49,7 @@ categories:
     items:
       - { id: nightly,      title: Nightly Restic backup (local),          status: done }
       - { id: weekly,       title: Weekly DR backup (backup-all.sh),       status: done }
-      - { id: nas_mount,    title: Restic repointed at NAS,                status: blocked, blocker: NAS mount on host }
+      - { id: nas_mount,    title: Restic repointed at NAS,                status: deferred, note: "Postponed 2026-05-11 — GitHub off-host-backup covers config-tree DR" }
       - { id: bootstrap,    title: bootstrap.sh draft,                     status: done }
       - { id: restore,      title: restore.sh draft,                       status: done }
 

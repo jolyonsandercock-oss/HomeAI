@@ -14,9 +14,9 @@ phases:
     gates:
       - { id: platform,      name: Platform foundation,           status: done }
       - { id: vertical_b,    name: Vertical slice (Gate B),       status: done }
-      - { id: pipelines,     name: Pipelines 1-11,                status: in_progress, note: "P3/P5/P6/P7 user-blocked → U11" }
+      - { id: pipelines,     name: Pipelines 1-11,                status: in_progress, note: "P5/P6 → U27 Playwright; P3/P7/P10 user-blocked" }
       - { id: operability,   name: Operability + monitoring,      status: done }
-      - { id: backup_dr,     name: Backup + DR,                   status: in_progress, note: "NAS mount pending → U11" }
+      - { id: backup_dr,     name: Backup + DR,                   status: done, note: "GitHub off-host-backup live; NAS-mount postponed" }
       - { id: identity,      name: Multi-account Google identity, status: done, note: "U9 + U10-bis" }
 
   - id: 2

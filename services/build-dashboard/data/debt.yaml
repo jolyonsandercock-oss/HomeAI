@@ -13,16 +13,21 @@ items:
   #   Verify weekly: SELECT COUNT(*) FROM dead_letter WHERE pipeline='invoice_pipeline' AND resolved=false AND created_at > NOW() - INTERVAL '7 days';
 
   - severity: medium
-    title: P5/P6 parsers built for fixture format, real Caterbook/TouchOffice formats unknown
-    detail: P5 EPOS parser expects "ICRTouch Z-Report" plaintext daily summary; P6 Caterbook parser expects "Caterbook Daily Report" plaintext occupancy summary. Both shapes come from benchmark fixtures. Real Caterbook traffic at 2026-05-10 is per-booking notifications + "Arrivals/Departures" with PDF attachment (no parseable body). No real EPOS emails in inbox yet. Pipelines will mark these as unparseable and log to audit_log — not broken, but no useful rows in epos_daily/accommodation_daily until either (a) Caterbook Daily Report email is enabled in their portal, (b) PDF parsing is added for Arrivals/Departures, or (c) format spec is captured from a real sample.
+    title: P5/P6 need Playwright-based scraping (no email export available)
+    detail: User confirmed 2026-05-11 — neither TouchOffice nor Caterbook can email daily reports. Both portals are browser-only. Current Pipeline 5/6 (Gmail-trigger + Haiku report_parser) cannot fire. Scoped as U27 sprint — build a Playwright scraper service (headless Chromium in a container on ai-internal), cron-triggered daily, that logs into touchoffice.net + Caterbook, extracts the same fields the existing parsers expect, and emits epos.report.received / accommodation.received events. Existing parser/validator/INSERT nodes stay; only the trigger + source change. Old debt note about "format unknown from fixtures" is moot — Playwright extracts directly from the rendered HTML.
     unblocks: Useful epos_daily / accommodation_daily rows
-    estimate: 1-2h once a real sample of each report format is in hand
+    estimate: 4-6h (see /home_ai/.claude/sprints/U27-playwright-p5-p6.md)
 
-  - severity: medium
-    title: Restic repo is local-only
-    detail: /home_ai/backups/restic-local — not on NAS. Lost-host = lost backups. U13 produced runnable installer at /home_ai/.claude/scripts/u13-mount-nas.sh — interactive (SMB or NFS), idempotent, copies existing snapshots to NAS, repoints crontab, leaves local repo as warm spare. Run as root.
-    unblocks: True off-machine DR
-    estimate: 5 min — sudo bash u13-mount-nas.sh
+  # ▸ NAS off-host backup — POSTPONED 2026-05-11 (user decision).
+  #   GitHub off-host-backup (U26 option 9) provides text-config DR; the actual
+  #   restic snapshots remain local-only for now. Revisit when a NAS is on hand.
+  #   Original debt entry preserved below as a comment for re-activation:
+  #   - severity: medium
+  #     title: Restic repo is local-only
+  #     detail: /home_ai/backups/restic-local — not on NAS. Lost-host = lost backups.
+  #             u13-mount-nas.sh installer ready (interactive SMB/NFS, idempotent).
+  #     unblocks: True off-machine DR
+  #     estimate: 5 min — sudo bash u13-mount-nas.sh
   - severity: low
     title: Hooks not installed in user settings
     detail: ".claude/hooks/no-secrets-in-files.sh + sql-rules.sh exist and tested. PreToolUse install in ~/.claude/settings.json is opt-in (agent cannot self-modify). U13 produced runnable installer at /home_ai/.claude/scripts/u13-install-hooks.sh — backs up, jq-merges, runs negative tests. Run: bash /home_ai/.claude/scripts/u13-install-hooks.sh"
@@ -30,7 +35,7 @@ items:
     estimate: 2 min — run u13-install-hooks.sh
 
   - severity: low
-    title: Authelia 2FA not yet bootstrapped
-    detail: Container scaffolded (config in /home_ai/security/authelia/), image pinned (4.39.19), /auth route reserved on Caddy. Bootstrap blocked on root file ownership of configuration.yml + need to generate JWT_SECRET / SESSION_SECRET / STORAGE_ENCRYPTION_KEY in Vault. Once unblocked, wire Caddy forward_auth to protect /dashboard and /metabase admin.
-    unblocks: SSO + 2FA on internal tools, full Phase 2 access layer
-    estimate: 60 min once a sudo session is available
+    title: Authelia bootstrapped but Vault ≠ rendered config (cosmetic mismatch)
+    detail: 2026-05-11 — authelia/authelia:4.39.19 pulled, users_database.yml written, container ready to start. The old bootstrap script (pre-template rewrite) was used — generated fresh JWT + encryption secrets into Vault but its sed couldn't match the rendered configuration.yml so the file kept the original values. Authelia reads from the file at runtime, so SSO works correctly; the divergence only matters if a future operation reads secrets from Vault (none today). To clean up — re-run new ./scripts/authelia-bootstrap.sh, answer Y at the "Import existing into Vault?" prompts, then docker compose restart authelia. Also: uncomment authelia + caddy-forward-auth blocks in docker-compose.yml and wire forward_auth to protect /dashboard + /metabase.
+    unblocks: Clean rotation path, full Phase 2 access layer
+    estimate: 30 min
