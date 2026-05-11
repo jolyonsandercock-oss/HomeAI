@@ -36,21 +36,34 @@ NETWORK=home_ai_ai-egress
 docker image inspect "$IMAGE" >/dev/null 2>&1 || {
   echo -e "${RED}✗${NC} image $IMAGE not built — run: docker compose build playwright-service"; exit 1; }
 
-# Allow local Docker UIDs to talk to the host X server; revoke on exit.
-xhost +local:docker >/dev/null 2>&1 || {
-  echo -e "${RED}✗${NC} xhost +local:docker failed"; exit 1; }
-trap 'xhost -local:docker >/dev/null 2>&1 || true' EXIT INT TERM
+# Allow local Docker connections to talk to the host X server; revoke on exit.
+# Belt-and-braces — Wayland path below is preferred, X11 is the fallback.
+xhost +local:docker >/dev/null 2>&1 || true
+xhost "+SI:localuser:$(id -un)" >/dev/null 2>&1 || true
+trap 'xhost -local:docker >/dev/null 2>&1; xhost "-SI:localuser:$(id -un)" >/dev/null 2>&1; true' EXIT INT TERM
 
-echo -e "${YEL}→${NC} launching codegen in container (Inspector + browser will open on $DISPLAY)…"
+UID_HOST=$(id -u)
+GID_HOST=$(id -g)
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$UID_HOST}"
+WL_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+
+echo -e "${YEL}→${NC} launching codegen in container as uid=$UID_HOST (matches your session)"
+echo "    Wayland: $RUNTIME_DIR/$WL_DISPLAY  |  X11: $DISPLAY (fallback)"
 echo "    Drive the browser through the flow you want to record."
-echo "    Close the browser window when done — the recorded script saves to:"
+echo "    Close the browser window when done — recorded script saves to:"
 echo "      $OUTFILE_HOST"
 echo
 
 docker run --rm -it \
   --network "$NETWORK" \
   --shm-size=2g \
+  --user "$UID_HOST:$GID_HOST" \
+  -e HOME=/tmp \
   -e DISPLAY="$DISPLAY" \
+  -e WAYLAND_DISPLAY="$WL_DISPLAY" \
+  -e XDG_RUNTIME_DIR="$RUNTIME_DIR" \
+  -e OZONE_PLATFORM=wayland \
+  -v "$RUNTIME_DIR:$RUNTIME_DIR" \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   -v /tmp:/host-tmp:rw \
   "$IMAGE" \
