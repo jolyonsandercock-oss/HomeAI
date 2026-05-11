@@ -49,6 +49,7 @@ echo
 
 docker run --rm -it \
   --network "$NETWORK" \
+  --shm-size=2g \
   -e DISPLAY="$DISPLAY" \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   -v /tmp:/host-tmp:rw \
