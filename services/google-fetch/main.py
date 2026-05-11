@@ -186,17 +186,23 @@ async def list_accounts():
 async def list_messages(
     account: str = Query(...),
     newer_than: str = Query("1d", description="Gmail q syntax: 1d, 2h, 30m"),
+    q: str | None = Query(None, description="Raw Gmail search query (e.g. 'subject:foo to:bar'). Overrides newer_than when set."),
     max_results: int = Query(50, ge=1, le=500),
 ):
-    """Returns recent Gmail messages with header metadata for n8n's poller."""
+    """Returns Gmail messages with header metadata.
+
+    By default returns mail newer_than:1d. Pass `q=` for an arbitrary Gmail
+    search query — used by U28 Caterbook backfill (subject + recipient filter).
+    """
     acc = await find_account(account)
     tok = await access_token(acc)
 
     t0 = time.time()
     url = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+    query = q if q else f"newer_than:{newer_than}"
     r = await app.state.http.get(
         url,
-        params={"q": f"newer_than:{newer_than}", "maxResults": max_results},
+        params={"q": query, "maxResults": max_results},
         headers={"Authorization": f"Bearer {tok}"},
     )
     dur = int((time.time() - t0) * 1000)
