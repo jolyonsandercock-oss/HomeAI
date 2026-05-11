@@ -418,6 +418,7 @@ services:
     environment:
       VAULT_ADDR: "http://vault:8200"
       VAULT_TOKEN: "${VAULT_TOKEN}"
+      PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
     volumes:
       # Debug dumps land here so they're accessible from the host without
       # docker cp. Path on host matches path in container for log clarity.

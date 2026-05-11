@@ -1,28 +1,36 @@
 """homeai-playwright — browser-scraping service for U27 P5/P6.
 
-Owns two scrape endpoints, one per vendor portal:
-  POST /scrape/touchoffice-z?date=YYYY-MM-DD     → daily Z-report JSON
-  POST /scrape/caterbook-arrivals?date=YYYY-MM-DD → daily arrivals/summary JSON
+Owns:
+  POST /scrape/touchoffice?date=YYYY-MM-DD&site=malthouse|sandwich
+       → JSON with fixed_totals / department_sales_total / plu_sales widgets
+  POST /ingest/touchoffice?date=YYYY-MM-DD&site=…
+       → scrape + INSERT into 3 widget tables, independent per-widget
+         try/except, status logged to touchoffice_scrapes.
+  POST /scrape/caterbook-arrivals?date=YYYY-MM-DD
+       → stub until U27 chunk 4
 
 Credentials live in Vault under secret/touchoffice and secret/caterbook
 and are read at scrape time so they never sit in container env vars.
-
-n8n hits these endpoints via the existing HTTP Request node pattern.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from typing import Any
 
+import asyncpg
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 
 # ─── Config from env ────────────────────────────────────────────
 VAULT_ADDR = os.environ.get("VAULT_ADDR", "http://vault:8200")
 VAULT_TOKEN = os.environ["VAULT_TOKEN"]
+PG_DSN = os.environ.get("PG_DSN", "")  # may be empty in scrape-only deployments
 
 log = logging.getLogger("homeai-playwright")
 logging.basicConfig(
@@ -31,14 +39,23 @@ logging.basicConfig(
 )
 
 
-# ─── Lifespan: shared HTTP client ──────────────────────────────
+# ─── Lifespan: shared HTTP client + DB pool ────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.http = httpx.AsyncClient(timeout=10.0)
+    app.state.pool = None
+    if PG_DSN:
+        try:
+            app.state.pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=4)
+            log.info("postgres pool ready")
+        except Exception as e:  # noqa: BLE001
+            log.error("could not open postgres pool: %s — /ingest endpoints will 503", e)
     try:
         yield
     finally:
         await app.state.http.aclose()
+        if app.state.pool is not None:
+            await app.state.pool.close()
 
 
 app = FastAPI(title="homeai-playwright", lifespan=lifespan)
@@ -111,6 +128,242 @@ async def scrape_touchoffice_z_compat(
     site: str = Query("malthouse"),
 ) -> dict[str, Any]:
     return await scrape_touchoffice(report_date=report_date, site=site)
+
+
+# ─── /ingest/touchoffice — scrape + write 3 widget tables ───────
+async def _ingest_widget(
+    conn: asyncpg.Connection,
+    *,
+    table: str,
+    site: str,
+    report_date: str,
+    rows: list[dict[str, Any]],
+    extract_row: Any,
+) -> int:
+    """Run SET LOCAL + INSERT ... ON CONFLICT DO NOTHING for one widget.
+
+    `extract_row(row_dict)` returns the tuple of column values matching the
+    INSERT statement built per-table below. Returns rows inserted.
+    """
+    inserted = 0
+    async with conn.transaction():
+        await conn.execute("SET LOCAL app.current_entity = '1'")
+        for row in rows:
+            try:
+                values = extract_row(row)
+                # Each table has site, report_date, idempotency_key + widget cols.
+                if table == "touchoffice_fixed_totals":
+                    n = await conn.fetchval(
+                        """
+                        INSERT INTO touchoffice_fixed_totals
+                          (idempotency_key, site, report_date, totaliser_id, label, quantity, value, raw_cells)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+                        ON CONFLICT (site, report_date, totaliser_id) DO NOTHING
+                        RETURNING 1
+                        """, *values,
+                    )
+                elif table == "touchoffice_department_sales":
+                    n = await conn.fetchval(
+                        """
+                        INSERT INTO touchoffice_department_sales
+                          (idempotency_key, site, report_date, department, quantity, value, raw_cells)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
+                        ON CONFLICT (site, report_date, department) DO NOTHING
+                        RETURNING 1
+                        """, *values,
+                    )
+                elif table == "touchoffice_plu_sales":
+                    n = await conn.fetchval(
+                        """
+                        INSERT INTO touchoffice_plu_sales
+                          (idempotency_key, site, report_date, plu_number, descriptor, quantity, value, raw_cells)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+                        ON CONFLICT (site, report_date, plu_number) DO NOTHING
+                        RETURNING 1
+                        """, *values,
+                    )
+                else:
+                    raise ValueError(f"unknown table {table}")
+                if n:
+                    inserted += 1
+            except Exception as e:  # noqa: BLE001
+                log.warning("ingest %s row error: %s — row=%s", table, e, row)
+    return inserted
+
+
+def _num(s: str | None) -> float | None:
+    if not s:
+        return None
+    s = s.replace("£", "").replace(",", "").strip()
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+@app.post("/ingest/touchoffice")
+async def ingest_touchoffice(
+    report_date: str | None = Query(None, alias="date"),
+    site: str = Query("malthouse", description="malthouse | sandwich"),
+) -> dict[str, Any]:
+    """Scrape a (site, date) and INSERT each of the 3 widgets into its table.
+
+    Per-widget INSERTs are wrapped in independent try/except. The
+    touchoffice_scrapes table gets one row per widget so each pipeline can
+    be monitored independently.
+    """
+    if app.state.pool is None:
+        raise HTTPException(503, "postgres pool not configured (PG_DSN missing)")
+
+    target = _resolve_date(report_date)
+    target_date = date.fromisoformat(target)  # asyncpg wants native date for DATE cols
+    creds = await vault_read("secret/touchoffice")
+    t0 = time.monotonic()
+
+    from scrapers import touchoffice
+    try:
+        scrape = await touchoffice.scrape(
+            username=creds["username"],
+            password=creds["password"],
+            report_date=target,
+            site=site,
+        )
+    except Exception as e:  # noqa: BLE001
+        runtime_ms = int((time.monotonic() - t0) * 1000)
+        async with app.state.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SET LOCAL app.current_entity = '1'")
+                for w in ("fixed_totals", "department_sales", "plu_sales"):
+                    await conn.execute(
+                        """INSERT INTO touchoffice_scrapes
+                            (site, report_date, widget, success, error_message, scrape_runtime_ms)
+                           VALUES ($1,$2,$3,false,$4,$5)""",
+                        site, target_date, w, str(e)[:1000], runtime_ms,
+                    )
+        raise HTTPException(502, f"scrape failed: {e}")
+
+    runtime_ms = int((time.monotonic() - t0) * 1000)
+
+    def _ikey(*parts: Any) -> str:
+        s = "|".join(str(p) for p in parts)
+        return f"to_{hashlib.sha256(s.encode()).hexdigest()[:24]}"
+
+    results: dict[str, Any] = {
+        "report_date": target,
+        "site": site,
+        "scrape_runtime_ms": runtime_ms,
+        "snapshot_html": scrape.get("_snapshot_html"),
+        "snapshot_png":  scrape.get("_snapshot_png"),
+        "widgets": {},
+    }
+
+    # ── Each widget INSERTed in its own transaction so they don't block each other.
+    async with app.state.pool.acquire() as conn:
+        # FIXED TOTALS — totaliser_id / label / quantity / value
+        widget_status: dict[str, Any] = {}
+        try:
+            ft_rows = scrape.get("fixed_totals", {}).get("rows", [])
+            def ft_extract(r: dict[str, Any]) -> tuple:
+                tid = r.get("totaliser_id")
+                label = r.get("label") or (r.get("cells", [None])[0] or "")
+                cells = r.get("cells", [])
+                qty = _num(cells[1]) if len(cells) > 1 else None
+                val = _num(cells[2]) if len(cells) > 2 else None
+                return (
+                    _ikey("ft", site, target, tid),
+                    site, target_date, tid, label, qty, val,
+                    json.dumps(cells),
+                )
+            inserted = await _ingest_widget(
+                conn, table="touchoffice_fixed_totals", site=site, report_date=target,
+                rows=ft_rows, extract_row=ft_extract,
+            )
+            widget_status = {"success": True, "scraped": len(ft_rows), "inserted": inserted}
+        except Exception as e:  # noqa: BLE001
+            widget_status = {"success": False, "error": str(e)[:300]}
+        results["widgets"]["fixed_totals"] = widget_status
+        async with conn.transaction():
+            await conn.execute("SET LOCAL app.current_entity = '1'")
+            await conn.execute(
+                """INSERT INTO touchoffice_scrapes
+                    (site, report_date, widget, success, rows_written, error_message,
+                     scrape_runtime_ms, snapshot_html_path, snapshot_png_path)
+                   VALUES ($1,$2,'fixed_totals',$3,$4,$5,$6,$7,$8)""",
+                site, target_date, widget_status["success"],
+                widget_status.get("inserted"), widget_status.get("error"),
+                runtime_ms, scrape.get("_snapshot_html"), scrape.get("_snapshot_png"),
+            )
+
+        # DEPARTMENT SALES — department / quantity / value
+        widget_status = {}
+        try:
+            ds_rows = scrape.get("department_sales_total", {}).get("rows", [])
+            def ds_extract(r: dict[str, Any]) -> tuple:
+                cells = r.get("cells", [])
+                dept = cells[0] if cells else None
+                qty = _num(cells[1]) if len(cells) > 1 else None
+                val = _num(cells[2]) if len(cells) > 2 else None
+                return (
+                    _ikey("ds", site, target, dept),
+                    site, target_date, dept, qty, val,
+                    json.dumps(cells),
+                )
+            inserted = await _ingest_widget(
+                conn, table="touchoffice_department_sales", site=site, report_date=target,
+                rows=ds_rows, extract_row=ds_extract,
+            )
+            widget_status = {"success": True, "scraped": len(ds_rows), "inserted": inserted}
+        except Exception as e:  # noqa: BLE001
+            widget_status = {"success": False, "error": str(e)[:300]}
+        results["widgets"]["department_sales"] = widget_status
+        async with conn.transaction():
+            await conn.execute("SET LOCAL app.current_entity = '1'")
+            await conn.execute(
+                """INSERT INTO touchoffice_scrapes
+                    (site, report_date, widget, success, rows_written, error_message,
+                     scrape_runtime_ms, snapshot_html_path, snapshot_png_path)
+                   VALUES ($1,$2,'department_sales',$3,$4,$5,$6,$7,$8)""",
+                site, target_date, widget_status["success"],
+                widget_status.get("inserted"), widget_status.get("error"),
+                runtime_ms, scrape.get("_snapshot_html"), scrape.get("_snapshot_png"),
+            )
+
+        # PLU SALES — plu_number / descriptor / quantity / value
+        widget_status = {}
+        try:
+            plu_rows = scrape.get("plu_sales", {}).get("rows", [])
+            def plu_extract(r: dict[str, Any]) -> tuple:
+                cells = r.get("cells", [])
+                plu = cells[0] if cells else None
+                desc = cells[1] if len(cells) > 1 else None
+                qty = _num(cells[2]) if len(cells) > 2 else None
+                val = _num(cells[3]) if len(cells) > 3 else None
+                return (
+                    _ikey("plu", site, target, plu),
+                    site, target_date, plu, desc, qty, val,
+                    json.dumps(cells),
+                )
+            inserted = await _ingest_widget(
+                conn, table="touchoffice_plu_sales", site=site, report_date=target,
+                rows=plu_rows, extract_row=plu_extract,
+            )
+            widget_status = {"success": True, "scraped": len(plu_rows), "inserted": inserted}
+        except Exception as e:  # noqa: BLE001
+            widget_status = {"success": False, "error": str(e)[:300]}
+        results["widgets"]["plu_sales"] = widget_status
+        async with conn.transaction():
+            await conn.execute("SET LOCAL app.current_entity = '1'")
+            await conn.execute(
+                """INSERT INTO touchoffice_scrapes
+                    (site, report_date, widget, success, rows_written, error_message,
+                     scrape_runtime_ms, snapshot_html_path, snapshot_png_path)
+                   VALUES ($1,$2,'plu_sales',$3,$4,$5,$6,$7,$8)""",
+                site, target_date, widget_status["success"],
+                widget_status.get("inserted"), widget_status.get("error"),
+                runtime_ms, scrape.get("_snapshot_html"), scrape.get("_snapshot_png"),
+            )
+
+    return results
 
 
 @app.post("/scrape/caterbook-arrivals")
