@@ -1,0 +1,42 @@
+# Volumes + binary data
+/backups/
+/storage/
+/staging/
+/n8n_data/
+/vault_data/
+
+# Secret patterns
+*.env
+*.env.*
+.env*
+*secret*
+*credential*
+*password*
+*.pem
+*.key
+*_rsa
+*_dsa
+*_ed25519
+
+# Vault encrypted bundles
+*.gpg
+/security/.vault-*
+
+# Authelia secrets
+/security/authelia/users_database.yml
+/security/authelia-v2/users_database.yml
+
+# Restic
+.restic-pw
+.restic-repo
+
+# Local-only state
+/tmp/
+/var/
+*.pyc
+__pycache__/
+.DS_Store
+*.swp
+
+# Build artefacts
+node_modules/
