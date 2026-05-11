@@ -408,12 +408,21 @@ services:
     profiles: ["phase3"]
     restart: unless-stopped
 
+  # homeai-playwright — browser-scraping service (U27 P5/P6).
+  # ai-internal for vault; ai-egress for touchoffice.net + app.caterbook.net.
+  # n8n hits the scrape endpoints via HTTP Request node on ai-internal.
   playwright-service:
     build: ./services/playwright
     container_name: homeai-playwright
-    networks: [ai-internal, ai-services]
-    ports: ["8001:8001"]
-    profiles: ["phase3"]
+    networks: [ai-internal, ai-egress]
+    environment:
+      VAULT_ADDR: "http://vault:8200"
+      VAULT_TOKEN: "${VAULT_TOKEN}"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/healthz', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
 volumes:
