@@ -24,12 +24,6 @@ items:
     unblocks: True off-machine DR
     estimate: 5 min — sudo bash u13-mount-nas.sh
   - severity: low
-    title: Backup-all.sh git push commented
-    detail: scripts/backup-all.sh has the git push block disabled until the remote is verified safe.
-    unblocks: Off-host config history
-    estimate: Set up clean private repo + uncomment block
-
-  - severity: low
     title: Hooks not installed in user settings
     detail: ".claude/hooks/no-secrets-in-files.sh + sql-rules.sh exist and tested. PreToolUse install in ~/.claude/settings.json is opt-in (agent cannot self-modify). U13 produced runnable installer at /home_ai/.claude/scripts/u13-install-hooks.sh — backs up, jq-merges, runs negative tests. Run: bash /home_ai/.claude/scripts/u13-install-hooks.sh"
     unblocks: Hard enforcement of the no-secrets / RLS / HMAC build rules
