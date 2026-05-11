@@ -81,28 +81,36 @@ def _resolve_date(d: str | None) -> str:
     return (date.today() - timedelta(days=1)).isoformat()
 
 
-@app.post("/scrape/touchoffice-z")
-async def scrape_touchoffice_z(
+@app.post("/scrape/touchoffice")
+async def scrape_touchoffice(
     report_date: str | None = Query(None, alias="date"),
+    site: str = Query("malthouse", description="malthouse | sandwich"),
 ) -> dict[str, Any]:
-    """Scrape the daily Department Sales report from touchoffice.net.
-
-    (The endpoint name is historical — kept so existing n8n nodes don't break.
-    Will be renamed to /scrape/touchoffice-department-sales in a later pass.)
+    """Scrape TouchOffice home-page widgets (FIXED TOTALS, DEPARTMENT SALES
+    TOTAL, PLU SALES) for the given site + date.
     """
     from scrapers import touchoffice
     target = _resolve_date(report_date)
     creds = await vault_read("secret/touchoffice")
-    log.info("touchoffice scrape: date=%s user=%s", target, creds["username"])
+    log.info("touchoffice scrape: date=%s site=%s user=%s", target, site, creds["username"])
     try:
         return await touchoffice.scrape(
             username=creds["username"],
             password=creds["password"],
             report_date=target,
+            site=site,
         )
     except RuntimeError as e:
-        # Diagnostic-friendly failures (e.g. report didn't render) → 502.
         raise HTTPException(502, str(e))
+
+
+# Back-compat shim so an existing wiring to the old name keeps working.
+@app.post("/scrape/touchoffice-z")
+async def scrape_touchoffice_z_compat(
+    report_date: str | None = Query(None, alias="date"),
+    site: str = Query("malthouse"),
+) -> dict[str, Any]:
+    return await scrape_touchoffice(report_date=report_date, site=site)
 
 
 @app.post("/scrape/caterbook-arrivals")

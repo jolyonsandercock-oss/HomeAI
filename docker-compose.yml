@@ -418,6 +418,10 @@ services:
     environment:
       VAULT_ADDR: "http://vault:8200"
       VAULT_TOKEN: "${VAULT_TOKEN}"
+    volumes:
+      # Debug dumps land here so they're accessible from the host without
+      # docker cp. Path on host matches path in container for log clarity.
+      - /home_ai/storage/scraper-debug:/host-tmp
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/healthz', timeout=2)"]
       interval: 30s
