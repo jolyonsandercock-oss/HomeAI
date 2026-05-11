@@ -1143,6 +1143,63 @@ async def pub_board():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# U29 — Vendor invoice triage (light-touch inbox)
+# ─────────────────────────────────────────────────────────────────────────────
+@app.get("/invoices")
+async def invoices_page():
+    return FileResponse(str(STATIC / "invoices.html"))
+
+
+@app.get("/api/invoices/list")
+async def api_invoices_list(days: int = 90, status: str = ""):
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        where_status = "AND status = $2" if status else ""
+        args = [days] + ([status] if status else [])
+        rows = await c.fetch(f"""
+          SELECT id, source_email_id, account, vendor_domain, vendor_name,
+                 subject, received_at, amount_seen, currency, invoice_date,
+                 due_date, status, has_pdf, attachment_count, linked_invoice_id, notes
+            FROM vendor_invoice_inbox
+           WHERE received_at >= CURRENT_DATE - ($1::int)
+           {where_status}
+           ORDER BY received_at DESC LIMIT 500
+        """, *args)
+        by_vendor = await c.fetch("""
+          SELECT vendor_domain, COUNT(*) AS n,
+                 COUNT(*) FILTER (WHERE status='new')  AS pending,
+                 COUNT(*) FILTER (WHERE status='paid') AS paid,
+                 SUM(amount_seen) FILTER (WHERE amount_seen IS NOT NULL) AS total_seen
+            FROM vendor_invoice_inbox
+           WHERE received_at >= CURRENT_DATE - ($1::int)
+           GROUP BY vendor_domain ORDER BY n DESC
+        """, days)
+        totals = await c.fetchrow("""
+          SELECT COUNT(*) AS total,
+                 COUNT(*) FILTER (WHERE status='new') AS pending,
+                 SUM(amount_seen) FILTER (WHERE amount_seen IS NOT NULL) AS sum_seen
+            FROM vendor_invoice_inbox
+           WHERE received_at >= CURRENT_DATE - ($1::int)
+        """, days)
+
+    def _row(r):
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"): out[k] = v.isoformat()
+            elif hasattr(v, "to_eng_string"): out[k] = str(v)
+            else: out[k] = v
+        return out
+
+    return {
+        "window_days": days,
+        "totals":      _row(totals) if totals else {},
+        "by_vendor":   [_row(r) for r in by_vendor],
+        "invoices":    [_row(r) for r in rows],
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # U28 — Caterbook email-driven accommodation data (Pipeline 6)
 # ─────────────────────────────────────────────────────────────────────────────
 @app.get("/caterbook")

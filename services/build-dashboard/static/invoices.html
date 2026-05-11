@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invoices — Home AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .num  { font-variant-numeric: tabular-nums; }
+  table.tidy th, table.tidy td { padding: 0.4rem 0.6rem; }
+  table.tidy thead th { border-bottom: 1px solid rgba(148,163,184,0.2); text-align: left; font-weight: 600; color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  table.tidy tbody tr { border-bottom: 1px solid rgba(148,163,184,0.08); }
+  .badge-new       { background: rgba(56,189,248,0.15);  color:#7dd3fc; border:1px solid rgba(56,189,248,0.3); }
+  .badge-extracted { background: rgba(168,85,247,0.15);  color:#d8b4fe; border:1px solid rgba(168,85,247,0.3); }
+  .badge-paid      { background: rgba(74,222,128,0.15);  color:#86efac; border:1px solid rgba(74,222,128,0.3); }
+  .badge-disputed  { background: rgba(244,114,182,0.15); color:#f9a8d4; border:1px solid rgba(244,114,182,0.3); }
+  .badge-ignored   { background: rgba(148,163,184,0.15); color:#cbd5e1; border:1px solid rgba(148,163,184,0.3); }
+</style>
+</head>
+<body class="text-slate-100">
+<div x-data="inv()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+
+<header class="flex flex-wrap items-center justify-between gap-3">
+  <div>
+    <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Invoices</h1>
+    <p class="text-sm text-slate-400">Triage view — every invoice-shaped email lands here. Pipeline 2 enriches with full extraction later.</p>
+  </div>
+  <div class="flex items-center gap-3 flex-wrap">
+    <label class="text-xs text-slate-400">Window
+      <select x-model.number="days" @change="reload()" class="ml-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
+        <option value="30">30 days</option>
+        <option value="90" selected>90 days</option>
+        <option value="365">1 year</option>
+      </select>
+    </label>
+    <label class="text-xs text-slate-400">Status
+      <select x-model="status" @change="reload()" class="ml-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
+        <option value="">all</option>
+        <option value="new">new</option>
+        <option value="extracted">extracted</option>
+        <option value="paid">paid</option>
+        <option value="disputed">disputed</option>
+        <option value="ignored">ignored</option>
+      </select>
+    </label>
+    <a href="/" class="text-xs text-slate-400 hover:text-slate-200">← Mission Control</a>
+  </div>
+</header>
+
+<!-- Totals -->
+<section class="grid grid-cols-2 md:grid-cols-4 gap-3">
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">In window</div>
+    <div class="text-3xl font-medium num" x-text="data.totals?.total ?? '—'"></div>
+  </div>
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">Pending</div>
+    <div class="text-3xl font-medium num text-sky-300" x-text="data.totals?.pending ?? '—'"></div>
+  </div>
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">£ Seen</div>
+    <div class="text-3xl font-medium num" x-text="data.totals?.sum_seen ? '£' + Number(data.totals.sum_seen).toLocaleString() : '—'"></div>
+  </div>
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">Vendors</div>
+    <div class="text-3xl font-medium num" x-text="(data.by_vendor || []).length"></div>
+  </div>
+</section>
+
+<!-- Invoice list -->
+<section class="glass rounded-xl p-4 md:p-5">
+  <h2 class="text-lg font-medium mb-3">Inbox</h2>
+  <div class="overflow-x-auto">
+    <table class="tidy w-full text-sm">
+      <thead><tr>
+        <th>Received</th>
+        <th>Vendor</th>
+        <th>Subject</th>
+        <th class="text-right">Amount</th>
+        <th>Status</th>
+        <th>PDF</th>
+      </tr></thead>
+      <tbody>
+        <template x-for="i in data.invoices" :key="i.id">
+          <tr>
+            <td class="mono text-xs whitespace-nowrap" x-text="(i.received_at || '').slice(0,10)"></td>
+            <td class="text-xs" x-text="i.vendor_domain"></td>
+            <td class="max-w-md truncate" :title="i.subject" x-text="i.subject"></td>
+            <td class="text-right num" x-text="i.amount_seen ? '£' + Number(i.amount_seen).toFixed(2) : '—'"></td>
+            <td>
+              <span class="text-xs px-2 py-0.5 rounded-full"
+                    :class="{
+                      'badge-new': i.status==='new',
+                      'badge-extracted': i.status==='extracted',
+                      'badge-paid': i.status==='paid',
+                      'badge-disputed': i.status==='disputed',
+                      'badge-ignored': i.status==='ignored',
+                    }" x-text="i.status"></span>
+            </td>
+            <td class="text-xs" x-text="i.has_pdf ? '✓' : ''"></td>
+          </tr>
+        </template>
+        <tr x-show="!data.invoices || data.invoices.length === 0">
+          <td colspan="6" class="text-center text-slate-500 py-4">no invoices in window</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- Per-vendor summary -->
+<section class="glass rounded-xl p-4 md:p-5">
+  <h2 class="text-lg font-medium mb-3">By vendor</h2>
+  <div class="overflow-x-auto">
+    <table class="tidy w-full text-sm num">
+      <thead><tr>
+        <th>Vendor</th>
+        <th class="text-right">Total</th>
+        <th class="text-right">Pending</th>
+        <th class="text-right">Paid</th>
+        <th class="text-right">£ Seen</th>
+      </tr></thead>
+      <tbody>
+        <template x-for="v in data.by_vendor" :key="v.vendor_domain">
+          <tr>
+            <td class="font-mono text-xs" x-text="v.vendor_domain"></td>
+            <td class="text-right" x-text="v.n"></td>
+            <td class="text-right text-sky-300" x-text="v.pending"></td>
+            <td class="text-right text-emerald-300" x-text="v.paid"></td>
+            <td class="text-right" x-text="v.total_seen ? '£' + Number(v.total_seen).toFixed(2) : '—'"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+</div>
+
+<script>
+function inv() {
+  return {
+    days: 90, status: '',
+    data: { totals: {}, by_vendor: [], invoices: [] },
+    async boot() { await this.reload(); },
+    async reload() {
+      const u = `/api/invoices/list?days=${this.days}${this.status?'&status='+this.status:''}`;
+      this.data = await (await fetch(u)).json();
+    },
+  };
+}
+</script>
+</body></html>
