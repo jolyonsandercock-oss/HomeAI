@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TouchOffice — Scraped Data Interrogator</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+  table.tidy th, table.tidy td { padding: 0.4rem 0.6rem; }
+  table.tidy thead th { border-bottom: 1px solid rgba(148,163,184,0.2); text-align: left; font-weight: 600; color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  table.tidy tbody tr { border-bottom: 1px solid rgba(148,163,184,0.08); }
+  .pill-malthouse { background: rgba(96,165,250,0.15); color: #93c5fd; border: 1px solid rgba(96,165,250,0.3); }
+  .pill-sandwich  { background: rgba(74,222,128,0.15); color: #86efac; border: 1px solid rgba(74,222,128,0.3); }
+</style>
+</head>
+<body class="text-slate-100">
+<div x-data="touchoffice()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+
+<header class="flex items-center justify-between">
+  <div>
+    <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">TouchOffice — Scraped Data</h1>
+    <p class="text-sm text-slate-400">Browser-scraped EPoS data from touchoffice.net for The Olde Malthouse + Sandwich Bar. Updated nightly at 03:00.</p>
+  </div>
+  <div class="flex items-center gap-3">
+    <label class="text-xs text-slate-400">Window
+      <select x-model.number="days" @change="reload()" class="ml-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
+        <option value="7">7 days</option>
+        <option value="30" selected>30 days</option>
+        <option value="90">90 days</option>
+        <option value="365">1 year</option>
+        <option value="1095">3 years</option>
+      </select>
+    </label>
+    <a href="/" class="text-xs text-slate-400 hover:text-slate-200">← Mission Control</a>
+  </div>
+</header>
+
+<!-- Coverage cards -->
+<section class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <template x-for="c in data.coverage" :key="c.site">
+    <div class="glass rounded-xl p-5">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-medium" x-text="c.site === 'malthouse' ? 'Malthouse (pub)' : 'Sandwich Bar (ice cream)'"></h2>
+        <span class="text-xs px-2 py-1 rounded-full" :class="c.site === 'malthouse' ? 'pill-malthouse' : 'pill-sandwich'" x-text="c.site"></span>
+      </div>
+      <div class="mt-3 grid grid-cols-3 gap-3 text-sm">
+        <div><div class="text-slate-400 text-xs">days loaded</div><div class="num text-xl font-medium" x-text="c.days_loaded"></div></div>
+        <div><div class="text-slate-400 text-xs">earliest</div><div class="num mono text-sm" x-text="c.earliest"></div></div>
+        <div><div class="text-slate-400 text-xs">latest</div><div class="num mono text-sm" x-text="c.latest"></div></div>
+      </div>
+    </div>
+  </template>
+</section>
+
+<!-- Per-day table -->
+<section class="glass rounded-xl p-5">
+  <h2 class="text-lg font-medium mb-3">Per-day summary (last <span x-text="days"></span> days)</h2>
+  <div class="overflow-x-auto">
+    <table class="tidy w-full text-sm num">
+      <thead><tr>
+        <th>Date</th><th>Site</th>
+        <th class="text-right">NET Sales</th><th class="text-right">Gross Sales</th>
+        <th class="text-right">Covers</th>
+        <th class="text-right">Depts</th><th class="text-right">PLUs</th>
+      </tr></thead>
+      <tbody>
+        <template x-for="r in data.per_day" :key="r.report_date + '-' + r.site">
+          <tr>
+            <td class="mono" x-text="r.report_date"></td>
+            <td><span class="text-xs px-2 py-0.5 rounded-full" :class="r.site === 'malthouse' ? 'pill-malthouse' : 'pill-sandwich'" x-text="r.site"></span></td>
+            <td class="text-right" x-text="r.net_sales !== null ? '£' + Number(r.net_sales).toFixed(2) : '—'"></td>
+            <td class="text-right" x-text="r.gross_sales !== null ? '£' + Number(r.gross_sales).toFixed(2) : '—'"></td>
+            <td class="text-right" x-text="r.covers !== null ? Number(r.covers).toFixed(0) : '—'"></td>
+            <td class="text-right" x-text="r.depts"></td>
+            <td class="text-right" x-text="r.plus"></td>
+          </tr>
+        </template>
+        <tr x-show="!data.per_day || data.per_day.length === 0"><td colspan="7" class="text-center text-slate-500 py-4">no data in window</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- Top departments + Top PLUs side by side -->
+<section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+  <div class="glass rounded-xl p-5">
+    <h2 class="text-lg font-medium mb-3">Top departments (window total)</h2>
+    <div class="overflow-x-auto">
+      <table class="tidy w-full text-sm num">
+        <thead><tr><th>Site</th><th>Department</th><th class="text-right">Qty</th><th class="text-right">Value</th></tr></thead>
+        <tbody>
+          <template x-for="d in data.top_departments" :key="d.site + d.department">
+            <tr>
+              <td><span class="text-xs px-2 py-0.5 rounded-full" :class="d.site === 'malthouse' ? 'pill-malthouse' : 'pill-sandwich'" x-text="d.site"></span></td>
+              <td x-text="d.department"></td>
+              <td class="text-right" x-text="Number(d.qty).toFixed(0)"></td>
+              <td class="text-right" x-text="'£' + Number(d.total).toFixed(2)"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="glass rounded-xl p-5">
+    <h2 class="text-lg font-medium mb-3">Top 50 PLUs by value (window)</h2>
+    <div class="overflow-x-auto max-h-[500px] overflow-y-auto">
+      <table class="tidy w-full text-sm num">
+        <thead><tr><th>Site</th><th>PLU</th><th>Descriptor</th><th class="text-right">Qty</th><th class="text-right">Value</th></tr></thead>
+        <tbody>
+          <template x-for="p in data.top_plus" :key="p.site + p.plu_number">
+            <tr>
+              <td><span class="text-xs px-2 py-0.5 rounded-full" :class="p.site === 'malthouse' ? 'pill-malthouse' : 'pill-sandwich'" x-text="p.site"></span></td>
+              <td class="mono" x-text="p.plu_number"></td>
+              <td x-text="p.descriptor"></td>
+              <td class="text-right" x-text="Number(p.qty).toFixed(0)"></td>
+              <td class="text-right" x-text="'£' + Number(p.total).toFixed(2)"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- Recent scrape attempts -->
+<section class="glass rounded-xl p-5">
+  <h2 class="text-lg font-medium mb-3">Recent scrape attempts (per widget)</h2>
+  <div class="overflow-x-auto">
+    <table class="tidy w-full text-sm">
+      <thead><tr>
+        <th>Scraped at</th><th>Site</th><th>Date</th><th>Widget</th>
+        <th>Status</th><th class="text-right">Rows</th><th>Error</th>
+      </tr></thead>
+      <tbody>
+        <template x-for="s in data.recent_scrapes" :key="s.scraped_at + s.site + s.widget">
+          <tr>
+            <td class="mono text-xs" x-text="(s.scraped_at || '').slice(0,19).replace('T',' ')"></td>
+            <td><span class="text-xs px-2 py-0.5 rounded-full" :class="s.site === 'malthouse' ? 'pill-malthouse' : 'pill-sandwich'" x-text="s.site"></span></td>
+            <td class="mono text-xs" x-text="s.report_date"></td>
+            <td x-text="s.widget"></td>
+            <td><span :class="s.success ? 'text-emerald-300' : 'text-rose-300'" x-text="s.success ? '✓' : '✗'"></span></td>
+            <td class="text-right num" x-text="s.rows_written ?? '—'"></td>
+            <td class="text-xs text-slate-400" x-text="s.error_message || ''"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+</div>
+
+<script>
+function touchoffice() {
+  return {
+    days: 30,
+    data: { coverage: [], per_day: [], top_departments: [], top_plus: [], recent_scrapes: [] },
+    async boot() { await this.reload(); },
+    async reload() {
+      try {
+        const r = await fetch(`/api/touchoffice/overview?days=${this.days}`);
+        this.data = await r.json();
+      } catch (e) {
+        console.error(e);
+      }
+    },
+  };
+}
+</script>
+</body></html>

@@ -36,6 +36,17 @@ items:
 
   - severity: low
     title: Authelia bootstrapped but Vault ≠ rendered config (cosmetic mismatch)
-    detail: 2026-05-11 — authelia/authelia:4.39.19 pulled, users_database.yml written, container ready to start. The old bootstrap script (pre-template rewrite) was used — generated fresh JWT + encryption secrets into Vault but its sed couldn't match the rendered configuration.yml so the file kept the original values. Authelia reads from the file at runtime, so SSO works correctly; the divergence only matters if a future operation reads secrets from Vault (none today). To clean up — re-run new ./scripts/authelia-bootstrap.sh, answer Y at the "Import existing into Vault?" prompts, then docker compose restart authelia. Also: uncomment authelia + caddy-forward-auth blocks in docker-compose.yml and wire forward_auth to protect /dashboard + /metabase.
+    detail: >
+      2026-05-11 — authelia/authelia 4.39.19 pulled, users_database.yml written,
+      container ready to start. The old bootstrap script (pre-template rewrite)
+      was used — generated fresh JWT + encryption secrets into Vault but its
+      sed could not match the rendered configuration.yml so the file kept the
+      original values. Authelia reads from the file at runtime, so SSO works;
+      the divergence only matters if a future operation reads secrets from
+      Vault (none today). To clean up, re-run scripts/authelia-bootstrap.sh,
+      answer Y at the "Import existing into Vault?" prompts, then docker
+      compose restart authelia. Also uncomment authelia + caddy-forward-auth
+      blocks in docker-compose.yml and wire forward_auth to protect /dashboard
+      and /metabase.
     unblocks: Clean rotation path, full Phase 2 access layer
     estimate: 30 min

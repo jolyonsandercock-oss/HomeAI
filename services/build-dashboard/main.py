@@ -1142,6 +1142,87 @@ async def pub_board():
     return FileResponse(str(STATIC / "pub.html"))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# U27 — TouchOffice browser-scraped data (Pipeline 5)
+# ─────────────────────────────────────────────────────────────────────────────
+@app.get("/touchoffice")
+async def touchoffice_page():
+    return FileResponse(str(STATIC / "touchoffice.html"))
+
+
+@app.get("/api/touchoffice/overview")
+async def api_touchoffice_overview(days: int = 30):
+    """Summary + per-day NET sales/covers across both sites for the last N days."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        coverage = await c.fetch("""
+          SELECT site,
+                 COUNT(DISTINCT report_date) AS days_loaded,
+                 MIN(report_date)            AS earliest,
+                 MAX(report_date)            AS latest
+            FROM touchoffice_fixed_totals
+           GROUP BY site
+           ORDER BY site
+        """)
+        recent_scrapes = await c.fetch("""
+          SELECT site, report_date, widget, success, rows_written, error_message, scraped_at
+            FROM touchoffice_scrapes
+           ORDER BY scraped_at DESC
+           LIMIT 30
+        """)
+        per_day = await c.fetch(f"""
+          SELECT report_date, site,
+                 (SELECT value    FROM touchoffice_fixed_totals f WHERE f.site=t.site AND f.report_date=t.report_date AND f.label='NET sales') AS net_sales,
+                 (SELECT value    FROM touchoffice_fixed_totals f WHERE f.site=t.site AND f.report_date=t.report_date AND f.label='GROSS Sales') AS gross_sales,
+                 (SELECT quantity FROM touchoffice_fixed_totals f WHERE f.site=t.site AND f.report_date=t.report_date AND f.label='Covers') AS covers,
+                 (SELECT COUNT(*) FROM touchoffice_department_sales d WHERE d.site=t.site AND d.report_date=t.report_date) AS depts,
+                 (SELECT COUNT(*) FROM touchoffice_plu_sales p WHERE p.site=t.site AND p.report_date=t.report_date) AS plus
+            FROM (SELECT DISTINCT site, report_date FROM touchoffice_fixed_totals
+                   WHERE report_date >= CURRENT_DATE - ($1::int)) t
+           ORDER BY report_date DESC, site
+        """, days)
+        top_depts = await c.fetch("""
+          SELECT site, department, SUM(value)::numeric(14,2) AS total,
+                 SUM(quantity)::numeric(14,2) AS qty
+            FROM touchoffice_department_sales
+           WHERE report_date >= CURRENT_DATE - ($1::int)
+           GROUP BY site, department
+           ORDER BY site, total DESC
+           LIMIT 40
+        """, days)
+        top_plus = await c.fetch("""
+          SELECT site, plu_number, descriptor,
+                 SUM(value)::numeric(14,2) AS total,
+                 SUM(quantity)::numeric(14,2) AS qty
+            FROM touchoffice_plu_sales
+           WHERE report_date >= CURRENT_DATE - ($1::int)
+           GROUP BY site, plu_number, descriptor
+           ORDER BY total DESC
+           LIMIT 50
+        """, days)
+    # Stringify dates + decimals so the response is JSON-encodable by FastAPI's
+    # default encoder regardless of which path renders it.
+    def _row(r):
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"):
+                out[k] = v.isoformat()
+            elif hasattr(v, "to_eng_string"):  # decimal.Decimal
+                out[k] = str(v)
+            else:
+                out[k] = v
+        return out
+    return {
+        "window_days":     days,
+        "coverage":        [_row(r) for r in coverage],
+        "recent_scrapes":  [_row(r) for r in recent_scrapes],
+        "per_day":         [_row(r) for r in per_day],
+        "top_departments": [_row(r) for r in top_depts],
+        "top_plus":        [_row(r) for r in top_plus],
+    }
+
+
 @app.get("/api/pub/snapshot")
 async def pub_snapshot():
     """Aggregate today's pub-side metrics: EPoS revenue, accommodation
