@@ -354,7 +354,8 @@ Ad hoc (when needed)
 ```
 Bank statements  →  transaction truth
 Xero             →  accounting truth
-Dext             →  invoice truth
+Email PDF        →  invoice truth (extracted via pdfplumber + Haiku)
+Dext             →  manual review tool only (no API integration)
 ICRTouch         →  EPoS sales truth
 Caterbook        →  accommodation truth
 System DB        →  mirror + derived data + reconciliation flags
@@ -368,7 +369,7 @@ System DB        →  mirror + derived data + reconciliation flags
 4. **Security is the foundation.** Every input is validated. Every AI call is sandboxed. Every secret is rotated. Every action is audited.
 5. **Reliable before intelligent.** Correct and slow beats incorrect and fast.
 6. **Xero is never written to automatically.** All financial actions require confirmation.
-7. **Dext stays live.** Parallel pipeline until 60+ days proven parity.
+7. **Dext stays live as a manual review tool.** No API integration — Dext does not expose a public API. Run the internal extraction pipeline (pdfplumber/MarkItDown + Haiku) in parallel for 60+ days and compare outputs manually to validate extraction accuracy.
 8. **Idempotent.** All pipeline runs are safe to repeat. Duplicate events produce no duplicate records.
 9. **Fail philosophy is explicit.** Every pipeline has a declared fail-open or fail-closed mode (see Section 4.6).
 
@@ -437,7 +438,6 @@ secret/xero/estates            { client_id, client_secret, refresh_token, org_id
 secret/natwest/openbanking     { client_id, client_secret, access_token, consent_id }
 secret/rbs/openbanking         { client_id, client_secret, access_token, consent_id }
 secret/garmin                  { email, password }
-secret/dext                    { api_key }
 secret/telegram                { bot_token, chat_id }
 secret/github                  { personal_access_token }
 secret/google/calendar         { oauth_client_id, oauth_client_secret, refresh_token }
@@ -465,7 +465,6 @@ path "secret/data/xero/*"     { capabilities = ["read"] }
 path "secret/data/anthropic"  { capabilities = ["read"] }
 path "secret/data/postgres"   { capabilities = ["read"] }
 path "secret/data/telegram"   { capabilities = ["read"] }
-path "secret/data/dext"       { capabilities = ["read"] }
 path "secret/data/google/*"   { capabilities = ["read"] }
 path "secret/data/signing"    { capabilities = ["read"] }
 # n8n cannot access: garmin, encryption, admin paths
@@ -856,7 +855,6 @@ CREATE TABLE invoices (
   anomaly_check    TEXT,
   anomaly_reason   TEXT,
   xero_invoice_id  TEXT,
-  dext_document_id TEXT,
   drive_url        TEXT,
   created_at       TIMESTAMPTZ DEFAULT NOW()
 );
@@ -2287,8 +2285,7 @@ MILESTONE C — Full Pipeline Build
 1. Configure TouchOffice admin to email daily Z-report to a monitored Gmail address
 2. Configure Caterbook admin to email daily report to the same or another monitored Gmail
 3. Create Google Sheet for cashing up (columns A–J as per Appendix C)
-4. Register for Dext API key at api.dext.com
-5. Create Anthropic API key at console.anthropic.com
+4. Create Anthropic API key at console.anthropic.com
 
 ## 6.2 Phase 1 Pipeline Specifications
 
@@ -2443,24 +2440,34 @@ You are analysing pre-sanitised content. Return ONLY valid JSON. No markdown. No
 
 ### Pipeline 2 — Invoice Pipeline
 
-**Trigger:** New event `invoice.detected`
-**Idempotency key:** `invoice_{dext_doc_id}` OR `invoice_{sha256(supplier+amount+date)}`
+**Trigger:** New event `invoice.detected` (email attachment)
+**Idempotency key:** `invoice_{sha256(supplier_name+gross_amount+invoice_date+entity_id)}`
 **Fail mode:** Fail closed — no partial writes
+
+> **Note on Dext:** Dext does not expose a public API. Dext continues as Jo's
+> manual review tool in parallel — no system integration. Compare outputs
+> manually for the first 60 days to validate extraction accuracy. Internal
+> extraction (pdfplumber/MarkItDown + Haiku) is the *only* automated path.
 
 **Node sequence:**
 1. Check idempotency → stop if exists
-2. HTTP Request → Dext API → does dext_document_id exist?
-3. Switch:
-   - Dext found → pull fields, source='dext'
-   - Not found → HTTP Request pdfplumber POST /extract-pdf → sanitise → Haiku extraction
-4. Code Node: `validateAIOutput` + threshold check (min 0.90)
-5. Code Node: supplier anomaly check (see below)
-6. Code Node: sign payload
-7. PostgreSQL Node: INSERT invoices (fail if error — no partial)
-8. PostgreSQL Node: upsert supplier_invoice_history
-9. SQL: match against xero_invoices (amount ±£0.01, date ±3 days, entity match)
-10. If unmatched: INSERT reconciliation_flags
-11. Emit `invoice.extracted` (or `invoice.unmatched`) event
+2. Fetch attachment from Gmail via Gmail API (existing OAuth pattern — refresh access token from Vault, GET `/messages/{id}/attachments/{attachment_id}`)
+3. Detect MIME type and route:
+   - `application/pdf` → HTTP Request pdfplumber POST `/extract-pdf` → structured text + `content_hash`
+   - `image/*`, `.docx`, `.doc`, `.html`, other → HTTP Request MarkItDown POST `/convert` → markdown text
+4. Code Node: `sanitiseForPrompt(text)` → `body_text_safe` (SPEC §2.4)
+5. HTTP Request → Anthropic Haiku `invoice_extractor` with body_text_safe + filename + supplier hint
+6. Code Node: build OutcomeObject (status / confidence / reasoning / data / requires_human / worker / tier_used) per §6.2 Outcome-Native Pattern
+7. If `outcome.status == 'escalate'` (confidence ≥ threshold × 0.85 but < threshold): retry with medium tier (`model.tiers.medium` from static_context); rebuild OutcomeObject with `tier_used='medium'`
+8. If `outcome.status == 'fail'` (confidence < threshold × 0.85): set `requires_human=true`, write to invoices with `requires_human=TRUE`, emit `invoice.unmatched`, end
+9. Code Node: supplier anomaly check (see below) — may set `requires_human=true`
+10. Code Node: sign payload (HMAC-SHA256 over canonical JSON, key from Vault `secret/signing`)
+11. PostgreSQL Node: INSERT invoices (fail closed — abort run on error, no partial state)
+12. PostgreSQL Node: upsert supplier_invoice_history
+13. SQL: match against xero_invoices (amount ±£0.01, date ±3 days, entity match)
+14. If unmatched: INSERT reconciliation_flags
+15. Emit `invoice.extracted` (or `invoice.unmatched`) event with parent_event_id chain
+16. Audit_log row with `ai_worker='invoice_extractor'`, `ai_parsed=<outcome JSONB>`, `tier_used`
 
 **invoice_extractor system prompt:**
 ```
@@ -2964,7 +2971,7 @@ Deterministic routing → AI enrichment → PostgreSQL write → event emit.
 4=Family (3 children ages 8, 10, 16)
 
 ## Source of truth (never override these)
-Xero=accounting | Dext=invoices | Bank=transactions | ICRTouch=EPoS | Caterbook=accommodation
+Xero=accounting | Email PDF=invoice extraction (Dext is manual review only, no API) | Bank=transactions | ICRTouch=EPoS | Caterbook=accommodation
 
 ## Build rules (enforced by hooks — not optional)
 - NEVER write any secret to a file. Vault only. No .env with secrets.
@@ -3732,7 +3739,7 @@ Work through every item. All must pass before Phase 2 begins.
 [ ] Gmail pipeline: send test email → email.received event in events table within 15 min
 [ ] Idempotency: send same email twice → only one row in emails table
 [ ] Invoice pipeline: email test PDF → appears in invoices table (source=email_ocr)
-[ ] Dext priority: same invoice in Dext → source=dext on second run
+[ ] Invoice pipeline: same PDF emailed twice → only one invoices row (idempotency on supplier+amount+date+entity)
 [ ] EPoS pipeline: forward TouchOffice email → epos_daily_reports populated
 [ ] EPoS arithmetic validation: net+vat ≈ gross (within £0.10)
 [ ] Caterbook pipeline: forward Caterbook email → accommodation_daily_reports populated
@@ -4413,10 +4420,8 @@ echo "  4. Run /verify-phase1 to confirm system health"
 - Google Calendar sync (personal, work, kids — 3 calendars)
 - Task engine (manual + auto-generated from email triage)
 - Property database (7 properties: full schema, compliance dates, renewals)
-- **Paperless-ngx** (document management: scan intake, OCR, splitting, auto-tagging, search)
-- **Samba share** on P620 for scanner → consume folder direct drop
 - Document control system (versioning, expiry alerts, approval workflow)
-- Scanner → Paperless-ngx → n8n enrichment → PostgreSQL + Obsidian → Google Drive workflow
+- Scanner → Google Drive → OCR → PostgreSQL workflow
 - **PostgreSQL MCP server** (read-only tools for Claude.ai live data queries — port 8005)
 - **Obsidian vault MCP server** (read/write vault tools for Claude.ai — port 8007)
 - **MarkItDown service** (audio, images, Word, YouTube → markdown — port 8006)
@@ -4637,7 +4642,7 @@ GET  /api/diagnostics/history      → last 30 days from diagnostic_history tabl
 
 **Test categories and severities:**
 - Critical (red): PostgreSQL, Vault unsealed, Vault secrets, n8n workflows, epos partition, RLS, dead letters, Claude API, Ollama
-- Warning (amber): Disk space, GPU, Xero sync, Dext API, Garmin service, ICRTouch/Caterbook last report, stale leases, error rate
+- Warning (amber): Disk space, GPU, Xero sync, Garmin service, ICRTouch/Caterbook last report, stale leases, error rate
 - Info (blue): Prompt injection count, API spend, backup integrity age
 
 **n8n diagnostic workflow** (runs daily at 06:30, before digest):
@@ -4881,7 +4886,7 @@ HOLIDAY_CALC: Statutory pro-rata ONLY. NEVER 12.07% accrual.
 §
 XERO: Org 1 = Trading Ltd. Org 2 = Estates Ltd.
 §
-DEXT: Dext is invoice ground truth. Internal OCR is fallback only.
+DEXT: Dext is a manual review tool (no public API). Internal extraction (pdfplumber/MarkItDown + Haiku) is the ONLY automated path.
 §
 CASHING_UP: Z-reading from ICRTouch ONLY. Staff enter cash+float only.
 §
@@ -5932,7 +5937,7 @@ The RLS policies (Section 3.3) are already deployed in Phase 1. Phase 6 is about
 |---|---|
 | events | Set explicitly per pipeline |
 | emails | `email_{gmail_message_id}` |
-| invoices | `invoice_{dext_doc_id}` OR `invoice_{sha256(supplier_norm+amount+date)}` |
+| invoices | `invoice_{sha256(supplier_name+gross_amount+invoice_date+entity_id)}` |
 | bank_transactions | `bank_{sha256(account+date+amount+desc[:50])}` |
 | epos_daily_reports | `epos_{sha256(report_date+session)}` |
 | accommodation_daily_reports | `accomm_{sha256(report_date)}` |
@@ -5987,7 +5992,6 @@ J = "OK" if ABS(I) ≤ 5 AND ABS(I/F*100) ≤ 0.5 else "VARIANCE FLAGGED"
 | Xero Trading | secret/xero/trading |
 | Xero Estates | secret/xero/estates |
 | Claude API | secret/anthropic |
-| Dext | secret/dext |
 | Telegram | secret/telegram |
 | PostgreSQL | secret/postgres |
 | Google Sheets | secret/google/sheets |
@@ -6054,11 +6058,10 @@ J = "OK" if ABS(I) ≤ 5 AND ABS(I/F*100) ≤ 0.5 else "VARIANCE FLAGGED"
 | v5.0 | Phase 1 three-milestone gate structure. Vault auto-unseal + Authelia + benchmarks deferred to Phase 2 hardening. Vertical slice gate mandatory before all remaining pipelines. |
 | v5.1 | Ralph loop, MarkItDown, vault-mcp, Karpathy wiki compilation, PARA vault, Qdrant reranking. |
 | v5.2 | Disaster recovery scripts (backup-all.sh, bootstrap.sh, restore.sh). Section 7.3. |
-| v5.3 | Outcome-Native pipeline pattern, Local Dreaming Workflow, CI Auto-Fix GitHub Actions. |
-| **v5.4** | **Paperless-ngx document digitisation pipeline added (Phase 3, Section 8.1b): Brother ADS-2800W → SMB → Paperless-ngx → n8n Workflow I enrichment → PostgreSQL + Obsidian + Google Drive. Samba share setup, docker-compose service on port 8011, post-consume n8n webhook, Haiku enrichment with OutcomeObject, rclone Google Drive/OneDrive sync, scanner one-touch profile spec, Paperless auto-tagging rules. Phase 5 stretch: gemma4:e4b AI document boundary detection. Phase 3 deliverables updated.** | **Outcome-Native pipeline pattern added to Section 6.2 construction rules: OutcomeObject schema (status/confidence/reasoning/tier_used), retry/escalation Code node (confidence <0.85 escalates to medium tier before requires_human), Dreaming heuristics file pattern for Master Router context. Phase 2 deliverables: Local Dreaming Workflow (Workflow H, nightly 02:00, audit_log → Haiku → heuristics.md → Master Router). CI Auto-Fix GitHub Actions (SQL tests for init_placeholder + RLS policy count). Note: Outcomes and Dreaming are patterns implemented locally in n8n/Ollama — NOT Anthropic Managed Agents platform features.** |
+| **v5.3** | **Outcome-Native pipeline pattern added to Section 6.2 construction rules: OutcomeObject schema (status/confidence/reasoning/tier_used), retry/escalation Code node (confidence <0.85 escalates to medium tier before requires_human), Dreaming heuristics file pattern for Master Router context. Phase 2 deliverables: Local Dreaming Workflow (Workflow H, nightly 02:00, audit_log → Haiku → heuristics.md → Master Router). CI Auto-Fix GitHub Actions (SQL tests for init_placeholder + RLS policy count). Note: Outcomes and Dreaming are patterns implemented locally in n8n/Ollama — NOT Anthropic Managed Agents platform features.** |
 
 ---
 
-*End of Master Build Specification v5.4*
+*End of Master Build Specification v5.3*
 *This document supersedes all previous versions.*
 *Single source of truth for the Home AI Administrative Engine build.*
