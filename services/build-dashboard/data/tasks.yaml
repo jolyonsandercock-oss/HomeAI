@@ -1,5 +1,4 @@
-# Tasks remaining for Phase 1 close-out.
-# Edit freely — re-read on every /api/snapshot.
+# Tasks remaining — re-read on every /api/snapshot.
 
 hands_off:
   - id: column-order-cleanup
@@ -13,33 +12,48 @@ hands_off:
     estimate: 30 min
 
   - id: ci-autofix
-    title: CI Auto-Fix sketch (Phase 2)
-    detail: GitHub Actions workflow that runs RLS test suite, sanitiser fixture, P2 fixture, schema drift on PRs. Needs the repo first (Bucket 3 — needs you).
-    estimate: 45 min once repo exists
+    title: CI Auto-Fix (GitHub Actions, Phase 2)
+    detail: Repo now exists (off-host-backup, 2026-05-11). Workflow needs to run RLS suite, sanitiser fixture, P2 fixture, schema drift on PRs.
+    estimate: 45 min
 
-needs_user:
-  # All three remaining user-blocked items are scoped together as U29
-  # (Phase 1 close-out). See /home_ai/.claude/sprints/U29-phase1-closeout.md.
-  - id: xero-oauth
-    title: P3 Xero OAuth + P2 matching unlock (U29 chunk 1)
-    detail: Register at developer.xero.com, run OAuth Playground for refresh tokens (one for Trading, one for Estates), store at secret/xero/{trading,estates}. After tokens land, run scripts/u29-xero-creds.sh (will be written this sprint).
+  - id: u31-completion
+    title: U31 dashboard tables — chunks 5, 6, 8, 9 remaining
+    detail: /touchoffice + /caterbook + /workforce + / Mission Control still need migration to Tabulator. /invoices is the proof (live). Plan at .claude/sprints/U31-dashboard-tables-ux.md.
+    estimate: 3h
+
+  - id: daily-unit-economics
+    title: Cross-pipeline daily_unit_economics view + /economics page
+    detail: Join touchoffice_fixed_totals + caterbook_daily_snapshots + workforce_shifts on (date, site). Headline "did the business make money" in one row per day. Designed in U30 plan.
+    estimate: 90 min
+
+  - id: p7-cashing-up
+    title: P7 Cashing Up — parse 2026CashUp sheet (weekly-block layout)
+    detail: Sheet creds in Vault (secret/sheets/cashing_up). Layout is weekly-block, 52 columns per year, not the flat 10-col SPEC anticipated. Parser walks blocks at A,M,Y,... extracts per-day cash totals + drawer error + manager. Persist into till_reconciliation, join touchoffice_fixed_totals for variance > £5 flag piped to the digest.
+    estimate: 2h
+
+  - id: invoice-pdf-extraction
+    title: P2 enrichment — PDF auto-extraction for vendor_invoice_inbox rows
+    detail: Fetch attached PDFs for the rows in vendor_invoice_inbox, run through pdfplumber, regex amount + due_date + invoice_no, write back to the row. After this, /invoices shows real £ amounts.
+    estimate: 60 min
+
+  - id: workforce-departments
+    title: Workforce — pull /departments for human-readable names
+    detail: Currently workforce_shifts.department_external_id is 593833/593834/etc. Add workforce_departments table + sync + join so the /workforce dashboard shows names.
     estimate: 30 min
 
-  # ✓ scraper-creds completed 2026-05-11 — TouchOffice + Caterbook creds in Vault.
-  # ✓ TouchOffice scraper + ingest live; daily 03:00 cron installed. Backfill
-  #   in progress (30 days first, then 3 years). See /touchoffice in dashboard.
-  # → Caterbook pivoted from browser scrape to email-driven pipeline.
-  #   Plan in .claude/sprints/U28-caterbook-email-pipeline.md.
+  - id: u31-mobile-page
+    title: Phone-first /m landing page
+    detail: Single thumb-scrollable view, today's pub takings + accom occupancy + due invoices + scrape health. Auto-refresh on load.
+    estimate: 45 min
 
-  - id: gsheets-oauth
-    title: P7 Cashing Up — Google Sheets OAuth
-    detail: Create the cashing-up sheet (columns A–J per Appendix C), then OAuth flow for Sheets API.
-    estimate: 15 min
+needs_user:
+  - id: xero-oauth
+    title: P3 Xero OAuth — PARKED awaiting Xero support
+    detail: Bootstrap script + scope strings are correct. The error came from Xero's authorize endpoint even on a fresh app with minimal scope (offline_access only) in incognito mode. Email api@xero.com with the errorId — they look these up in their logs. Re-run scripts/u29-xero-bootstrap.py once they reply.
+    estimate: 30 min once Xero responds
 
-  - id: telegram-smtp
-    title: P10 Daily Digest — Telegram bot + SMTP
-    detail: BotFather → bot token + chat_id → Vault. SMTP creds (Gmail app password works) → Vault.
-    estimate: 20 min
+  # ✓ gsheets-oauth   DONE 2026-05-12 — info@ SA had Sheets scope already; secret/sheets/cashing_up populated.
+  # ✓ telegram-smtp   DONE 2026-05-11 — bot_token + chat_id in secret/telegram; SMTP unneeded (Gmail API).
+  # ✓ scraper-creds   DONE 2026-05-11 — TouchOffice + Caterbook creds stashed.
 
-  # ▸ nas-mount POSTPONED 2026-05-11 (user decision). GitHub off-host-backup
-  #   handles config-tree DR (U26 option 9). Re-add when NAS hardware is on hand.
+  # ▸ nas-mount       POSTPONED 2026-05-11 — GitHub off-host-backup covers config DR.

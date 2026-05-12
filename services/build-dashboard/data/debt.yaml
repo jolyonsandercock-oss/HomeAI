@@ -15,20 +15,20 @@ items:
   # ✓ P5 TouchOffice — RESOLVED 2026-05-11 (U27). Browser scrape + 3-widget
   #   INSERTs + 3am cron live. Backfill running (30d → 3y). Surfaced on
   #   /touchoffice dashboard page.
+  # ✓ P6 Caterbook — RESOLVED 2026-05-11 (U28). 140 emails ingested, 282
+  #   complete bookings, 467 room-nights. Dashboard /caterbook live. 07:00
+  #   cron live. Schema at V28.
+
   - severity: medium
-    title: P6 Caterbook — email-driven pipeline not yet built
+    title: P3 Xero Sync — PARKED awaiting Xero support
     detail: >
-      Caterbook sends a daily "Arrivals and Departures" email with a PDF
-      attachment to stay@malthousetintagel.com (received in
-      info@malthousetintagel.com). Browser scraping is parked — the email
-      route is strictly better. New pipeline needs to: filter Gmail by
-      subject + recipient, fetch the PDF via homeai-google-fetch, parse via
-      pdfplumber, explode each booking into per-night rows in
-      caterbook_room_nights, plus a daily snapshot for the dashboard. Cron
-      at 07:00. Backfill via Gmail search going as far back as the inbox
-      holds. Full plan at .claude/sprints/U28-caterbook-email-pipeline.md.
-    unblocks: Per-room revenue trend, arrivals/stayovers/departures dashboard
-    estimate: 4-5h (V28 migration + n8n workflow + /caterbook dashboard page)
+      OAuth bootstrap script + scopes verified correct against Xero docs.
+      Authorize endpoint rejects requests even with minimal scope (offline_access
+      only) on a fresh app, in incognito mode. errorId logged in URL. Sent to
+      api@xero.com for log lookup. Re-run scripts/u29-xero-bootstrap.py once
+      Xero replies. Until unblocked, P2 invoice matching cannot complete.
+    unblocks: P2 invoice → Xero match, P3 Pipeline 3, payment reconciliation
+    estimate: 30 min once Xero replies + 30 min wiring
 
   # ▸ NAS off-host backup — POSTPONED 2026-05-11 (user decision).
   #   GitHub off-host-backup (U26 option 9) provides text-config DR; the actual
