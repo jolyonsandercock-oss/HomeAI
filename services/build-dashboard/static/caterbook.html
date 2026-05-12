@@ -3,78 +3,75 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Caterbook — Accommodation Data</title>
+<title>Caterbook — Home AI</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link href="https://unpkg.com/tabulator-tables@5.5.4/dist/css/tabulator.min.css" rel="stylesheet">
+<link href="/static/css/tables.css" rel="stylesheet">
+<script src="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"></script>
+<script src="/static/js/homeai-table.js"></script>
 <style>
   :root { color-scheme: dark; }
-  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
   .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
-  .num  { font-variant-numeric: tabular-nums; }
-  table.tidy th, table.tidy td { padding: 0.4rem 0.6rem; }
-  table.tidy thead th { border-bottom: 1px solid rgba(148,163,184,0.2); text-align: left; font-weight: 600; color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
-  table.tidy tbody tr { border-bottom: 1px solid rgba(148,163,184,0.08); }
-  .chip-arr { background: rgba(74,222,128,0.15);  color: #86efac; border: 1px solid rgba(74,222,128,0.3); }
-  .chip-stay { background: rgba(56,189,248,0.15); color: #7dd3fc; border: 1px solid rgba(56,189,248,0.3); }
-  .chip-dep  { background: rgba(244,114,182,0.15);color: #f9a8d4; border: 1px solid rgba(244,114,182,0.3); }
-  /* heatmap cell — colour by rate (lower=blue, higher=amber) */
-  .hm-cell { width: 24px; height: 24px; display: inline-block; vertical-align: middle; border: 1px solid rgba(15,23,42,0.4); }
+  .chip-arr { background: rgba(74,222,128,0.15);  color:#86efac; border:1px solid rgba(74,222,128,0.3); padding:1px 8px; border-radius:999px; font-size:0.7rem; }
+  .chip-stay{ background: rgba(56,189,248,0.15);  color:#7dd3fc; border:1px solid rgba(56,189,248,0.3); padding:1px 8px; border-radius:999px; font-size:0.7rem; }
+  .chip-dep { background: rgba(244,114,182,0.15); color:#f9a8d4; border:1px solid rgba(244,114,182,0.3); padding:1px 8px; border-radius:999px; font-size:0.7rem; }
 </style>
 </head>
 <body class="text-slate-100">
-<div x-data="caterbook()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+<div x-data="cb()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
 
-<header class="flex items-center justify-between">
+<header class="flex flex-wrap items-center justify-between gap-3">
   <div>
     <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Caterbook — Accommodation</h1>
-    <p class="text-sm text-slate-400">From the daily "Arrivals and Departures" email PDF (Pipeline 6). Ingest at 07:00 daily.</p>
+    <p class="text-sm text-slate-400">Daily "Arrivals and Departures" PDF, ingested every 07:00.</p>
   </div>
-  <div class="flex items-center gap-3">
+  <div class="flex items-center gap-3 flex-wrap">
+    <input type="text" data-homeai-search placeholder="search… (/)"
+           class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm w-40"
+           @input="searchAll($event.target.value)">
     <label class="text-xs text-slate-400">Window
       <select x-model.number="days" @change="reload()" class="ml-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
-        <option value="7">7 days</option>
-        <option value="30" selected>30 days</option>
-        <option value="90">90 days</option>
-        <option value="180">6 months</option>
-        <option value="365">1 year</option>
+        <option value="7">7d</option><option value="30" selected>30d</option>
+        <option value="90">90d</option><option value="180">6mo</option><option value="365">1y</option>
       </select>
     </label>
     <a href="/" class="text-xs text-slate-400 hover:text-slate-200">← Mission Control</a>
   </div>
 </header>
 
-<!-- Coverage card + headline counts -->
-<section class="grid grid-cols-1 md:grid-cols-4 gap-4">
+<!-- Headline tiles -->
+<section class="grid grid-cols-2 md:grid-cols-4 gap-3">
   <div class="glass rounded-xl p-4">
     <div class="text-xs uppercase tracking-wide text-slate-400">Days loaded</div>
-    <div class="text-3xl font-medium num" x-text="data.coverage?.days_loaded ?? '—'"></div>
-    <div class="text-xs text-slate-400 mono mt-1" x-text="(data.coverage?.earliest || '') + ' → ' + (data.coverage?.latest || '')"></div>
+    <div class="text-3xl font-medium mono" x-text="data.coverage?.days_loaded ?? '—'"></div>
+    <div class="text-xs text-slate-400 mono" x-text="(data.coverage?.earliest||'') + ' → ' + (data.coverage?.latest||'')"></div>
   </div>
   <div class="glass rounded-xl p-4">
     <div class="text-xs uppercase tracking-wide text-slate-400">Today — In-house</div>
-    <div class="text-3xl font-medium num" x-text="data.latest_snapshot?.in_house_count ?? '—'"></div>
-    <div class="text-xs text-slate-400" x-text="'£' + (data.latest_snapshot?.revenue_in_house ?? '—')"></div>
+    <div class="text-3xl font-medium mono" x-text="data.latest_snapshot?.in_house_count ?? '—'"></div>
+    <div class="text-xs text-slate-400 mono" x-text="data.latest_snapshot?.revenue_in_house ? '£'+data.latest_snapshot.revenue_in_house : ''"></div>
   </div>
   <div class="glass rounded-xl p-4">
     <div class="text-xs uppercase tracking-wide text-slate-400">Today — Arrivals</div>
-    <div class="text-3xl font-medium num" x-text="data.latest_snapshot?.arrivals_count ?? '—'"></div>
+    <div class="text-3xl font-medium mono" x-text="data.latest_snapshot?.arrivals_count ?? '—'"></div>
   </div>
   <div class="glass rounded-xl p-4">
     <div class="text-xs uppercase tracking-wide text-slate-400">Today — Departures</div>
-    <div class="text-3xl font-medium num" x-text="data.latest_snapshot?.departures_count ?? '—'"></div>
+    <div class="text-3xl font-medium mono" x-text="data.latest_snapshot?.departures_count ?? '—'"></div>
   </div>
 </section>
 
-<!-- Today's three lists -->
+<!-- Today's three lists — keep card style for the at-a-glance view -->
 <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
   <template x-for="[label, key, cls] in [['Arrivals','arrivals','chip-arr'],['Stayovers','stayovers','chip-stay'],['Departures','departures','chip-dep']]" :key="key">
     <div class="glass rounded-xl p-4">
       <div class="flex items-center justify-between mb-2">
         <h2 class="text-base font-medium" x-text="label"></h2>
-        <span class="text-xs px-2 py-0.5 rounded-full" :class="cls" x-text="(data.latest_snapshot?.[key] || []).length"></span>
+        <span :class="cls" x-text="(data.latest_snapshot?.[key] || []).length"></span>
       </div>
-      <div class="text-xs text-slate-400 mono mb-2" x-text="data.latest_snapshot?.report_date || ''"></div>
       <div class="space-y-1 max-h-72 overflow-y-auto">
         <template x-for="g in (data.latest_snapshot?.[key] || [])" :key="g.ref + g.room">
           <div class="text-sm flex justify-between gap-2 border-b border-slate-800/60 pb-1">
@@ -84,7 +81,7 @@
               <div class="text-xs text-slate-500" x-text="(g.type||'') + ' · ' + (g.guests||'')"></div>
             </div>
             <div class="text-right">
-              <div class="num" x-text="'£' + (g.balance ?? '—')"></div>
+              <div class="mono" x-text="'£' + (g.balance ?? '—')"></div>
               <div class="text-xs text-slate-500" x-text="g.dep ? '→ ' + g.dep : ''"></div>
             </div>
           </div>
@@ -94,90 +91,81 @@
   </template>
 </section>
 
-<!-- Per-room revenue (last N days) -->
-<section class="glass rounded-xl p-5">
-  <h2 class="text-lg font-medium mb-3">Revenue per room (last <span x-text="days"></span> days)</h2>
-  <div class="overflow-x-auto">
-    <table class="tidy w-full text-sm num">
-      <thead><tr><th>Room</th><th class="text-right">Nights</th><th class="text-right">Revenue</th><th class="text-right">Avg / night</th></tr></thead>
-      <tbody>
-        <template x-for="r in data.per_room" :key="r.room">
-          <tr>
-            <td class="mono" x-text="r.room"></td>
-            <td class="text-right" x-text="r.nights"></td>
-            <td class="text-right" x-text="'£' + r.revenue"></td>
-            <td class="text-right" x-text="r.avg_rate ? '£' + r.avg_rate : '—'"></td>
-          </tr>
-        </template>
-        <tr x-show="!data.per_room || data.per_room.length === 0"><td colspan="4" class="text-center text-slate-500 py-4">no room-night data in window</td></tr>
-      </tbody>
-    </table>
-  </div>
+<!-- Per-room revenue, daily snapshots, recent imports → Tabulator -->
+<section class="glass rounded-xl p-3 md:p-4">
+  <h2 class="text-lg font-medium mb-2 px-1">Revenue per room (window)</h2>
+  <div id="per-room-table"></div>
 </section>
 
-<!-- Per-day snapshot table -->
-<section class="glass rounded-xl p-5">
-  <h2 class="text-lg font-medium mb-3">Daily snapshots</h2>
-  <div class="overflow-x-auto">
-    <table class="tidy w-full text-sm num">
-      <thead><tr>
-        <th>Date</th>
-        <th class="text-right">Arrivals</th>
-        <th class="text-right">Stayovers</th>
-        <th class="text-right">Departures</th>
-        <th class="text-right">In-house</th>
-        <th class="text-right">In-house £</th>
-      </tr></thead>
-      <tbody>
-        <template x-for="d in data.per_day" :key="d.report_date">
-          <tr>
-            <td class="mono" x-text="d.report_date"></td>
-            <td class="text-right" x-text="d.arrivals_count"></td>
-            <td class="text-right" x-text="d.stayovers_count"></td>
-            <td class="text-right" x-text="d.departures_count"></td>
-            <td class="text-right" x-text="d.in_house_count"></td>
-            <td class="text-right" x-text="'£' + (d.revenue_in_house ?? '—')"></td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
-  </div>
+<section class="glass rounded-xl p-3 md:p-4">
+  <h2 class="text-lg font-medium mb-2 px-1">Daily snapshots</h2>
+  <div id="per-day-table"></div>
 </section>
 
-<!-- Recent imports -->
-<section class="glass rounded-xl p-5">
-  <h2 class="text-lg font-medium mb-3">Recent imports</h2>
-  <div class="overflow-x-auto">
-    <table class="tidy w-full text-sm">
-      <thead><tr><th>Received</th><th>Report date</th><th>From</th><th class="text-right">Arr/Stay/Dep</th><th>Email ID</th></tr></thead>
-      <tbody>
-        <template x-for="i in data.recent_imports" :key="i.source_email_id">
-          <tr>
-            <td class="mono text-xs" x-text="(i.received_at || '').slice(0,19).replace('T',' ')"></td>
-            <td class="mono" x-text="i.report_date"></td>
-            <td x-text="i.account"></td>
-            <td class="text-right num mono" x-text="i.arrivals_count + ' / ' + i.stayovers_count + ' / ' + i.departures_count"></td>
-            <td class="mono text-xs text-slate-500" x-text="i.source_email_id"></td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
-  </div>
+<section class="glass rounded-xl p-3 md:p-4">
+  <h2 class="text-lg font-medium mb-2 px-1">Recent imports (click row → source email)</h2>
+  <div id="imports-table"></div>
 </section>
 
 </div>
 
 <script>
-function caterbook() {
+function cb() {
   return {
     days: 30,
-    data: { coverage: null, latest_snapshot: null, per_day: [], per_room: [], heatmap: [], recent_imports: [] },
+    data: { coverage: null, latest_snapshot: null, per_day: [], per_room: [], recent_imports: [] },
+    tables: {},
     async boot() { await this.reload(); },
     async reload() {
-      try {
-        const r = await fetch(`/api/caterbook/overview?days=${this.days}`);
-        this.data = await r.json();
-      } catch (e) { console.error(e); }
+      const r = await fetch(`/api/caterbook/overview?days=${this.days}`);
+      this.data = await r.json();
+      this.render();
+    },
+    render() {
+      Object.values(this.tables).forEach(t => t.destroy());
+
+      this.tables.perRoom = homeai_table('#per-room-table', this.data.per_room, {
+        persistenceID: 'caterbook-per-room',
+        columns: [
+          { title: 'Room',     field: 'room', formatter: 'mono', width: 100 },
+          { title: 'Nights',   field: 'nights', hozAlign: 'right', headerFilter: false },
+          { title: 'Revenue',  field: 'revenue', formatter: 'money', hozAlign: 'right', headerFilter: false },
+          { title: 'Avg/night',field: 'avg_rate', formatter: 'money', hozAlign: 'right', headerFilter: false },
+        ],
+      });
+
+      this.tables.perDay = homeai_table('#per-day-table', this.data.per_day, {
+        persistenceID: 'caterbook-per-day',
+        columns: [
+          { title: 'Date',       field: 'report_date', formatter: 'date', width: 110 },
+          { title: 'Arrivals',   field: 'arrivals_count',   hozAlign: 'right', headerFilter: false },
+          { title: 'Stayovers',  field: 'stayovers_count',  hozAlign: 'right', headerFilter: false },
+          { title: 'Departures', field: 'departures_count', hozAlign: 'right', headerFilter: false },
+          { title: 'In-house',   field: 'in_house_count',   hozAlign: 'right', headerFilter: false },
+          { title: 'Revenue',    field: 'revenue_in_house', formatter: 'money', hozAlign: 'right', headerFilter: false },
+        ],
+      });
+
+      this.tables.imports = homeai_table('#imports-table', this.data.recent_imports, {
+        persistenceID: 'caterbook-imports',
+        columns: [
+          { title: 'Received',  field: 'received_at', formatter: 'datetime', width: 160 },
+          { title: 'Report date',field:'report_date', formatter: 'date', width: 110 },
+          { title: 'Account',   field: 'account', formatter: 'mono', width: 90 },
+          { title: 'Arrivals',  field: 'arrivals_count',  hozAlign: 'right', headerFilter: false, width: 90 },
+          { title: 'Stayovers', field: 'stayovers_count', hozAlign: 'right', headerFilter: false, width: 90 },
+          { title: 'Departures',field: 'departures_count',hozAlign: 'right', headerFilter: false, width: 90 },
+          { title: 'Email ID',  field: 'source_email_id', formatter: 'mono' },
+        ],
+        row_link: (row) => `/viewer/email/${encodeURIComponent(row.account)}/${encodeURIComponent(row.source_email_id)}`,
+      });
+    },
+    searchAll(v) {
+      v = (v || '').trim();
+      Object.values(this.tables).forEach(t => {
+        if (!v) { t.clearFilter(true); return; }
+        t.setFilter([(d) => Object.values(d).some(val => val != null && String(val).toLowerCase().includes(v.toLowerCase()))]);
+      });
     },
   };
 }
