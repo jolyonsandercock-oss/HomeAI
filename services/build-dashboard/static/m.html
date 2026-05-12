@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Home AI — Mobile</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: linear-gradient(180deg, #0f172a 0%, #020617 100%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; color: #e2e8f0; }
+  .card { background: rgba(15,23,42,0.7); border: 1px solid rgba(148,163,184,0.15); border-radius: 14px; padding: 12px; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  .big   { font-size: 2.4rem; line-height: 1; font-weight: 600; }
+  .label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; }
+  .tl { display:inline-block; width:11px; height:11px; border-radius:999px; margin-right:6px; vertical-align:middle; box-shadow:0 0 8px currentColor; }
+  .tl-green { background:#10b981; color:#10b981; }
+  .tl-amber { background:#f59e0b; color:#f59e0b; }
+  .tl-red   { background:#f43f5e; color:#f43f5e; animation:pulse 1.4s infinite; }
+  .tl-grey  { background:#64748b; color:#64748b; }
+  @keyframes pulse { 50%{opacity:0.55} }
+  a.card { text-decoration: none; color: inherit; display: block; }
+  .row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(148,163,184,0.08); }
+  .row:last-child { border-bottom: none; }
+</style>
+</head>
+<body>
+<div x-data="m()" x-init="boot()" class="max-w-md mx-auto p-3 space-y-3">
+
+<header class="flex items-center justify-between mb-1">
+  <h1 class="text-lg font-semibold">Home AI</h1>
+  <span class="mono text-xs text-slate-500" x-text="lastRefresh"></span>
+</header>
+
+<!-- 1. Labour traffic light — the headline -->
+<a href="/economics" class="card">
+  <div class="label">Labour % · today</div>
+  <div class="big mono" :style="`color:${tlColor()}`">
+    <span class="tl" :class="'tl-' + tlClass()"></span>
+    <span x-text="kpi.labour_pct != null ? kpi.labour_pct + '%' : '—'"></span>
+  </div>
+  <div class="text-xs text-slate-400">
+    target &lt;30%
+    <template x-if="kpi.labour_pct == null"><span class="text-amber-300"> · awaiting Tanda sync (12d lag)</span></template>
+  </div>
+</a>
+
+<!-- 2. Today's takings + accommodation -->
+<div class="grid grid-cols-2 gap-3">
+  <a href="/touchoffice" class="card">
+    <div class="label">Today NET</div>
+    <div class="big mono" x-text="kpi.total_net_sales ? '£' + Number(kpi.total_net_sales).toLocaleString() : '—'"></div>
+    <div class="text-xs" :class="lwDir() >= 0 ? 'text-emerald-300' : 'text-rose-300'" x-text="lwString()"></div>
+  </a>
+  <a href="/caterbook" class="card">
+    <div class="label">Accom in-house</div>
+    <div class="big mono" x-text="kpi.in_house_count ?? '—'"></div>
+    <div class="text-xs text-slate-400" x-text="kpi.accom_revenue ? '£' + kpi.accom_revenue + ' tonight' : ''"></div>
+  </a>
+</div>
+
+<!-- 3. Cashing-up status -->
+<a href="/economics" class="card">
+  <div class="flex justify-between items-start">
+    <div>
+      <div class="label">Cashing-up flags · 7d</div>
+      <div class="big mono" :class="flagged > 0 ? 'text-amber-300' : 'text-emerald-300'"
+           x-text="flagged + (flagged === 1 ? ' flag' : ' flags')"></div>
+    </div>
+    <div class="text-right text-xs text-slate-400 mt-1" x-text="latestVarianceDate || ''"></div>
+  </div>
+</a>
+
+<!-- 4. Invoices -->
+<a href="/invoices" class="card">
+  <div class="label">Pending invoices</div>
+  <div class="big mono" x-text="invoicesPending"></div>
+  <div class="text-xs text-slate-400" x-text="invoicesTotal ? '£' + Number(invoicesTotal).toLocaleString() + ' seen' : ''"></div>
+</a>
+
+<!-- 5. System pulse -->
+<div class="card">
+  <div class="label">System pulse</div>
+  <div class="space-y-1 text-sm mt-1">
+    <div class="row"><span class="text-slate-400">TouchOffice last</span><span class="mono" x-text="ages.to || '—'"></span></div>
+    <div class="row"><span class="text-slate-400">Caterbook last</span><span class="mono" x-text="ages.cb || '—'"></span></div>
+    <div class="row"><span class="text-slate-400">Workforce last</span><span class="mono" x-text="ages.wf || '—'"></span></div>
+    <div class="row"><span class="text-slate-400">Alerts firing</span><span class="mono" :class="alerts > 0 ? 'text-rose-300' : 'text-emerald-300'" x-text="alerts"></span></div>
+    <div class="row"><span class="text-slate-400">Instructions</span><span class="mono" :class="pendingInstructions > 0 ? 'text-amber-300' : ''" x-text="pendingInstructions + ' pending'"></span></div>
+  </div>
+</div>
+
+<div class="text-center text-xs text-slate-600 pt-1 pb-4">
+  refreshing every 60s · <a href="/" class="underline">desktop view</a>
+</div>
+
+</div>
+
+<script>
+function m() {
+  return {
+    kpi: {}, flagged: 0, latestVarianceDate: '',
+    invoicesPending: '—', invoicesTotal: 0,
+    ages: { to: '—', cb: '—', wf: '—' },
+    alerts: 0, pendingInstructions: 0,
+    lastRefresh: '',
+    async boot() {
+      await this.refresh();
+      setInterval(() => this.refresh(), 60000);
+    },
+    async refresh() {
+      try {
+        const e = await (await fetch('/api/economics/overview?days=14')).json();
+        this.kpi = e.kpi || {};
+        ['labour_pct','total_revenue','total_net_sales','splh','total_covers','net_sales_lw','accom_revenue'].forEach(k => {
+          if (this.kpi[k] != null && !isNaN(this.kpi[k])) this.kpi[k] = Number(this.kpi[k]);
+        });
+      } catch {}
+      try {
+        const i = await (await fetch('/api/invoices/list?days=90&status=new')).json();
+        this.invoicesPending = i.totals?.pending ?? '—';
+        this.invoicesTotal = i.totals?.sum_seen || 0;
+      } catch {}
+      try {
+        const m = await (await fetch('/api/m/mobile')).json();
+        this.flagged = m.flagged_7d || 0;
+        this.latestVarianceDate = m.latest_variance_date || '';
+        this.ages = m.ages || this.ages;
+        this.alerts = m.firing_alerts || 0;
+        this.pendingInstructions = m.pending_instructions || 0;
+      } catch {}
+      this.lastRefresh = new Date().toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+    },
+    tlClass() {
+      const v = this.kpi.labour_pct;
+      if (v == null) return 'grey';
+      if (v < 30) return 'green';
+      if (v <= 32) return 'amber';
+      return 'red';
+    },
+    tlColor() {
+      const v = this.kpi.labour_pct;
+      if (v == null) return '#94a3b8';
+      if (v < 30) return '#10b981';
+      if (v <= 32) return '#f59e0b';
+      return '#f43f5e';
+    },
+    lwDir() {
+      const t = Number(this.kpi.total_net_sales), l = Number(this.kpi.net_sales_lw);
+      return (!t || !l) ? 0 : t - l;
+    },
+    lwString() {
+      const t = Number(this.kpi.total_net_sales), l = Number(this.kpi.net_sales_lw);
+      if (!t || !l) return '';
+      const pct = ((t-l)/l*100).toFixed(1);
+      return `vs LW: ${pct >= 0 ? '+' : ''}${pct}%`;
+    },
+  };
+}
+</script>
+</body></html>

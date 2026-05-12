@@ -1150,6 +1150,51 @@ async def economics_page():
     return FileResponse(str(STATIC / "economics.html"))
 
 
+@app.get("/m")
+async def mobile_page():
+    return FileResponse(str(STATIC / "m.html"))
+
+
+@app.get("/api/m/mobile")
+async def api_m_mobile():
+    """Compact roll-up for the phone landing page."""
+    from datetime import datetime, timezone
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        flagged_7d = await c.fetchval(
+          "SELECT COUNT(*) FROM till_reconciliation WHERE status='flagged' AND recon_date >= CURRENT_DATE - 7")
+        latest = await c.fetchval(
+          "SELECT MAX(recon_date) FROM till_reconciliation WHERE status='flagged'")
+        alerts = await c.fetchval(
+          "SELECT COUNT(*) FROM system_alerts WHERE status='firing' AND acknowledged=false")
+        pending = await c.fetchval(
+          "SELECT COUNT(*) FROM bot_instructions WHERE status='pending'")
+        to_last  = await c.fetchval(
+          "SELECT MAX(scraped_at) FROM touchoffice_scrapes WHERE success=true")
+        cb_last  = await c.fetchval(
+          "SELECT MAX(received_at) FROM caterbook_email_reports")
+        wf_last  = await c.fetchval(
+          "SELECT MAX(started_at) FROM workforce_sync_log WHERE http_status=200")
+
+    def age(ts):
+        if ts is None: return None
+        now = datetime.now(ts.tzinfo or timezone.utc)
+        d = now - ts
+        h = int(d.total_seconds() / 3600)
+        if h < 1: return f"{int(d.total_seconds()/60)}m"
+        if h < 24: return f"{h}h"
+        return f"{h//24}d"
+
+    return {
+      "flagged_7d": int(flagged_7d or 0),
+      "latest_variance_date": latest.isoformat() if latest else "",
+      "firing_alerts": int(alerts or 0),
+      "pending_instructions": int(pending or 0),
+      "ages": {"to": age(to_last), "cb": age(cb_last), "wf": age(wf_last)},
+    }
+
+
 @app.get("/api/kpi/pending-instructions")
 async def api_kpi_pending_instructions():
     p = await pool()
@@ -1390,8 +1435,9 @@ async def api_invoices_list(days: int = 90, status: str = ""):
         args = [days] + ([status] if status else [])
         rows = await c.fetch(f"""
           SELECT id, source_email_id, account, vendor_domain, vendor_name,
-                 subject, received_at, amount_seen, currency, invoice_date,
-                 due_date, status, has_pdf, attachment_count, linked_invoice_id, notes
+                 vendor_category, subject, received_at, amount_seen, currency,
+                 invoice_date, due_date, status, has_pdf, attachment_count,
+                 linked_invoice_id, notes
             FROM vendor_invoice_inbox
            WHERE received_at >= CURRENT_DATE - ($1::int)
            {where_status}
@@ -1406,10 +1452,20 @@ async def api_invoices_list(days: int = 90, status: str = ""):
            WHERE received_at >= CURRENT_DATE - ($1::int)
            GROUP BY vendor_domain ORDER BY n DESC
         """, days)
+        by_category = await c.fetch("""
+          SELECT vendor_category, COUNT(*) AS n,
+                 COUNT(*) FILTER (WHERE status='new')  AS pending,
+                 SUM(amount_seen) FILTER (WHERE amount_seen IS NOT NULL) AS total_seen,
+                 ARRAY_AGG(DISTINCT vendor_domain) AS vendors
+            FROM vendor_invoice_inbox
+           WHERE received_at >= CURRENT_DATE - ($1::int)
+           GROUP BY vendor_category ORDER BY total_seen DESC NULLS LAST, n DESC
+        """, days)
         totals = await c.fetchrow("""
           SELECT COUNT(*) AS total,
                  COUNT(*) FILTER (WHERE status='new') AS pending,
-                 SUM(amount_seen) FILTER (WHERE amount_seen IS NOT NULL) AS sum_seen
+                 SUM(amount_seen) FILTER (WHERE amount_seen IS NOT NULL) AS sum_seen,
+                 COUNT(DISTINCT vendor_category) AS categories
             FROM vendor_invoice_inbox
            WHERE received_at >= CURRENT_DATE - ($1::int)
         """, days)
@@ -1426,6 +1482,7 @@ async def api_invoices_list(days: int = 90, status: str = ""):
         "window_days": days,
         "totals":      _row(totals) if totals else {},
         "by_vendor":   [_row(r) for r in by_vendor],
+        "by_category": [_row(r) for r in by_category],
         "invoices":    [_row(r) for r in rows],
     }
 

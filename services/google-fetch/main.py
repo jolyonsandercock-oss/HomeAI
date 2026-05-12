@@ -399,6 +399,20 @@ def _walk_attachments(part: dict, out: list):
         _walk_attachments(sub, out)
 
 
+# ─── /sheets/values/{account} — proxy to Google Sheets API v4 ──
+@app.get("/sheets/values/{account}/{spreadsheet_id}/{range_a1:path}")
+async def sheets_values(account: str, spreadsheet_id: str, range_a1: str):
+    """Fetch a range from Google Sheets. Account must have spreadsheets scope.
+    range_a1 follows Sheets A1 notation, e.g. 'Sheet1!A1:Z100'."""
+    acc = await find_account(account)
+    tok = await access_token(acc)
+    url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{range_a1}"
+    r = await app.state.http.get(url, headers={"Authorization": f"Bearer {tok}"})
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, r.text[:400])
+    return r.json()
+
+
 # ─── /send/{account} — RFC 2822 → Gmail users.messages.send ─────
 from pydantic import BaseModel as _BaseModel  # local alias so this is self-contained
 

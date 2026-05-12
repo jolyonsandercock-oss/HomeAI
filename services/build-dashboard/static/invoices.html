@@ -61,12 +61,17 @@
 </section>
 
 <section class="glass rounded-xl p-3 md:p-4">
+  <h2 class="text-lg font-medium mb-2 px-1">By category (click to filter)</h2>
+  <div id="cat-table"></div>
+</section>
+
+<section class="glass rounded-xl p-3 md:p-4">
   <h2 class="text-lg font-medium mb-2 px-1">Inbox</h2>
   <div id="invoice-table"></div>
 </section>
 
 <section class="glass rounded-xl p-3 md:p-4">
-  <h2 class="text-lg font-medium mb-2 px-1">By vendor</h2>
+  <h2 class="text-lg font-medium mb-2 px-1">By vendor (click to filter)</h2>
   <div id="vendor-table"></div>
 </section>
 
@@ -83,6 +88,7 @@ function inv() {
     async reload() {
       const r = await fetch(`/api/invoices/list?days=${this.days}`);
       this.data = await r.json();
+      this.renderCategories();
       this.renderInvoices();
       this.renderVendors();
     },
@@ -90,11 +96,12 @@ function inv() {
       const cfg = {
         persistenceID: 'invoices-inbox',
         columns: [
-          { title: 'Received', field: 'received_at', formatter: 'date',     width: 110 },
+          { title: 'Received', field: 'received_at',   formatter: 'date',     width: 110 },
+          { title: 'Category', field: 'vendor_category', width: 110 },
           { title: 'Vendor',   field: 'vendor_domain' },
-          { title: 'Subject',  field: 'subject',     widthGrow: 3 },
-          { title: 'Amount',   field: 'amount_seen', formatter: 'money',   hozAlign: 'right', headerFilter: false },
-          { title: 'Status',   field: 'status',      formatter: 'badge',   width: 110 },
+          { title: 'Subject',  field: 'subject',        widthGrow: 3 },
+          { title: 'Amount',   field: 'amount_seen',    formatter: 'money',   hozAlign: 'right', headerFilter: false },
+          { title: 'Status',   field: 'status',         formatter: 'badge',   width: 110 },
           { title: 'PDF',      field: 'has_pdf',
             formatter: (cell) => cell.getValue() ? '✓' : '',
             hozAlign: 'center', width: 50, headerFilter: false },
@@ -103,6 +110,27 @@ function inv() {
       };
       if (this.invoiceTable) this.invoiceTable.destroy();
       this.invoiceTable = homeai_table('#invoice-table', this.data.invoices, cfg);
+    },
+    renderCategories() {
+      const cfg = {
+        page_size: 0,
+        columns: [
+          { title: 'Category',  field: 'vendor_category', formatter: 'mono' },
+          { title: 'Total',     field: 'n',          hozAlign: 'right', headerFilter: false },
+          { title: 'Pending',   field: 'pending',    hozAlign: 'right', headerFilter: false },
+          { title: '£ Seen',    field: 'total_seen', formatter: 'money', hozAlign: 'right', headerFilter: false },
+          { title: 'Vendors',   field: 'vendors',
+            formatter: (c) => (c.getValue() || []).slice(0,5).join(', '),
+            widthGrow: 3 },
+        ],
+        row_link: (row) => {
+          this.invoiceTable.setHeaderFilterValue('vendor_category', row.vendor_category);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          return null;
+        },
+      };
+      if (this.catTable) this.catTable.destroy();
+      this.catTable = homeai_table('#cat-table', this.data.by_category, cfg);
     },
     renderVendors() {
       const cfg = {
