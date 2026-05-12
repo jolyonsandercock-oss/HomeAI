@@ -20,8 +20,25 @@ VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}
 
 docker exec -i -e DAYS="$DAYS" -e VAULT_TOKEN="$VAULT_TOKEN" homeai-playwright python << 'PYEOF'
 import os, asyncio, json, time, urllib.request, urllib.parse, urllib.error
-from datetime import date as _date, timedelta
+from datetime import date as _date, datetime as _dt, timedelta
 import asyncpg
+
+
+def to_date(v):
+    if v is None or v == "": return None
+    if isinstance(v, _date): return v
+    try: return _date.fromisoformat(str(v)[:10])
+    except Exception: return None
+
+
+def to_dt(v):
+    if v is None or v == "": return None
+    if isinstance(v, _dt): return v
+    s = str(v).replace("Z", "+00:00")
+    try: return _dt.fromisoformat(s)
+    except Exception:
+        try: return _dt.fromtimestamp(int(v))
+        except Exception: return None
 
 DAYS = int(os.environ["DAYS"])
 VAULT_TOKEN = os.environ["VAULT_TOKEN"]
@@ -79,7 +96,7 @@ async def upsert_users(conn, items):
               RETURNING (xmax = 0) AS inserted
             """,
               u.get("id"), u.get("email"), u.get("name"), u.get("preferred_name"),
-              u.get("active"), u.get("hire_date"), u.get("termination_date"),
+              u.get("active"), to_date(u.get("hire_date")), to_date(u.get("termination_date")),
               u.get("base_pay_rate"), u.get("pay_unit"),
               json.dumps(u))
             if n: ins += 1
@@ -109,6 +126,12 @@ async def upsert_shifts(conn, items):
     async with conn.transaction():
         await conn.execute("SET LOCAL app.current_entity = '1'")
         for s in items:
+            start_unix  = s.get("start")
+            finish_unix = s.get("finish")
+            break_min   = s.get("break_length") or 0
+            hours = None
+            if isinstance(start_unix, int) and isinstance(finish_unix, int) and finish_unix > start_unix:
+                hours = round((finish_unix - start_unix) / 3600 - break_min/60, 3)
             n = await conn.fetchval("""
               INSERT INTO workforce_shifts (external_id, user_external_id, location_external_id,
                                              department_external_id, shift_date, start_time, end_time,
@@ -117,14 +140,18 @@ async def upsert_shifts(conn, items):
               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,now())
               ON CONFLICT (external_id) DO UPDATE SET
                 start_time=EXCLUDED.start_time, end_time=EXCLUDED.end_time,
+                break_minutes=EXCLUDED.break_minutes,
                 hours_worked=EXCLUDED.hours_worked, cost_estimate=EXCLUDED.cost_estimate,
+                department_external_id=EXCLUDED.department_external_id,
                 status=EXCLUDED.status, raw_payload=EXCLUDED.raw_payload, last_synced_at=now()
               RETURNING (xmax = 0)
             """,
               s.get("id"), s.get("user_id"), s.get("location_id"),
-              s.get("department_id"), s.get("date"), s.get("start"), s.get("end"),
-              s.get("breaks_in_minutes"), s.get("hours_worked"),
-              s.get("cost"), s.get("status"), json.dumps(s))
+              s.get("department_id"), to_date(s.get("date")),
+              to_dt(start_unix), to_dt(finish_unix),
+              int(break_min) if break_min else None, hours,
+              None,  # cost_estimate — not in /shifts payload; populated via /timesheets
+              s.get("status"), json.dumps(s))
             if n: ins += 1
             else: upd += 1
     return ins, upd
@@ -149,7 +176,7 @@ async def main():
     conn = await asyncpg.connect(PG_DSN)
 
     # 1. Users
-    status, body, ms, err = wf_call(base, tok, "/api/v2/users", {"page_size": 100})
+    status, body, ms, err = wf_call(base, tok, "/api/v2/users", {"page": 1, "page_size": 100})
     seen = ins = upd = 0
     if status == 200 and isinstance(body, list):
         seen = len(body)
@@ -166,15 +193,28 @@ async def main():
     print(f"  locations:    HTTP {status} {ms}ms  seen={seen} ins={ins} upd={upd}  {err or ''}")
     await log_sync(conn, "/api/v2/locations", {}, status, seen, ins, upd, err, ms)
 
-    # 3. Shifts (date-range query)
-    status, body, ms, err = wf_call(base, tok, "/api/v2/shifts",
-        {"from": from_date.isoformat(), "to": today.isoformat(), "page_size": 100})
-    seen = ins = upd = 0
-    if status == 200 and isinstance(body, list):
-        seen = len(body)
-        ins, upd = await upsert_shifts(conn, body)
-    print(f"  shifts:       HTTP {status} {ms}ms  seen={seen} ins={ins} upd={upd}  {err or ''}")
-    await log_sync(conn, "/api/v2/shifts", {"from":from_date.isoformat(),"to":today.isoformat()}, status, seen, ins, upd, err, ms)
+    # 3. Shifts (date-range query — Tanda caps each call at 31 days, so chunk).
+    total_seen = total_ins = total_upd = 0
+    last_status = None
+    window_start = from_date
+    while window_start <= today:
+        window_end = min(window_start + timedelta(days=30), today)
+        status, body, ms, err = wf_call(base, tok, "/api/v2/shifts",
+            {"from": window_start.isoformat(), "to": window_end.isoformat(),
+             "page": 1, "page_size": 100})
+        last_status = status
+        seen = ins = upd = 0
+        if status == 200 and isinstance(body, list):
+            seen = len(body)
+            ins, upd = await upsert_shifts(conn, body)
+        await log_sync(conn, "/api/v2/shifts",
+            {"from": window_start.isoformat(), "to": window_end.isoformat()},
+            status, seen, ins, upd, err, ms)
+        total_seen += seen; total_ins += ins; total_upd += upd
+        if err:
+            print(f"  shifts {window_start}..{window_end}: HTTP {status} {ms}ms  {err}")
+        window_start = window_end + timedelta(days=1)
+    print(f"  shifts:       last HTTP {last_status}  seen={total_seen} ins={total_ins} upd={total_upd}")
 
     # 4. Wage comparisons
     status, body, ms, err = wf_call(base, tok, "/api/v2/wage_comparisons",
