@@ -3,57 +3,56 @@
 hands_off:
   - id: column-order-cleanup
     title: Fix accommodation/epos/till column order drift
-    detail: Schema drift detector flags 56 lines of cosmetic column-order differences (entity_id placed AFTER created_at in live, BEFORE in init-db.sql). Either rewrite init-db to match live, or accept as benign and add an exclusion to the drift detector.
+    detail: Schema drift detector flags 56 lines of cosmetic differences. Either rewrite init-db to match live or accept as benign.
     estimate: 30 min
 
   - id: caddy-routes
     title: Caddy reverse-proxy routes for new services
-    detail: Build dashboard at /dashboard, MarkItDown internal, Authelia at /auth/. Currently only Tailscale-IP:port direct access.
+    detail: /dashboard, /metabase, /auth/ via Caddy. Currently Tailscale-IP:port direct.
     estimate: 30 min
 
   - id: ci-autofix
-    title: CI Auto-Fix (GitHub Actions, Phase 2)
-    detail: Repo now exists (off-host-backup, 2026-05-11). Workflow needs to run RLS suite, sanitiser fixture, P2 fixture, schema drift on PRs.
+    title: CI Auto-Fix (GitHub Actions)
+    detail: Repo exists. Workflow runs RLS suite + sanitiser + P2 + schema drift on PRs.
     estimate: 45 min
-
-  - id: u31-completion
-    title: U31 dashboard tables — chunks 5, 6, 8, 9 remaining
-    detail: /touchoffice + /caterbook + /workforce + / Mission Control still need migration to Tabulator. /invoices is the proof (live). Plan at .claude/sprints/U31-dashboard-tables-ux.md.
-    estimate: 3h
-
-  - id: daily-unit-economics
-    title: Cross-pipeline daily_unit_economics view + /economics page
-    detail: Join touchoffice_fixed_totals + caterbook_daily_snapshots + workforce_shifts on (date, site). Headline "did the business make money" in one row per day. Designed in U30 plan.
-    estimate: 90 min
-
-  - id: p7-cashing-up
-    title: P7 Cashing Up — parse 2026CashUp sheet (weekly-block layout)
-    detail: Sheet creds in Vault (secret/sheets/cashing_up). Layout is weekly-block, 52 columns per year, not the flat 10-col SPEC anticipated. Parser walks blocks at A,M,Y,... extracts per-day cash totals + drawer error + manager. Persist into till_reconciliation, join touchoffice_fixed_totals for variance > £5 flag piped to the digest.
-    estimate: 2h
-
-  - id: invoice-pdf-extraction
-    title: P2 enrichment — PDF auto-extraction for vendor_invoice_inbox rows
-    detail: Fetch attached PDFs for the rows in vendor_invoice_inbox, run through pdfplumber, regex amount + due_date + invoice_no, write back to the row. After this, /invoices shows real £ amounts.
-    estimate: 60 min
 
   - id: workforce-departments
     title: Workforce — pull /departments for human-readable names
-    detail: Currently workforce_shifts.department_external_id is 593833/593834/etc. Add workforce_departments table + sync + join so the /workforce dashboard shows names.
+    detail: workforce_shifts.department_external_id is numeric. /departments endpoint → workforce_departments table → join.
     estimate: 30 min
 
-  - id: u31-mobile-page
-    title: Phone-first /m landing page
-    detail: Single thumb-scrollable view, today's pub takings + accom occupancy + due invoices + scrape health. Auto-refresh on load.
+  - id: vehicle-table
+    title: Vehicles / MOT tracker
+    detail: User has 4 vehicles in Obsidian markdown (MOT/insurance/service/V5). Migrate to a vehicles table + scheduled MOT-due alerts. Was a Gemini ask in the U32 review; deferred from that sprint.
+    estimate: 90 min
+
+  - id: cashing-up-form
+    title: Manager note + cashing-up UI on /m
+    detail: V35 manager_notes table is live. /m needs a small inline form to POST a note for any date. Also need a UI to mark flagged till_reconciliation entries 'resolved' with a note.
+    estimate: 60 min
+
+  - id: alertmanager-stale-ack
+    title: Auto-acknowledge stale Diag_* alerts that re-fire daily
+    detail: Three diagnostic alerts (Diag_dead_letter_recent, Diag_pipeline_failure_rate_24h, Diag_firing_alerts) fire every morning at 06:30 because alertmanager has no resolution logic for them. Either fix the underlying detector or auto-ack after N hours.
+    estimate: 30 min
+
+  - id: invoice-due-date-extraction
+    title: Improve invoice PDF extraction — due_date hit rate
+    detail: 9 of 13 PDFs yielded amount. Due_date regex matched 0 — each vendor uses different labels. Iterate per-vendor regex or fall back to Haiku extraction.
+    estimate: 60 min
+
+  - id: workforce-cost-allocation
+    title: Split workforce labour cost by site (pub vs sandwich)
+    detail: Currently labour is whole-org. workforce_shifts has department_external_id which maps to site. Once workforce_departments is loaded, the v_daily_unit_economics view can split labour_cost per-site.
     estimate: 45 min
 
 needs_user:
   - id: xero-oauth
     title: P3 Xero OAuth — PARKED awaiting Xero support
-    detail: Bootstrap script + scope strings are correct. The error came from Xero's authorize endpoint even on a fresh app with minimal scope (offline_access only) in incognito mode. Email api@xero.com with the errorId — they look these up in their logs. Re-run scripts/u29-xero-bootstrap.py once they reply.
+    detail: Fresh app, minimal scope, incognito — still rejected by /connect/authorize. Email sent to api@xero.com with errorId. Re-run scripts/u29-xero-bootstrap.py once they reply.
     estimate: 30 min once Xero responds
 
-  # ✓ gsheets-oauth   DONE 2026-05-12 — info@ SA had Sheets scope already; secret/sheets/cashing_up populated.
-  # ✓ telegram-smtp   DONE 2026-05-11 — bot_token + chat_id in secret/telegram; SMTP unneeded (Gmail API).
-  # ✓ scraper-creds   DONE 2026-05-11 — TouchOffice + Caterbook creds stashed.
-
-  # ▸ nas-mount       POSTPONED 2026-05-11 — GitHub off-host-backup covers config DR.
+  # ✓ gsheets-oauth    DONE 2026-05-12 — SA had Sheets scope already.
+  # ✓ telegram-smtp    DONE 2026-05-11.
+  # ✓ scraper-creds    DONE 2026-05-11.
+  # ▸ nas-mount        POSTPONED 2026-05-11.
