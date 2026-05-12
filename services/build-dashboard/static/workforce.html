@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workforce — Home AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .num  { font-variant-numeric: tabular-nums; }
+  table.tidy th, table.tidy td { padding: 0.4rem 0.6rem; }
+  table.tidy thead th { border-bottom: 1px solid rgba(148,163,184,0.2); text-align: left; font-weight: 600; color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  table.tidy tbody tr { border-bottom: 1px solid rgba(148,163,184,0.08); }
+</style>
+</head>
+<body class="text-slate-100">
+<div x-data="wf()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+
+<header class="flex flex-wrap items-center justify-between gap-3">
+  <div>
+    <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Workforce — Labour</h1>
+    <p class="text-sm text-slate-400">From Tanda (my.workforce.com). Syncs daily at 02:15.</p>
+  </div>
+  <div class="flex items-center gap-3 flex-wrap">
+    <label class="text-xs text-slate-400">Window
+      <select x-model.number="days" @change="reload()" class="ml-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
+        <option value="7">7 days</option>
+        <option value="30" selected>30 days</option>
+        <option value="90">90 days</option>
+        <option value="365">1 year</option>
+      </select>
+    </label>
+    <a href="/" class="text-xs text-slate-400 hover:text-slate-200">← Mission Control</a>
+  </div>
+</header>
+
+<!-- Coverage tiles -->
+<section class="grid grid-cols-2 md:grid-cols-4 gap-3">
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">Shifts loaded</div>
+    <div class="text-3xl font-medium num" x-text="data.coverage?.shifts ?? '—'"></div>
+    <div class="text-xs text-slate-400 mono" x-text="(data.coverage?.earliest || '') + ' → ' + (data.coverage?.latest || '')"></div>
+  </div>
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">Staff</div>
+    <div class="text-3xl font-medium num" x-text="data.coverage?.staff ?? '—'"></div>
+  </div>
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">Total hours</div>
+    <div class="text-3xl font-medium num" x-text="data.coverage?.total_hours ?? '—'"></div>
+  </div>
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">Window hours</div>
+    <div class="text-3xl font-medium num" x-text="windowHours()"></div>
+  </div>
+</section>
+
+<!-- Per-day -->
+<section class="glass rounded-xl p-4 md:p-5">
+  <h2 class="text-lg font-medium mb-3">Per day (last <span x-text="days"></span>)</h2>
+  <div class="overflow-x-auto">
+    <table class="tidy w-full text-sm num">
+      <thead><tr><th>Date</th><th class="text-right">Shifts</th><th class="text-right">Staff</th><th class="text-right">Hours</th></tr></thead>
+      <tbody>
+        <template x-for="d in data.per_day" :key="d.shift_date">
+          <tr>
+            <td class="mono" x-text="d.shift_date"></td>
+            <td class="text-right" x-text="d.shifts"></td>
+            <td class="text-right" x-text="d.staff"></td>
+            <td class="text-right" x-text="d.hours"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+  <div class="glass rounded-xl p-4 md:p-5">
+    <h2 class="text-lg font-medium mb-3">By department</h2>
+    <div class="overflow-x-auto">
+      <table class="tidy w-full text-sm num">
+        <thead><tr><th>Department</th><th class="text-right">Shifts</th><th class="text-right">Staff</th><th class="text-right">Hours</th></tr></thead>
+        <tbody>
+          <template x-for="d in data.per_dept" :key="d.dept || 'none'">
+            <tr>
+              <td class="mono text-xs" x-text="d.dept || '(unset)'"></td>
+              <td class="text-right" x-text="d.shifts"></td>
+              <td class="text-right" x-text="d.staff"></td>
+              <td class="text-right" x-text="d.hours"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="glass rounded-xl p-4 md:p-5">
+    <h2 class="text-lg font-medium mb-3">Top staff (by hours)</h2>
+    <div class="overflow-x-auto">
+      <table class="tidy w-full text-sm num">
+        <thead><tr><th>Staff</th><th class="text-right">Shifts</th><th class="text-right">Hours</th></tr></thead>
+        <tbody>
+          <template x-for="s in data.top_staff" :key="s.user_external_id">
+            <tr>
+              <td x-text="s.full_name || ('uid '+s.user_external_id)"></td>
+              <td class="text-right" x-text="s.shifts"></td>
+              <td class="text-right" x-text="s.hours"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="glass rounded-xl p-4 md:p-5">
+  <h2 class="text-lg font-medium mb-3">Recent sync calls</h2>
+  <div class="overflow-x-auto">
+    <table class="tidy w-full text-sm">
+      <thead><tr><th>When</th><th>Endpoint</th><th>HTTP</th><th class="text-right">Seen</th><th class="text-right">Ins/Upd</th><th class="text-right">ms</th><th>Error</th></tr></thead>
+      <tbody>
+        <template x-for="r in data.recent_sync" :key="r.started_at + r.endpoint">
+          <tr>
+            <td class="mono text-xs" x-text="(r.started_at||'').slice(0,19).replace('T',' ')"></td>
+            <td class="text-xs" x-text="r.endpoint"></td>
+            <td><span :class="r.http_status===200 ? 'text-emerald-300' : 'text-rose-300'" x-text="r.http_status"></span></td>
+            <td class="text-right num" x-text="r.records_seen"></td>
+            <td class="text-right num" x-text="(r.records_inserted||0)+'/'+(r.records_updated||0)"></td>
+            <td class="text-right num" x-text="r.runtime_ms"></td>
+            <td class="text-xs text-slate-400" x-text="(r.error_message||'').slice(0,80)"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+</div>
+
+<script>
+function wf() {
+  return {
+    days: 30,
+    data: { coverage:{}, per_day:[], per_dept:[], top_staff:[], recent_sync:[] },
+    async boot() { await this.reload(); },
+    async reload() {
+      const u = `/api/workforce/overview?days=${this.days}`;
+      this.data = await (await fetch(u)).json();
+    },
+    windowHours() {
+      return (this.data.per_day || []).reduce((s,d)=>s+(parseFloat(d.hours)||0), 0).toFixed(1);
+    },
+  };
+}
+</script>
+</body></html>

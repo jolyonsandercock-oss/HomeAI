@@ -1143,6 +1143,78 @@ async def pub_board():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# U30 — Workforce.com (Tanda) labour data
+# ─────────────────────────────────────────────────────────────────────────────
+@app.get("/workforce")
+async def workforce_page():
+    return FileResponse(str(STATIC / "workforce.html"))
+
+
+@app.get("/api/workforce/overview")
+async def api_workforce_overview(days: int = 30):
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        coverage = await c.fetchrow("""
+          SELECT COUNT(*) AS shifts,
+                 COUNT(DISTINCT user_external_id) AS staff,
+                 ROUND(SUM(hours_worked)::numeric, 1) AS total_hours,
+                 MIN(shift_date) AS earliest, MAX(shift_date) AS latest
+            FROM workforce_shifts
+        """)
+        per_day = await c.fetch("""
+          SELECT shift_date, COUNT(*) AS shifts,
+                 ROUND(SUM(hours_worked)::numeric, 1) AS hours,
+                 COUNT(DISTINCT user_external_id) AS staff
+            FROM workforce_shifts
+           WHERE shift_date >= CURRENT_DATE - ($1::int)
+           GROUP BY shift_date ORDER BY shift_date DESC
+        """, days)
+        per_dept = await c.fetch("""
+          SELECT department_external_id AS dept,
+                 COUNT(*) AS shifts,
+                 ROUND(SUM(hours_worked)::numeric, 1) AS hours,
+                 COUNT(DISTINCT user_external_id) AS staff
+            FROM workforce_shifts
+           WHERE shift_date >= CURRENT_DATE - ($1::int)
+           GROUP BY department_external_id ORDER BY hours DESC NULLS LAST
+        """, days)
+        top_staff = await c.fetch("""
+          SELECT s.user_external_id, u.full_name,
+                 COUNT(*) AS shifts,
+                 ROUND(SUM(s.hours_worked)::numeric, 1) AS hours
+            FROM workforce_shifts s
+            LEFT JOIN workforce_users u ON u.external_id = s.user_external_id
+           WHERE s.shift_date >= CURRENT_DATE - ($1::int)
+           GROUP BY s.user_external_id, u.full_name
+           ORDER BY hours DESC NULLS LAST LIMIT 20
+        """, days)
+        recent_sync = await c.fetch("""
+          SELECT endpoint, http_status, records_seen, records_inserted, records_updated,
+                 error_message, runtime_ms, started_at
+            FROM workforce_sync_log
+           ORDER BY started_at DESC LIMIT 20
+        """)
+
+    def _row(r):
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"): out[k] = v.isoformat()
+            elif hasattr(v, "to_eng_string"): out[k] = str(v)
+            else: out[k] = v
+        return out
+
+    return {
+        "window_days": days,
+        "coverage":    _row(coverage) if coverage else {},
+        "per_day":     [_row(r) for r in per_day],
+        "per_dept":    [_row(r) for r in per_dept],
+        "top_staff":   [_row(r) for r in top_staff],
+        "recent_sync": [_row(r) for r in recent_sync],
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # U29 — Vendor invoice triage (light-touch inbox)
 # ─────────────────────────────────────────────────────────────────────────────
 @app.get("/invoices")
