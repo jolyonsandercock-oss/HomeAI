@@ -25,7 +25,7 @@ import asyncpg
 import httpx
 import yaml
 from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).parent
