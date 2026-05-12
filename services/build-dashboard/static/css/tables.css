@@ -1,0 +1,118 @@
+/* Tabulator dark-glass theme — matches existing glassmorphism palette */
+.tabulator {
+  background: transparent;
+  border: none;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #e2e8f0;
+}
+.tabulator .tabulator-header {
+  background: rgba(15, 23, 42, 0.6);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tabulator .tabulator-header .tabulator-col {
+  background: transparent;
+  border-right: 1px solid rgba(148, 163, 184, 0.08);
+}
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable:hover {
+  background: rgba(148, 163, 184, 0.08);
+  cursor: pointer;
+}
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter input {
+  background: rgba(2, 6, 23, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+}
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter input:focus {
+  outline: 1px solid rgba(96, 165, 250, 0.5);
+}
+.tabulator .tabulator-tableholder .tabulator-table {
+  background: transparent;
+  color: #e2e8f0;
+}
+.tabulator .tabulator-row {
+  background: transparent;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  min-height: 28px;
+}
+.tabulator .tabulator-row:hover {
+  background: rgba(148, 163, 184, 0.05);
+}
+.tabulator .tabulator-row.row-clickable { cursor: pointer; }
+.tabulator .tabulator-row.row-clickable:hover {
+  background: rgba(96, 165, 250, 0.08);
+}
+.tabulator .tabulator-cell {
+  border-right: 1px solid rgba(148, 163, 184, 0.05);
+  padding: 6px 10px;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.875rem;
+}
+.tabulator .tabulator-footer {
+  background: rgba(15, 23, 42, 0.5);
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+}
+.tabulator .tabulator-footer .tabulator-page {
+  background: rgba(2, 6, 23, 0.5);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+}
+.tabulator .tabulator-footer .tabulator-page.active {
+  background: rgba(96, 165, 250, 0.2);
+  border-color: rgba(96, 165, 250, 0.4);
+  color: #f1f5f9;
+}
+.tabulator .tabulator-arrow {
+  border-bottom-color: #64748b !important;
+  border-top-color:    #64748b !important;
+}
+.tabulator-row.tabulator-row-even { background: transparent; }
+
+/* Status badge cells */
+.cell-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+.cell-badge.badge-new       { background: rgba(56,189,248,0.15);  color:#7dd3fc; border:1px solid rgba(56,189,248,0.3); }
+.cell-badge.badge-extracted { background: rgba(168,85,247,0.15);  color:#d8b4fe; border:1px solid rgba(168,85,247,0.3); }
+.cell-badge.badge-paid      { background: rgba(74,222,128,0.15);  color:#86efac; border:1px solid rgba(74,222,128,0.3); }
+.cell-badge.badge-disputed  { background: rgba(244,114,182,0.15); color:#f9a8d4; border:1px solid rgba(244,114,182,0.3); }
+.cell-badge.badge-ignored   { background: rgba(148,163,184,0.15); color:#cbd5e1; border:1px solid rgba(148,163,184,0.3); }
+.cell-badge.badge-ok        { background: rgba(74,222,128,0.15);  color:#86efac; border:1px solid rgba(74,222,128,0.3); }
+.cell-badge.badge-fail      { background: rgba(244,63,94,0.15);   color:#fda4af; border:1px solid rgba(244,63,94,0.3); }
+
+/* Mobile collapse */
+@media (max-width: 640px) {
+  .tabulator .tabulator-header { display: none; }
+  .tabulator .tabulator-row {
+    display: block;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(148,163,184,0.15);
+  }
+  .tabulator .tabulator-cell {
+    display: flex;
+    justify-content: space-between;
+    border: none;
+    padding: 2px 12px;
+  }
+  .tabulator .tabulator-cell::before {
+    content: attr(tabulator-field) ":";
+    color: #64748b;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+  }
+}

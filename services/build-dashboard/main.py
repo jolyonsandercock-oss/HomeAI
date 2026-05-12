@@ -1143,6 +1143,118 @@ async def pub_board():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# U31 — Viewer endpoints (email, pdf, snapshot) for table click-through
+# ─────────────────────────────────────────────────────────────────────────────
+import re as _re
+import os as _os
+
+_GOOGLE_FETCH_URL = "http://google-fetch:8011"
+_SNAPSHOT_ROOTS = (
+    "/home_ai/storage/scraper-debug",
+    "/home_ai/storage/caterbook-samples",
+)
+
+
+def _safe_under(path: str) -> str | None:
+    """Resolve `path` against the snapshot roots; return absolute path only if
+    it stays inside one of them. Else None (block traversal)."""
+    p = _os.path.realpath(path)
+    for root in _SNAPSHOT_ROOTS:
+        if p.startswith(_os.path.realpath(root) + "/"):
+            return p
+    return None
+
+
+@app.get("/viewer/email/{account}/{message_id}")
+async def viewer_email(account: str, message_id: str):
+    """Render a Gmail message body inline. HTML is wrapped in a sandboxed
+    iframe to neutralise external content. Plain-text fallback rendered as
+    <pre> below."""
+    import httpx, base64, html as _html
+    async with httpx.AsyncClient(timeout=15) as c:
+        r = await c.get(f"{_GOOGLE_FETCH_URL}/message/{account}/{message_id}")
+    if r.status_code != 200:
+        return HTMLResponse(f"<p>Failed to fetch: HTTP {r.status_code}</p>",
+                            status_code=r.status_code)
+    msg = r.json()
+    hdrs = {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
+    subject = hdrs.get("subject", "(no subject)")
+    from_  = hdrs.get("from", "(no sender)")
+    date   = hdrs.get("date", "")
+
+    text_body = None
+    html_body = None
+    def walk(part):
+        nonlocal text_body, html_body
+        mt = part.get("mimeType", "")
+        body = part.get("body") or {}
+        if body.get("data"):
+            b = body["data"]; pad = "=" * (-len(b) % 4)
+            try:
+                decoded = base64.urlsafe_b64decode(b + pad).decode("utf-8", errors="replace")
+            except Exception:
+                decoded = ""
+            if mt == "text/plain" and text_body is None: text_body = decoded
+            elif mt == "text/html" and html_body is None: html_body = decoded
+        for sub in part.get("parts", []) or []:
+            walk(sub)
+    walk(msg.get("payload", {}))
+
+    # iframe-sandbox the HTML body — neutralises forms, scripts, top-level navs
+    safe_html = (html_body or "").replace("</body", "").replace("</html", "")
+    iframe_doc = f"""
+<!doctype html><html><head><meta charset="utf-8"></head>
+<body style="font-family:system-ui;color:#1e293b;background:#fff;margin:8px">{safe_html}</body></html>
+"""
+    iframe_src = "data:text/html;base64," + base64.b64encode(iframe_doc.encode()).decode()
+
+    page = f"""<!doctype html>
+<html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{_html.escape(subject)}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>body{{background:radial-gradient(ellipse at top,#0f172a,#020617 60%);min-height:100vh;color:#e2e8f0;font-family:system-ui}}</style>
+</head>
+<body>
+<div class="max-w-4xl mx-auto p-4 md:p-6 space-y-4">
+  <div class="glass" style="background:rgba(15,23,42,0.7);backdrop-filter:blur(10px);border:1px solid rgba(148,163,184,0.15);border-radius:12px;padding:1rem">
+    <div class="text-xs uppercase tracking-wide text-slate-400">Email</div>
+    <h1 class="text-xl font-semibold">{_html.escape(subject)}</h1>
+    <div class="text-sm text-slate-400 mt-1">From: <span class="font-mono">{_html.escape(from_)}</span></div>
+    <div class="text-sm text-slate-400">Date: <span class="font-mono">{_html.escape(date)}</span></div>
+    <div class="text-xs text-slate-500 mt-2">message_id: <span class="font-mono">{_html.escape(message_id)}</span></div>
+  </div>
+  <div class="glass" style="background:rgba(15,23,42,0.7);backdrop-filter:blur(10px);border:1px solid rgba(148,163,184,0.15);border-radius:12px;overflow:hidden">
+    {"<iframe sandbox style='width:100%;min-height:500px;border:0;background:#fff' src='" + iframe_src + "'></iframe>" if html_body else ""}
+    {("<pre style='padding:1rem;white-space:pre-wrap;font-size:0.875rem;color:#cbd5e1;background:rgba(2,6,23,0.4)'>" + _html.escape(text_body or "(no plain-text body)") + "</pre>") if (text_body and not html_body) else ""}
+  </div>
+</div></body></html>"""
+    return HTMLResponse(page)
+
+
+@app.get("/viewer/snapshot/{filename}")
+async def viewer_snapshot(filename: str):
+    """Stream an HTML or PNG snapshot file from the whitelisted directories."""
+    candidate = None
+    for root in _SNAPSHOT_ROOTS:
+        candidate_path = _os.path.join(root, filename)
+        if _safe_under(candidate_path) and _os.path.exists(candidate_path):
+            candidate = candidate_path; break
+    if candidate is None:
+        raise HTTPException(404, "snapshot not found")
+    return FileResponse(candidate)
+
+
+@app.get("/viewer/pdf")
+async def viewer_pdf(path: str):
+    """Stream a PDF — `path` must resolve under a whitelisted root."""
+    safe = _safe_under(path)
+    if safe is None or not safe.endswith(".pdf") or not _os.path.exists(safe):
+        raise HTTPException(404, "pdf not found")
+    return FileResponse(safe, media_type="application/pdf")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # U30 — Workforce.com (Tanda) labour data
 # ─────────────────────────────────────────────────────────────────────────────
 @app.get("/workforce")
