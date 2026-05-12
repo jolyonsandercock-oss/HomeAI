@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unit Economics — Home AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link href="https://unpkg.com/tabulator-tables@5.5.4/dist/css/tabulator.min.css" rel="stylesheet">
+<link href="/static/css/tables.css" rel="stylesheet">
+<script src="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"></script>
+<script src="/static/js/homeai-table.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+  .num  { font-variant-numeric: tabular-nums; }
+  .tl-dot { display: inline-block; width: 10px; height: 10px; border-radius: 999px; vertical-align: middle; margin-right: 6px; }
+  .tl-green   { background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,0.5); }
+  .tl-amber   { background: #f59e0b; box-shadow: 0 0 8px rgba(245,158,11,0.6); }
+  .tl-red     { background: #f43f5e; box-shadow: 0 0 8px rgba(244,63,94,0.7); animation: pulse 1.5s infinite; }
+  .tl-unknown { background: #64748b; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.55} }
+</style>
+</head>
+<body class="text-slate-100">
+<div x-data="econ()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+
+<header class="flex flex-wrap items-center justify-between gap-3">
+  <div>
+    <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Unit Economics</h1>
+    <p class="text-sm text-slate-400">Sales × labour × accommodation per day. "Did the business make money?" in one row.</p>
+  </div>
+  <div class="flex items-center gap-3 flex-wrap">
+    <label class="text-xs text-slate-400">Window
+      <select x-model.number="days" @change="reload()" class="ml-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
+        <option value="30">30d</option><option value="90" selected>90d</option>
+        <option value="180">6mo</option><option value="365">1y</option>
+      </select>
+    </label>
+    <a href="/" class="text-xs text-slate-400 hover:text-slate-200">← Mission Control</a>
+  </div>
+</header>
+
+<!-- KPI ribbon — sticky on top -->
+<section class="grid grid-cols-2 md:grid-cols-5 gap-3">
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">Latest date</div>
+    <div class="text-2xl font-medium mono num" x-text="data.kpi?.report_date ?? '—'"></div>
+  </div>
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">Labour %</div>
+    <div class="text-3xl font-medium mono num">
+      <span class="tl-dot" :class="'tl-' + (data.kpi?.labour_pct_light || 'unknown')"></span>
+      <span x-text="data.kpi?.labour_pct ? data.kpi.labour_pct + '%' : '—'"></span>
+    </div>
+    <div class="text-xs text-slate-400">target &lt;30%</div>
+  </div>
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">Total revenue</div>
+    <div class="text-3xl font-medium mono num" x-text="data.kpi?.total_revenue ? '£' + data.kpi.total_revenue : '—'"></div>
+    <div class="text-xs text-slate-400" x-text="lwCompare(data.kpi?.total_net_sales, data.kpi?.net_sales_lw)"></div>
+  </div>
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">SPLH</div>
+    <div class="text-3xl font-medium mono num" x-text="data.kpi?.splh ? '£' + data.kpi.splh : '—'"></div>
+    <div class="text-xs text-slate-400">sales per labour-hour</div>
+  </div>
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">In-house guests</div>
+    <div class="text-3xl font-medium mono num" x-text="data.kpi?.in_house_count ?? '—'"></div>
+    <div class="text-xs text-slate-400" x-text="data.kpi?.total_covers ? data.kpi.total_covers + ' covers' : ''"></div>
+  </div>
+</section>
+
+<section class="glass rounded-xl p-3 md:p-4">
+  <h2 class="text-lg font-medium mb-2 px-1">Daily economics</h2>
+  <div id="econ-table"></div>
+</section>
+
+<section class="glass rounded-xl p-3 md:p-4">
+  <h2 class="text-lg font-medium mb-2 px-1">Thresholds (tunable)</h2>
+  <div id="th-table"></div>
+</section>
+
+</div>
+
+<script>
+function econ() {
+  return {
+    days: 90,
+    data: { kpi: {}, rows: [], thresholds: [] },
+    tables: {},
+    async boot() { await this.reload(); },
+    async reload() {
+      const r = await fetch(`/api/economics/overview?days=${this.days}`);
+      this.data = await r.json();
+      this.render();
+    },
+    lwCompare(today, lastWeek) {
+      const t = Number(today), l = Number(lastWeek);
+      if (!t || !l) return '';
+      const pct = ((t-l)/l*100).toFixed(1);
+      const sign = pct >= 0 ? '+' : '';
+      const cls  = pct >= 0 ? 'text-emerald-300' : 'text-rose-300';
+      return `vs LW: <span class="${cls}">${sign}${pct}%</span>`;
+    },
+    render() {
+      Object.values(this.tables).forEach(t => t.destroy());
+
+      this.tables.econ = homeai_table('#econ-table', this.data.rows, {
+        persistenceID: 'econ-daily',
+        columns: [
+          { title: 'Date',          field: 'report_date', formatter: 'date', width: 110 },
+          { title: 'Pub NET',       field: 'pub_net_sales',      formatter: 'money', hozAlign: 'right', headerFilter: false },
+          { title: 'Sand NET',      field: 'sandwich_net_sales', formatter: 'money', hozAlign: 'right', headerFilter: false },
+          { title: 'Accom £',       field: 'accom_revenue',      formatter: 'money', hozAlign: 'right', headerFilter: false },
+          { title: 'Total rev',     field: 'total_revenue',      formatter: 'money', hozAlign: 'right', headerFilter: false },
+          { title: 'Hours',         field: 'labour_hours',       hozAlign: 'right', headerFilter: false },
+          { title: 'Labour £',      field: 'labour_cost_est',    formatter: 'money', hozAlign: 'right', headerFilter: false },
+          { title: 'Labour %',      field: 'labour_pct',
+            formatter: (cell) => {
+              const v = cell.getValue(); if (v == null) return '<span class="text-slate-500">—</span>';
+              const light = (v < 30) ? 'tl-green' : (v <= 32 ? 'tl-amber' : 'tl-red');
+              return `<span class="tl-dot ${light}"></span>${v}%`;
+            }, hozAlign: 'right', headerFilter: false },
+          { title: 'SPLH £',        field: 'splh',               formatter: 'money', hozAlign: 'right', headerFilter: false },
+          { title: 'Covers',        field: 'total_covers',       hozAlign: 'right', headerFilter: false },
+          { title: 'In-house',      field: 'in_house_count',     hozAlign: 'right', headerFilter: false },
+        ],
+      });
+
+      this.tables.th = homeai_table('#th-table', this.data.thresholds, {
+        page_size: 0,
+        columns: [
+          { title: 'Metric',    field: 'metric', formatter: 'mono' },
+          { title: 'Green max', field: 'green_max', hozAlign: 'right', headerFilter: false },
+          { title: 'Amber max', field: 'amber_max', hozAlign: 'right', headerFilter: false },
+          { title: 'Red min',   field: 'red_min',   hozAlign: 'right', headerFilter: false },
+          { title: 'Note',      field: 'note', widthGrow: 3 },
+        ],
+      });
+    },
+  };
+}
+</script>
+</body></html>

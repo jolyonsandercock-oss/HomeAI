@@ -1143,6 +1143,44 @@ async def pub_board():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# U32 — Unit economics (cross-pipeline view + traffic-light KPIs)
+# ─────────────────────────────────────────────────────────────────────────────
+@app.get("/economics")
+async def economics_page():
+    return FileResponse(str(STATIC / "economics.html"))
+
+
+@app.get("/api/economics/overview")
+async def api_economics_overview(days: int = 90):
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        kpi = await c.fetchrow("SELECT * FROM v_live_ops_kpis")
+        rows = await c.fetch("""
+          SELECT * FROM v_daily_unit_economics
+           WHERE report_date >= CURRENT_DATE - ($1::int)
+           ORDER BY report_date DESC
+        """, days)
+        thresholds = await c.fetch("SELECT * FROM ops_thresholds")
+
+    def _row(r):
+        if r is None: return None
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"): out[k] = v.isoformat()
+            elif hasattr(v, "to_eng_string"): out[k] = str(v)
+            else: out[k] = v
+        return out
+
+    return {
+        "window_days": days,
+        "kpi":         _row(kpi),
+        "rows":        [_row(r) for r in rows],
+        "thresholds":  [_row(t) for t in thresholds],
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # U31 — Viewer endpoints (email, pdf, snapshot) for table click-through
 # ─────────────────────────────────────────────────────────────────────────────
 import re as _re
