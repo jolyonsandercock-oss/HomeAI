@@ -1150,6 +1150,15 @@ async def economics_page():
     return FileResponse(str(STATIC / "economics.html"))
 
 
+@app.get("/api/kpi/pending-instructions")
+async def api_kpi_pending_instructions():
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        n = await c.fetchval("SELECT COUNT(*) FROM bot_instructions WHERE status='pending'")
+    return {"pending": int(n or 0)}
+
+
 @app.get("/api/economics/overview")
 async def api_economics_overview(days: int = 90):
     p = await pool()

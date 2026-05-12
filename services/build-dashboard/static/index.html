@@ -474,6 +474,48 @@
       </div>
     </header>
 
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <!-- U32 KPI ribbon — labour traffic-light + revenue + pending  -->
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <div x-data="kpiRibbon()" x-init="boot()"
+         class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4 sticky top-0 z-10 backdrop-blur-md"
+         style="font-family:'JetBrains Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums">
+      <a href="/economics" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
+        <div class="text-xs uppercase tracking-wide" style="color:#64748b">Labour %</div>
+        <div class="text-2xl font-semibold mt-0.5" :style="`color:${kpi.labour_pct === null ? '#94a3b8' : (kpi.labour_pct < 30 ? '#10b981' : kpi.labour_pct <= 32 ? '#f59e0b' : '#f43f5e')}`">
+          <span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle"
+                :style="`background:${kpi.labour_pct === null ? '#64748b' : (kpi.labour_pct < 30 ? '#10b981' : kpi.labour_pct <= 32 ? '#f59e0b' : '#f43f5e')}; box-shadow:0 0 8px currentColor`"></span>
+          <span x-text="kpi.labour_pct != null ? kpi.labour_pct + '%' : '—'"></span>
+        </div>
+        <div class="text-xs" style="color:#94a3b8">target &lt;30%</div>
+      </a>
+      <a href="/economics" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
+        <div class="text-xs uppercase tracking-wide" style="color:#64748b">Revenue</div>
+        <div class="text-2xl font-semibold mt-0.5" style="color:#e2e8f0"
+             x-text="kpi.total_revenue ? '£' + Number(kpi.total_revenue).toLocaleString() : '—'"></div>
+        <div class="text-xs" :style="`color:${lwDir() >= 0 ? '#10b981' : '#f43f5e'}`" x-text="lwString()"></div>
+      </a>
+      <a href="/economics" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
+        <div class="text-xs uppercase tracking-wide" style="color:#64748b">SPLH</div>
+        <div class="text-2xl font-semibold mt-0.5" style="color:#e2e8f0"
+             x-text="kpi.splh ? '£' + kpi.splh : '—'"></div>
+        <div class="text-xs" style="color:#94a3b8">sales/hour</div>
+      </a>
+      <a href="/caterbook" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
+        <div class="text-xs uppercase tracking-wide" style="color:#64748b">In-house</div>
+        <div class="text-2xl font-semibold mt-0.5" style="color:#e2e8f0"
+             x-text="kpi.in_house_count ?? '—'"></div>
+        <div class="text-xs" style="color:#94a3b8" x-text="kpi.total_covers ? kpi.total_covers + ' covers' : ''"></div>
+      </a>
+      <div class="glass p-3 rounded-xl">
+        <div class="text-xs uppercase tracking-wide" style="color:#64748b">Inbox</div>
+        <div class="text-2xl font-semibold mt-0.5"
+             :style="`color:${pendingCount > 0 ? '#f59e0b' : '#94a3b8'}`"
+             x-text="pendingCount + '📨'"></div>
+        <div class="text-xs" style="color:#94a3b8">pending instructions</div>
+      </div>
+    </div>
+
     <template x-if="!data">
       <div class="glass p-8 text-center text-slate-500">Loading…</div>
     </template>
@@ -1404,6 +1446,49 @@
 </div>
 
 <script>
+function kpiRibbon() {
+  return {
+    kpi: { labour_pct: null, total_revenue: null, splh: null, in_house_count: null, total_covers: null, net_sales_lw: null },
+    pendingCount: 0,
+    async boot() {
+      try {
+        const r = await fetch('/api/economics/overview?days=14');
+        const o = await r.json();
+        this.kpi = o.kpi || {};
+        // Coerce numerics that arrive as strings
+        ['labour_pct','total_revenue','splh','total_covers','in_house_count','net_sales_lw','total_net_sales'].forEach(k => {
+          if (this.kpi[k] != null && !isNaN(this.kpi[k])) this.kpi[k] = Number(this.kpi[k]);
+        });
+      } catch (e) { console.error('kpi ribbon load', e); }
+      try {
+        const r2 = await fetch('/api/kpi/pending-instructions');
+        this.pendingCount = (await r2.json()).pending || 0;
+      } catch {}
+      setInterval(() => this.refresh(), 60000);  // refresh every minute
+    },
+    async refresh() {
+      try {
+        const r = await fetch('/api/economics/overview?days=14');
+        const o = await r.json();
+        this.kpi = o.kpi || this.kpi;
+        const r2 = await fetch('/api/kpi/pending-instructions');
+        this.pendingCount = (await r2.json()).pending || 0;
+      } catch {}
+    },
+    lwDir() {
+      const t = Number(this.kpi.total_net_sales), l = Number(this.kpi.net_sales_lw);
+      if (!t || !l) return 0;
+      return t - l;
+    },
+    lwString() {
+      const t = Number(this.kpi.total_net_sales), l = Number(this.kpi.net_sales_lw);
+      if (!t || !l) return '';
+      const pct = ((t - l) / l * 100).toFixed(1);
+      return `vs LW: ${pct >= 0 ? '+' : ''}${pct}%`;
+    },
+  };
+}
+
 function dashboard() {
   return {
     data: null,
