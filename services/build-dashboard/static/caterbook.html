@@ -10,18 +10,27 @@
 <link href="/static/css/tables.css" rel="stylesheet">
 <script src="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"></script>
 <script src="/static/js/homeai-table.js"></script>
+<script src="/static/js/u45-components.js"></script>
 <style>
   :root { color-scheme: dark; }
   body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
   .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .dw-btn { padding: 4px 10px; font-size: 12px; border-radius: 6px; background: rgba(15,23,42,0.6); border: 1px solid rgba(148,163,184,0.2); cursor: pointer; color: #cbd5e1; }
+  .dw-btn:hover { background: rgba(15,23,42,0.9); }
+  .dw-btn.active { background: rgb(99,102,241); color: white; border-color: transparent; }
+  .room-tile { padding: 12px; border-radius: 10px; min-height: 80px; display: flex; flex-direction: column; justify-content: space-between; }
+  .room-occupied { background: rgba(16,185,129,0.18); border: 1px solid rgba(16,185,129,0.4); color:#a7f3d0; }
+  .room-empty    { background: rgba(71,85,105,0.18); border: 1px solid rgba(71,85,105,0.4); color:#94a3b8; }
   .chip-arr { background: rgba(74,222,128,0.15);  color:#86efac; border:1px solid rgba(74,222,128,0.3); padding:1px 8px; border-radius:999px; font-size:0.7rem; }
   .chip-stay{ background: rgba(56,189,248,0.15);  color:#7dd3fc; border:1px solid rgba(56,189,248,0.3); padding:1px 8px; border-radius:999px; font-size:0.7rem; }
   .chip-dep { background: rgba(244,114,182,0.15); color:#f9a8d4; border:1px solid rgba(244,114,182,0.3); padding:1px 8px; border-radius:999px; font-size:0.7rem; }
 </style>
 </head>
 <body class="text-slate-100">
-<div x-data="cb()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+<div x-data="cb()" x-init="boot()"
+     @date-window-changed.window="onDateChange($event.detail)"
+     class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
 
 <header class="flex flex-wrap items-center justify-between gap-3">
   <div>
@@ -41,6 +50,97 @@
     <a href="/" class="text-xs text-slate-400 hover:text-slate-200">← Mission Control</a>
   </div>
 </header>
+
+<!-- U45 — date window -->
+<section class="glass rounded-xl p-3 flex flex-wrap items-center gap-3">
+  <div x-data="dateWindow('accommodation')" x-init="boot()" class="flex items-center gap-2 flex-wrap">
+    <span class="text-xs uppercase tracking-wide text-slate-400">Window</span>
+    <button class="dw-btn" :class="{active: preset==='today'}" @click="setPreset('today')">Today</button>
+    <button class="dw-btn" :class="{active: preset==='7d'}"    @click="setPreset('7d')">7d</button>
+    <button class="dw-btn" :class="{active: preset==='mtd'}"   @click="setPreset('mtd')">MTD</button>
+    <button class="dw-btn" :class="{active: preset==='30d'}"   @click="setPreset('30d')">30d</button>
+    <button class="dw-btn" :class="{active: preset==='90d'}"   @click="setPreset('90d')">90d</button>
+    <span class="text-xs text-slate-500 mx-2">or</span>
+    <input type="date" x-model="customFrom" @change="setCustom()" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+    <span class="text-xs text-slate-500">→</span>
+    <input type="date" x-model="customTo" @change="setCustom()" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+    <span class="text-xs text-slate-400 ml-2" x-text="label"></span>
+  </div>
+</section>
+
+<!-- U45 — ADR + per-room max/min -->
+<section class="grid grid-cols-2 md:grid-cols-4 gap-3" x-show="adr">
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">ADR (paid rooms)</div>
+    <div class="text-3xl font-medium mono" x-text="adr?.adr?.adr != null ? '£' + adr.adr.adr : '—'"></div>
+    <div class="text-xs text-slate-500 mono">incl free: £<span x-text="adr?.adr?.adr_inc_zero ?? '—'"></span></div>
+  </div>
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">Room nights (paid)</div>
+    <div class="text-3xl font-medium mono" x-text="adr?.adr?.nights_paid ?? '—'"></div>
+    <div class="text-xs text-slate-500 mono"><span x-text="adr?.adr?.nights_total ?? 0"></span> total nights</div>
+  </div>
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">In-house tonight</div>
+    <div class="text-3xl font-medium mono" x-text="occ?.in_house_count ?? '—'"></div>
+    <div class="text-xs text-slate-500 mono">
+      <span x-text="(occ?.items || []).filter(r => r.occupied).length"></span>
+      / <span x-text="occ?.total_rooms ?? 9"></span> rooms
+    </div>
+  </div>
+  <div class="glass rounded-xl p-4">
+    <div class="text-xs uppercase tracking-wide text-slate-400">Occupancy %</div>
+    <div class="text-3xl font-medium mono"
+         x-text="occ ? Math.round(100 * (occ.items||[]).filter(r => r.occupied).length / Math.max(occ.total_rooms || 9, 1)) + '%' : '—'"></div>
+  </div>
+</section>
+
+<!-- U45 — Per-room rate extremes -->
+<section class="glass rounded-xl p-3 md:p-4" x-show="adr?.per_room?.length">
+  <h2 class="text-lg font-medium mb-2 px-1">Per-room rate (in window)</h2>
+  <div class="overflow-x-auto">
+    <table class="w-full text-xs">
+      <thead class="text-slate-500 text-left"><tr>
+        <th class="py-1 pr-3">Room</th>
+        <th class="text-right pr-3">Nights</th>
+        <th class="text-right pr-3">Min</th>
+        <th class="text-right pr-3">Avg</th>
+        <th class="text-right pr-3">Max</th>
+      </tr></thead>
+      <tbody>
+        <template x-for="r in (adr?.per_room || [])" :key="r.room">
+          <tr class="border-t border-slate-800">
+            <td class="py-1 pr-3 mono" x-text="r.room"></td>
+            <td class="text-right pr-3 mono" x-text="r.nights"></td>
+            <td class="text-right pr-3 mono" x-text="r.min_rate != null ? '£' + r.min_rate : '—'"></td>
+            <td class="text-right pr-3 mono" x-text="r.avg_rate != null ? '£' + r.avg_rate : '—'"></td>
+            <td class="text-right pr-3 mono" x-text="r.max_rate != null ? '£' + r.max_rate : '—'"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- U45 — Occupancy grid -->
+<section class="glass rounded-xl p-3 md:p-4" x-show="occ">
+  <div class="flex items-baseline justify-between mb-2">
+    <h2 class="text-lg font-medium">Tonight's occupancy</h2>
+    <div class="text-xs text-slate-400 mono" x-text="'snapshot: ' + (occ?.snapshot_date || '')"></div>
+  </div>
+  <div class="grid grid-cols-3 md:grid-cols-5 gap-2">
+    <template x-for="r in (occ?.items || [])" :key="r.room">
+      <div class="room-tile" :class="r.occupied ? 'room-occupied' : 'room-empty'">
+        <div class="text-xs font-semibold mono" x-text="r.room"></div>
+        <div x-show="r.occupied">
+          <div class="text-xs" x-text="(r.guest||'').split(' ')[0] || '?'"></div>
+          <div class="text-xs opacity-70" x-text="r.depart ? 'until ' + r.depart : r.status"></div>
+        </div>
+        <div x-show="!r.occupied" class="text-xs opacity-60">empty</div>
+      </div>
+    </template>
+  </div>
+</section>
 
 <!-- Headline tiles -->
 <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -114,8 +214,27 @@ function cb() {
   return {
     days: 30,
     data: { coverage: null, latest_snapshot: null, per_day: [], per_room: [], recent_imports: [] },
+    adr: null,
+    occ: null,
+    dateFrom: '',
+    dateTo: '',
+    onDateChange({from, to}) {
+      this.dateFrom = from; this.dateTo = to;
+      this.loadADR();
+    },
+    async loadADR() {
+      if (!this.dateFrom || !this.dateTo) return;
+      try { this.adr = await (await fetch(`/api/accommodation/adr?date_from=${this.dateFrom}&date_to=${this.dateTo}`)).json(); } catch {}
+    },
+    async loadOcc() {
+      try { this.occ = await (await fetch('/api/accommodation/occupancy_now')).json(); } catch {}
+    },
     tables: {},
-    async boot() { await this.reload(); },
+    async boot() {
+      await this.reload();
+      this.loadOcc();
+      // ADR loads when dateWindow component fires its initial event
+    },
     async reload() {
       const r = await fetch(`/api/caterbook/overview?days=${this.days}`);
       this.data = await r.json();

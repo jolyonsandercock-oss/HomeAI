@@ -1204,6 +1204,109 @@ async def api_kpi_pending_instructions():
     return {"pending": int(n or 0)}
 
 
+_INVOICE_STORAGE_ROOT = "/home_ai/storage/invoices"
+
+
+@app.get("/api/gp/daily")
+async def api_gp_daily(date_from: str = "", date_to: str = "", site: str = "all"):
+    """U45 — daily GP% series for the invoices header strip.
+    Returns one row per date in the window, with drink/food/cafe/overall GP%."""
+    from datetime import date as _date, timedelta as _td
+    if not date_from or not date_to:
+        t = _date.today()
+        date_from_d = t - _td(days=14)
+        date_to_d   = t
+    else:
+        date_from_d = _date.fromisoformat(date_from)
+        date_to_d   = _date.fromisoformat(date_to)
+    date_from = date_from_d.isoformat()
+    date_to   = date_to_d.isoformat()
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        rows = await c.fetch("""
+          SELECT report_date, pub_net_sales, sandwich_net_sales,
+                 wet_cost, dry_cost, cafe_cost, overhead_cost,
+                 pub_drink_gp_pct, pub_food_gp_pct, cafe_gp_pct, overall_gp_pct
+            FROM v_daily_gp
+           WHERE report_date BETWEEN $1::date AND $2::date
+           ORDER BY report_date ASC
+        """, date_from_d, date_to_d)
+
+    def _row(r):
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"): out[k] = v.isoformat()
+            elif hasattr(v, "to_eng_string"): out[k] = float(v)
+            else: out[k] = v
+        return out
+    items = [_row(r) for r in rows]
+    # Latest row (today/most recent)
+    latest = items[-1] if items else {}
+    # Rolling 7-day averages (last 7 with non-null GP per stream)
+    def avg(field):
+        vals = [r[field] for r in items if r.get(field) is not None][-7:]
+        if not vals: return None
+        return round(sum(vals) / len(vals), 1)
+    return {
+        "items": items,
+        "latest": latest,
+        "rolling_7d": {
+            "drink": avg("pub_drink_gp_pct"),
+            "food":  avg("pub_food_gp_pct"),
+            "cafe":  avg("cafe_gp_pct"),
+            "overall": avg("overall_gp_pct"),
+        },
+        "site": site,
+    }
+
+
+@app.get("/api/invoice/{invoice_id}/pdf")
+async def api_invoice_pdf(invoice_id: int):
+    """U44 — serve the stored PDF for a vendor_invoice_inbox row.
+    Path-traversal guarded: resolves the recorded path and confirms it stays
+    inside /home_ai/storage/invoices."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = '1'")
+        path = await c.fetchval(
+            "SELECT first_attachment_path FROM vendor_invoice_inbox WHERE id=$1",
+            invoice_id,
+        )
+    if not path:
+        return JSONResponse({"error": "no PDF on disk for this invoice (may not yet be extracted)"}, status_code=404)
+    real = _os.path.realpath(path)
+    if not real.startswith(_os.path.realpath(_INVOICE_STORAGE_ROOT) + "/"):
+        return JSONResponse({"error": "path traversal blocked"}, status_code=403)
+    if not _os.path.exists(real):
+        return JSONResponse({"error": "file not found on disk"}, status_code=404)
+    return FileResponse(real, media_type="application/pdf",
+                        filename=_os.path.basename(real))
+
+
+@app.post("/api/invoice/{invoice_id}/feedback")
+async def api_invoice_feedback(invoice_id: int, payload: dict):
+    """U44 — record plain-text user feedback about an invoice. Sonnet applier
+    (cron 21:30) reads new rows and classifies into action types (flag_as_statement,
+    flag_as_ignored, recategorise, add_vendor_rule). Never auto-applies — Jo
+    approves via Action Queue."""
+    text = (payload.get("text") or "").strip()
+    if not text or len(text) < 3:
+        return {"ok": False, "error": "feedback text required (3+ chars)"}
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity='1'")
+        # Confirm invoice exists
+        exists = await c.fetchval("SELECT 1 FROM vendor_invoice_inbox WHERE id=$1", invoice_id)
+        if not exists:
+            return {"ok": False, "error": f"invoice id={invoice_id} not found"}
+        feedback_id = await c.fetchval("""
+          INSERT INTO invoice_feedback (invoice_id, feedback_text)
+          VALUES ($1, $2) RETURNING id
+        """, invoice_id, text[:2000])
+    return {"ok": True, "feedback_id": feedback_id}
+
+
 @app.get("/api/reviews/queue")
 async def api_reviews_queue():
     """U39 — Action Queue feed for guest reviews. Returns drafted-but-not-actioned
@@ -1656,6 +1759,214 @@ async def api_workforce_overview(days: int = 30):
     }
 
 
+@app.get("/api/workforce/rota_today")
+async def api_workforce_rota_today():
+    """U45 — who's on today, scheduled vs actual, cost per shift."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = '1'")
+        rows = await c.fetch("""
+          SELECT s.id, s.shift_date,
+                 u.full_name AS name, u.preferred_name,
+                 d.name AS dept_name, d.team,
+                 s.start_time, s.end_time, s.hours_worked,
+                 (s.hours_worked * (m.hourly_rate_pence::numeric / 100.0)
+                  * (1::numeric + COALESCE(m.on_cost_pct, 12.5) / 100.0))::numeric(10,2) AS cost_with_oncost,
+                 s.status
+            FROM workforce_shifts s
+            LEFT JOIN workforce_users u  ON u.external_id = s.user_external_id
+            LEFT JOIN workforce_departments d ON d.external_id = s.department_external_id
+            LEFT JOIN staff_meta m       ON m.user_external_id = s.user_external_id
+           WHERE s.shift_date = CURRENT_DATE
+           ORDER BY d.team, s.start_time
+        """)
+    def _row(r):
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"): out[k] = v.isoformat()
+            elif hasattr(v, "to_eng_string"): out[k] = float(v)
+            else: out[k] = v
+        return out
+    items = [_row(r) for r in rows]
+    total_hours = sum(i.get("hours_worked") or 0 for i in items)
+    total_cost  = sum(i.get("cost_with_oncost") or 0 for i in items)
+    return {
+        "items": items,
+        "total_hours": round(total_hours, 1),
+        "total_cost":  round(total_cost, 2),
+        "staff_count": len(items),
+    }
+
+
+@app.get("/api/workforce/income_vs_cost")
+async def api_workforce_income_vs_cost(date_from: str = "", date_to: str = ""):
+    """U45 — per-team labour cost vs the income stream it serves.
+    Cafe team ↔ sandwich_net_sales
+    Front-of-house + Kitchen ↔ pub_net_sales (food + drink combined)
+    Housekeeping ↔ accom_revenue"""
+    from datetime import date as _d, timedelta as _td
+    if not date_from or not date_to:
+        t = _d.today(); date_from_d = t - _td(days=7); date_to_d = t
+    else:
+        date_from_d = _d.fromisoformat(date_from); date_to_d = _d.fromisoformat(date_to)
+    date_from = date_from_d.isoformat(); date_to = date_to_d.isoformat()
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = '1'")
+        team_rows = await c.fetch("""
+          SELECT team, SUM(hours)::numeric(12,2) AS hours, SUM(cost_with_oncost)::numeric(12,2) AS cost
+            FROM v_daily_labour_by_team
+           WHERE report_date BETWEEN $1::date AND $2::date
+           GROUP BY team
+        """, date_from_d, date_to_d)
+        rev_row = await c.fetchrow("""
+          SELECT SUM(pub_net_sales)::numeric(12,2)      AS pub_total,
+                 SUM(sandwich_net_sales)::numeric(12,2) AS cafe_total,
+                 SUM(accom_revenue)::numeric(12,2)      AS accom_total
+            FROM v_daily_unit_economics
+           WHERE report_date BETWEEN $1::date AND $2::date
+        """, date_from_d, date_to_d)
+    teams = {r["team"]: dict(r) for r in team_rows}
+    def f(v): return float(v) if v is not None else 0.0
+    rev = dict(rev_row) if rev_row else {}
+    cafe_cost  = f(teams.get("cafe", {}).get("cost"))
+    foh_cost   = f(teams.get("front_of_house", {}).get("cost"))
+    kitchen_cost = f(teams.get("kitchen", {}).get("cost"))
+    house_cost = f(teams.get("accommodation", {}).get("cost"))
+    cafe_inc   = f(rev.get("cafe_total"))
+    pub_inc    = f(rev.get("pub_total"))
+    accom_inc  = f(rev.get("accom_total"))
+    def pct(num, denom): return round(100*num/denom, 1) if denom > 0 else None
+    return {
+        "from": date_from, "to": date_to,
+        "cafe":          {"income": cafe_inc,  "cost": cafe_cost,  "pct": pct(cafe_cost, cafe_inc)},
+        "foh_kitchen":   {"income": pub_inc,   "cost": foh_cost + kitchen_cost,  "pct": pct(foh_cost+kitchen_cost, pub_inc)},
+        "kitchen_food":  {"income": pub_inc * 0.4,  "cost": kitchen_cost,  "pct": pct(kitchen_cost, pub_inc*0.4),
+                          "note": "Food assumed 40% of pub_net — proxy until department_sales mapping confirmed"},
+        "foh_drink":     {"income": pub_inc * 0.6,  "cost": foh_cost,     "pct": pct(foh_cost, pub_inc*0.6),
+                          "note": "Drink assumed 60% of pub_net — proxy"},
+        "housekeeping":  {"income": accom_inc, "cost": house_cost, "pct": pct(house_cost, accom_inc)},
+    }
+
+
+@app.get("/api/workforce/forecast_vs_actual")
+async def api_workforce_forecast_vs_actual(days: int = 7):
+    """U45 — last N days forecast vs actual labour. Forecast = scheduled hours × rate.
+    Actual = clocked hours × rate. Until Tanda exposes scheduled/clocked split, we
+    approximate: forecast == actual (best-available)."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = '1'")
+        rows = await c.fetch("""
+          SELECT report_date, labour_hours, labour_cost_est
+            FROM v_daily_unit_economics
+           WHERE report_date >= CURRENT_DATE - ($1::int)
+             AND report_date <= CURRENT_DATE
+           ORDER BY report_date ASC
+        """, days)
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["forecast_cost"] = float(d["labour_cost_est"]) if d.get("labour_cost_est") else None
+        d["actual_cost"]   = float(d["labour_cost_est"]) if d.get("labour_cost_est") else None
+        d["variance"] = 0.0
+        d["report_date"] = d["report_date"].isoformat() if d.get("report_date") else None
+        items.append(d)
+    return {"days": days, "items": items, "note": "Forecast == actual until Tanda scheduled/clocked split is wired (Sprint U46 candidate)."}
+
+
+@app.get("/api/accommodation/adr")
+async def api_accommodation_adr(date_from: str = "", date_to: str = ""):
+    """U45 — Average Daily Rate + max/min per room over the window."""
+    from datetime import date as _d, timedelta as _td
+    if not date_from or not date_to:
+        t = _d.today(); date_from_d = t - _td(days=30); date_to_d = t
+    else:
+        date_from_d = _d.fromisoformat(date_from); date_to_d = _d.fromisoformat(date_to)
+    date_from = date_from_d.isoformat(); date_to = date_to_d.isoformat()
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = '1'")
+        adr_row = await c.fetchrow("""
+          SELECT
+            ROUND(AVG(rate_per_night) FILTER (WHERE rate_per_night > 0)::numeric, 2) AS adr,
+            ROUND(AVG(rate_per_night)::numeric, 2) AS adr_inc_zero,
+            COUNT(*) FILTER (WHERE rate_per_night > 0) AS nights_paid,
+            COUNT(*) AS nights_total
+          FROM caterbook_room_nights
+          WHERE night_date BETWEEN $1::date AND $2::date
+        """, date_from_d, date_to_d)
+        per_room = await c.fetch("""
+          SELECT room,
+                 MIN(rate_per_night) FILTER (WHERE rate_per_night > 0) AS min_rate,
+                 MAX(rate_per_night) AS max_rate,
+                 ROUND(AVG(rate_per_night) FILTER (WHERE rate_per_night > 0)::numeric, 2) AS avg_rate,
+                 COUNT(*) AS nights
+            FROM caterbook_room_nights
+           WHERE night_date BETWEEN $1::date AND $2::date
+           GROUP BY room ORDER BY room
+        """, date_from_d, date_to_d)
+
+    def _row(r):
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"): out[k] = v.isoformat()
+            elif hasattr(v, "to_eng_string"): out[k] = float(v)
+            else: out[k] = v
+        return out
+    return {
+        "from": date_from, "to": date_to,
+        "adr": _row(adr_row) if adr_row else {},
+        "per_room": [_row(r) for r in per_room],
+    }
+
+
+@app.get("/api/accommodation/occupancy_now")
+async def api_accommodation_occupancy_now():
+    """U45 — current occupancy grid: list of rooms + whether each is occupied tonight."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = '1'")
+        # Today's snapshot has arrivals + stayovers JSON; departures have already left.
+        snap = await c.fetchrow("""
+          SELECT report_date, arrivals, stayovers, departures, in_house_count
+            FROM caterbook_daily_snapshots
+           ORDER BY report_date DESC LIMIT 1
+        """)
+        total_rooms = await c.fetchval(
+          "SELECT value_num::int FROM ops_constants WHERE key='inn_total_rooms'")
+    if not snap:
+        return {"items": [], "total_rooms": total_rooms or 9}
+    arrivals = snap["arrivals"] or []
+    stayovers = snap["stayovers"] or []
+    # Each in-house room is identified by room name + guest
+    occupied = {}
+    import json as _json
+    for src, label in [(arrivals, 'arrival'), (stayovers, 'stayover')]:
+        if isinstance(src, str):
+            try: src = _json.loads(src)
+            except: src = []
+        for g in src or []:
+            room = g.get("room")
+            if not room: continue
+            occupied[room] = {"guest": g.get("guest"), "status": label,
+                              "depart": g.get("dep"), "balance": g.get("balance")}
+    # All room labels seen historically + the 9 numbered + Flat
+    known_rooms = ["Rm1","Rm2","Rm3","Rm4","Rm5","Rm6","Rm7","Rm8","suite-9","Flat"]
+    items = []
+    for r in known_rooms:
+        if r in occupied:
+            items.append({"room": r, "occupied": True, **occupied[r]})
+        else:
+            items.append({"room": r, "occupied": False})
+    return {
+        "snapshot_date": snap["report_date"].isoformat(),
+        "in_house_count": snap["in_house_count"],
+        "total_rooms": total_rooms or 9,
+        "items": items,
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # U29 — Vendor invoice triage (light-touch inbox)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1665,22 +1976,59 @@ async def invoices_page():
 
 
 @app.get("/api/invoices/list")
-async def api_invoices_list(days: int = 90, status: str = ""):
+async def api_invoices_list(
+    days: int = 90,
+    status: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    site: str = "all",          # all | pub | cafe
+):
+    """U45 — accepts either `days=N` (legacy) or `date_from`/`date_to` (ISO),
+    and a site filter that maps to entity_id (pub=1, cafe=1 with cafe bucket filter)."""
     p = await pool()
     async with p.acquire() as c:
         await c.execute("SET app.current_entity = 'all'")
-        where_status = "AND status = $2" if status else ""
-        args = [days] + ([status] if status else [])
+        # Date window: explicit from/to wins; else fall back to `days`.
+        from datetime import date as _date
+        if date_from and date_to:
+            date_clause = "COALESCE(delivery_date, invoice_date, received_at::date) BETWEEN $1::date AND $2::date"
+            date_args = [_date.fromisoformat(date_from), _date.fromisoformat(date_to)]
+            window_label = f"{date_from} → {date_to}"
+        else:
+            date_clause = "received_at >= CURRENT_DATE - ($1::int)"
+            date_args = [days]
+            window_label = f"last {days} days"
+
+        # Site filter: pub = wet+dry+head_office (entity 1, excluding cafe_stock);
+        #              cafe = cafe_stock category only;
+        #              all  = everything.
+        site_clause = ""
+        if site == "cafe":
+            site_clause = " AND category_canonical = 'cafe_stock'"
+        elif site == "pub":
+            site_clause = " AND (category_canonical <> 'cafe_stock' OR category_canonical IS NULL) AND entity_id = 1"
+        # status filter
+        status_clause = ""
+        extra_args = []
+        if status:
+            status_clause = f" AND status = ${len(date_args) + 1}"
+            extra_args = [status]
+
         rows = await c.fetch(f"""
           SELECT id, source_email_id, account, vendor_domain, vendor_name,
-                 vendor_category, subject, received_at, amount_seen, currency,
-                 invoice_date, due_date, status, has_pdf, attachment_count,
+                 vendor_category, category_canonical, subject, received_at, amount_seen,
+                 net_amount, vat_amount, gross_amount, currency,
+                 invoice_date, delivery_date, due_date, status, is_statement,
+                 has_pdf, attachment_count, first_attachment_path,
                  linked_invoice_id, notes
             FROM vendor_invoice_inbox
-           WHERE received_at >= CURRENT_DATE - ($1::int)
-           {where_status}
-           ORDER BY received_at DESC LIMIT 500
-        """, *args)
+           WHERE {date_clause}
+           {site_clause}
+           {status_clause}
+           ORDER BY COALESCE(delivery_date, invoice_date, received_at::date) DESC,
+                    received_at DESC
+           LIMIT 500
+        """, *date_args, *extra_args)
         by_vendor = await c.fetch("""
           SELECT vendor_domain, COUNT(*) AS n,
                  COUNT(*) FILTER (WHERE status='new')  AS pending,

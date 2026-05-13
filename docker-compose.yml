@@ -248,6 +248,7 @@ services:
       - ./postgres/migrations:/home_ai/postgres/migrations:ro
       - ./backups:/home_ai/backups:ro
       - ./storage/dreaming:/home_ai/storage/dreaming:ro
+      - ./storage/invoices:/home_ai/storage/invoices:ro
       - ./SPEC.md:/home_ai/SPEC.md:ro
       - ./AGENTS.md:/home_ai/AGENTS.md:ro
       - ./HOME-AI-STRETCH.md:/home_ai/HOME-AI-STRETCH.md:ro

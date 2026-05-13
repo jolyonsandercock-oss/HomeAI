@@ -110,23 +110,66 @@ def extract_from_text(text: str) -> dict:
     return out
 
 
-def fetch_attachment(acct: str, mid: str) -> bytes | None:
-    """Returns raw bytes of the first PDF attachment, or None."""
+import re as _re_storage
+from datetime import datetime as _dt_storage
+from pathlib import Path as _Path
+
+STORAGE_ROOT = "/home_ai/storage/invoices"
+
+
+def _safe_filename(s: str) -> str:
+    """Sanitise filename: keep alnum + . _ -; collapse rest to _."""
+    return _re_storage.sub(r'[^A-Za-z0-9._\-]+', '_', s)[:120]
+
+
+def save_pdf_to_disk(pdf_bytes: bytes, mid: str, filename: str, received_at=None) -> str | None:
+    """Save PDF to /home_ai/storage/invoices/YYYY/MM/<mid>_<safe_filename>.
+    Returns absolute path, or None on failure. Idempotent: if file exists with same size, skip."""
+    if not pdf_bytes:
+        return None
+    dt = received_at or _dt_storage.now()
+    if isinstance(dt, str):
+        try: dt = _dt_storage.fromisoformat(dt)
+        except: dt = _dt_storage.now()
+    yyyy = f"{dt.year:04d}"
+    mm   = f"{dt.month:02d}"
+    safe = _safe_filename(filename or "invoice.pdf")
+    if not safe.lower().endswith(".pdf"):
+        safe = safe + ".pdf"
+    dir_path = _Path(STORAGE_ROOT) / yyyy / mm
+    try:
+        dir_path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"  WARN: couldn't mkdir {dir_path}: {e}")
+        return None
+    target = dir_path / f"{mid}_{safe}"
+    if target.exists() and target.stat().st_size == len(pdf_bytes):
+        return str(target)
+    try:
+        target.write_bytes(pdf_bytes)
+    except OSError as e:
+        print(f"  WARN: couldn't write {target}: {e}")
+        return None
+    return str(target)
+
+
+def fetch_attachment(acct: str, mid: str) -> tuple[bytes | None, str | None]:
+    """Returns (raw bytes, filename) of the first PDF attachment, or (None, None)."""
     try:
         r = urllib.request.urlopen(f"{GF}/attachments/{acct}/{mid}", timeout=15)
         atts = json.load(r).get("attachments", [])
     except (urllib.error.HTTPError, urllib.error.URLError) as e:
-        return None
+        return None, None
     pdf = next((a for a in atts if (a.get("mime_type") == "application/pdf"
                                     or (a.get("filename") or "").lower().endswith(".pdf"))), None)
-    if not pdf: return None
+    if not pdf: return None, None
     try:
         r = urllib.request.urlopen(f"{GF}/attachment/{acct}/{mid}/{pdf['attachment_id']}", timeout=45)
         o = json.load(r)
         b64 = o.get("data_b64url") or ""
-        return base64.urlsafe_b64decode(b64 + "=" * (-len(b64) % 4))
+        return base64.urlsafe_b64decode(b64 + "=" * (-len(b64) % 4)), pdf.get("filename")
     except (urllib.error.HTTPError, urllib.error.URLError):
-        return None
+        return None, None
 
 
 def extract_via_pdfplumber(pdf_bytes: bytes) -> str | None:
@@ -161,7 +204,7 @@ async def main():
 
     for row in rows:
         bid, acct, mid = row['id'], row['account'], row['source_email_id']
-        pdf = fetch_attachment(acct, mid)
+        pdf, pdf_filename = fetch_attachment(acct, mid)
         if not pdf:
             no_pdf += 1
             async with conn.transaction():
@@ -172,6 +215,18 @@ async def main():
                    WHERE id=$1
                 """, bid)
             continue
+        # U44: save PDF to disk + populate first_attachment_path (idempotent).
+        # Use received_at for the date-bucket; fall back to today if NULL.
+        try:
+            ra = await conn.fetchval("SELECT received_at FROM vendor_invoice_inbox WHERE id=$1", bid)
+            saved_path = save_pdf_to_disk(pdf, mid, pdf_filename or "invoice.pdf", ra)
+            if saved_path:
+                await conn.execute("""
+                  UPDATE vendor_invoice_inbox SET first_attachment_path=$2
+                   WHERE id=$1 AND (first_attachment_path IS NULL OR first_attachment_path <> $2)
+                """, bid, saved_path)
+        except Exception as _e:
+            print(f"  WARN saving pdf for id={bid}: {_e}")
         text = extract_via_pdfplumber(pdf)
         if text is None:
             pdf_fail += 1

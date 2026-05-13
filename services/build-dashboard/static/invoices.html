@@ -10,35 +10,102 @@
 <link href="/static/css/tables.css" rel="stylesheet">
 <script src="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"></script>
 <script src="/static/js/homeai-table.js"></script>
+<script src="/static/js/u45-components.js"></script>
 <style>
   :root { color-scheme: dark; }
   body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
   .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
   .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .dw-btn { padding: 4px 10px; font-size: 12px; border-radius: 6px; background: rgba(15,23,42,0.6); border: 1px solid rgba(148,163,184,0.2); cursor: pointer; color: #cbd5e1; }
+  .dw-btn:hover { background: rgba(15,23,42,0.9); }
+  .dw-btn.active { background: rgb(99,102,241); color: white; border-color: transparent; }
+  .gp-tile { padding: 12px 16px; border-radius: 12px; }
+  .gp-good { background: rgba(16,185,129,0.12); color: rgb(110,231,183); }
+  .gp-amber { background: rgba(245,158,11,0.14); color: rgb(252,211,77); }
+  .gp-bad { background: rgba(244,63,94,0.16); color: rgb(252,165,165); }
+  .gp-neutral { background: rgba(148,163,184,0.10); color: rgb(203,213,225); }
 </style>
 </head>
 <body class="text-slate-100">
-<div x-data="inv()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+<div x-data="inv()" x-init="boot()"
+     @date-window-changed.window="onDateChange($event.detail)"
+     @site-changed.window="onSiteChange($event.detail)"
+     class="max-w-7xl mx-auto p-4 md:p-6 space-y-5">
 
 <header class="flex flex-wrap items-center justify-between gap-3">
   <div>
     <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Invoices</h1>
-    <p class="text-sm text-slate-400">Triage — click any row for the source email. Header click = sort. Per-column filter input below.</p>
+    <p class="text-sm text-slate-400">GP%, vendor triage, plain-text feedback. Click any row to view source email or PDF.</p>
   </div>
   <div class="flex items-center gap-3 flex-wrap">
     <input type="text" data-homeai-search placeholder="search… (/)"
            class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm w-44"
            @input="searchAll($event.target.value)">
-    <label class="text-xs text-slate-400">Window
-      <select x-model.number="days" @change="reload()" class="ml-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
-        <option value="30">30 days</option>
-        <option value="90" selected>90 days</option>
-        <option value="365">1 year</option>
-      </select>
-    </label>
     <a href="/" class="text-xs text-slate-400 hover:text-slate-200">← Mission Control</a>
   </div>
 </header>
+
+<!-- Filter strip: site + date window -->
+<section class="glass rounded-xl p-3 flex flex-wrap items-center gap-4">
+  <div x-data="siteFilter('invoices')" x-init="boot(); $watch('site', v => $dispatch('site-changed', {site:v}))" class="flex items-center gap-2">
+    <span class="text-xs uppercase tracking-wide text-slate-400">Site</span>
+    <button class="dw-btn" :class="{active: site==='all'}"  @click="setSite('all')">All</button>
+    <button class="dw-btn" :class="{active: site==='pub'}"  @click="setSite('pub')">Pub</button>
+    <button class="dw-btn" :class="{active: site==='cafe'}" @click="setSite('cafe')">Café</button>
+  </div>
+  <div class="h-6 border-l border-slate-700"></div>
+  <div x-data="dateWindow('invoices')" x-init="boot()" class="flex items-center gap-2 flex-wrap">
+    <span class="text-xs uppercase tracking-wide text-slate-400">Window</span>
+    <button class="dw-btn" :class="{active: preset==='today'}" @click="setPreset('today')">Today</button>
+    <button class="dw-btn" :class="{active: preset==='7d'}"    @click="setPreset('7d')">7d</button>
+    <button class="dw-btn" :class="{active: preset==='mtd'}"   @click="setPreset('mtd')">MTD</button>
+    <button class="dw-btn" :class="{active: preset==='30d'}"   @click="setPreset('30d')">30d</button>
+    <button class="dw-btn" :class="{active: preset==='90d'}"   @click="setPreset('90d')">90d</button>
+    <span class="text-xs text-slate-500 mx-2">or</span>
+    <input type="date" x-model="customFrom" @change="setCustom()"
+           class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+    <span class="text-xs text-slate-500">→</span>
+    <input type="date" x-model="customTo" @change="setCustom()"
+           class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+    <span class="text-xs text-slate-400 ml-2" x-text="label"></span>
+  </div>
+</section>
+
+<!-- GP% header strip -->
+<section class="grid grid-cols-2 md:grid-cols-4 gap-3" x-show="gp">
+  <div class="gp-tile" :class="gpClass('drink')">
+    <div class="text-xs uppercase tracking-wide opacity-80">Drink GP</div>
+    <div class="text-3xl font-medium mono"
+         x-text="gp?.latest?.pub_drink_gp_pct != null ? gp.latest.pub_drink_gp_pct.toFixed(1) + '%' : '—'"></div>
+    <div class="text-xs opacity-70 mono">
+      7d avg: <span x-text="gp?.rolling_7d?.drink != null ? gp.rolling_7d.drink.toFixed(1) + '%' : '—'"></span>
+    </div>
+  </div>
+  <div class="gp-tile" :class="gpClass('food')">
+    <div class="text-xs uppercase tracking-wide opacity-80">Food GP</div>
+    <div class="text-3xl font-medium mono"
+         x-text="gp?.latest?.pub_food_gp_pct != null ? gp.latest.pub_food_gp_pct.toFixed(1) + '%' : '—'"></div>
+    <div class="text-xs opacity-70 mono">
+      7d avg: <span x-text="gp?.rolling_7d?.food != null ? gp.rolling_7d.food.toFixed(1) + '%' : '—'"></span>
+    </div>
+  </div>
+  <div class="gp-tile" :class="gpClass('cafe')">
+    <div class="text-xs uppercase tracking-wide opacity-80">Café GP</div>
+    <div class="text-3xl font-medium mono"
+         x-text="gp?.latest?.cafe_gp_pct != null ? gp.latest.cafe_gp_pct.toFixed(1) + '%' : '—'"></div>
+    <div class="text-xs opacity-70 mono">
+      7d avg: <span x-text="gp?.rolling_7d?.cafe != null ? gp.rolling_7d.cafe.toFixed(1) + '%' : '—'"></span>
+    </div>
+  </div>
+  <div class="gp-tile" :class="gpClass('overall')">
+    <div class="text-xs uppercase tracking-wide opacity-80">Overall GP</div>
+    <div class="text-3xl font-medium mono"
+         x-text="gp?.latest?.overall_gp_pct != null ? gp.latest.overall_gp_pct.toFixed(1) + '%' : '—'"></div>
+    <div class="text-xs opacity-70 mono">
+      7d avg: <span x-text="gp?.rolling_7d?.overall != null ? gp.rolling_7d.overall.toFixed(1) + '%' : '—'"></span>
+    </div>
+  </div>
+</section>
 
 <!-- Totals -->
 <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -51,8 +118,8 @@
     <div class="text-3xl font-medium text-sky-300" x-text="data.totals?.pending ?? '—'"></div>
   </div>
   <div class="glass rounded-xl p-4">
-    <div class="text-xs uppercase tracking-wide text-slate-400">£ Seen</div>
-    <div class="text-3xl font-medium" x-text="data.totals?.sum_seen ? '£' + Number(data.totals.sum_seen).toLocaleString() : '—'"></div>
+    <div class="text-xs uppercase tracking-wide text-slate-400">£ Net (excl. statements)</div>
+    <div class="text-3xl font-medium" x-text="netTotal()"></div>
   </div>
   <div class="glass rounded-xl p-4">
     <div class="text-xs uppercase tracking-wide text-slate-400">Vendors</div>
@@ -61,18 +128,19 @@
 </section>
 
 <section class="glass rounded-xl p-3 md:p-4">
-  <h2 class="text-lg font-medium mb-2 px-1">By category (click to filter)</h2>
-  <div id="cat-table"></div>
-</section>
-
-<section class="glass rounded-xl p-3 md:p-4">
   <h2 class="text-lg font-medium mb-2 px-1">Inbox</h2>
   <div id="invoice-table"></div>
 </section>
 
-<section class="glass rounded-xl p-3 md:p-4">
-  <h2 class="text-lg font-medium mb-2 px-1">By vendor (click to filter)</h2>
-  <div id="vendor-table"></div>
+<section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+  <div class="glass rounded-xl p-3 md:p-4">
+    <h2 class="text-lg font-medium mb-2 px-1">By category</h2>
+    <div id="cat-table"></div>
+  </div>
+  <div class="glass rounded-xl p-3 md:p-4">
+    <h2 class="text-lg font-medium mb-2 px-1">By vendor</h2>
+    <div id="vendor-table"></div>
+  </div>
 </section>
 
 </div>
@@ -80,31 +148,84 @@
 <script>
 function inv() {
   return {
-    days: 90,
+    site: 'all',
+    dateFrom: '',
+    dateTo: '',
     data: { totals: {}, by_vendor: [], invoices: [] },
+    gp: null,
     invoiceTable: null,
     vendorTable: null,
-    async boot() { await this.reload(); },
+    catTable: null,
+    async boot() {
+      // wait for the dateWindow + siteFilter components to dispatch their initial events
+      setTimeout(() => this.reload(), 50);
+    },
+    onDateChange({from, to}) { this.dateFrom = from; this.dateTo = to; this.reload(); },
+    onSiteChange({site})     { this.site = site; this.reload(); },
     async reload() {
-      const r = await fetch(`/api/invoices/list?days=${this.days}`);
-      this.data = await r.json();
+      if (!this.dateFrom || !this.dateTo) return;
+      const qs = `date_from=${this.dateFrom}&date_to=${this.dateTo}&site=${this.site}`;
+      const [r1, r2] = await Promise.all([
+        fetch(`/api/invoices/list?${qs}`),
+        fetch(`/api/gp/daily?${qs}`),
+      ]);
+      this.data = await r1.json();
+      this.gp   = await r2.json();
       this.renderCategories();
       this.renderInvoices();
       this.renderVendors();
     },
+    netTotal() {
+      if (!this.data.invoices) return '—';
+      const sum = this.data.invoices
+        .filter(i => !i.is_statement && i.status !== 'ignored')
+        .reduce((a,i) => a + Number(i.net_amount || 0), 0);
+      return sum > 0 ? '£' + sum.toLocaleString(undefined,{maximumFractionDigits:0}) : '—';
+    },
+    gpClass(stream) {
+      const v = this.gp?.latest?.[
+        stream==='drink'   ? 'pub_drink_gp_pct' :
+        stream==='food'    ? 'pub_food_gp_pct'  :
+        stream==='cafe'    ? 'cafe_gp_pct'      :
+        'overall_gp_pct'
+      ];
+      if (v == null) return 'gp-neutral';
+      const thresholds = stream==='drink'   ? [55,65] :
+                         stream==='food'    ? [60,70] :
+                         stream==='cafe'    ? [35,50] :
+                                              [40,55];
+      if (v < thresholds[0]) return 'gp-bad';
+      if (v < thresholds[1]) return 'gp-amber';
+      return 'gp-good';
+    },
     renderInvoices() {
       const cfg = {
-        persistenceID: 'invoices-inbox',
+        persistenceID: 'invoices-inbox-v45',
         columns: [
-          { title: 'Received', field: 'received_at',   formatter: 'date',     width: 110 },
+          { title: 'Date',     field: 'delivery_date',  formatter: 'date', width: 100,
+            // Show delivery_date, fallback to invoice_date, fallback to received_at
+            formatter: (c) => {
+              const r = c.getRow().getData();
+              return (r.delivery_date || r.invoice_date || (r.received_at||'').slice(0,10) || '');
+            } },
           { title: 'Category', field: 'vendor_category', width: 110 },
           { title: 'Vendor',   field: 'vendor_domain' },
-          { title: 'Subject',  field: 'subject',        widthGrow: 3 },
-          { title: 'Amount',   field: 'amount_seen',    formatter: 'money',   hozAlign: 'right', headerFilter: false },
-          { title: 'Status',   field: 'status',         formatter: 'badge',   width: 110 },
-          { title: 'PDF',      field: 'has_pdf',
-            formatter: (cell) => cell.getValue() ? '✓' : '',
+          { title: 'Subject',  field: 'subject',  widthGrow: 3 },
+          { title: 'Net',      field: 'net_amount',    formatter: 'money', hozAlign: 'right', headerFilter: false, width: 90 },
+          { title: 'Gross',    field: 'gross_amount',  formatter: 'money', hozAlign: 'right', headerFilter: false, width: 90 },
+          { title: 'Status',   field: 'status',        width: 100 },
+          { title: 'Stmt?',    field: 'is_statement',
+            formatter: (c) => c.getValue() ? '📋' : '',
             hozAlign: 'center', width: 50, headerFilter: false },
+          { title: 'PDF',      field: 'first_attachment_path',
+            formatter: (c) => c.getValue()
+              ? `<a href="/api/invoice/${c.getRow().getData().id}/pdf" target="_blank" onclick="event.stopPropagation()">📄</a>`
+              : '',
+            hozAlign: 'center', width: 50, headerFilter: false },
+          { title: 'Feedback', field: 'id',
+            formatter: (c) => `<button class="dw-btn" style="font-size:11px;padding:2px 6px"
+              onclick="event.stopPropagation(); window.openFeedback(${c.getValue()})">✎</button>`,
+            hozAlign: 'center', width: 70, headerFilter: false },
         ],
         row_link: (row) => `/viewer/email/${encodeURIComponent(row.account)}/${encodeURIComponent(row.source_email_id)}`,
       };
@@ -115,17 +236,13 @@ function inv() {
       const cfg = {
         page_size: 0,
         columns: [
-          { title: 'Category',  field: 'vendor_category', formatter: 'mono' },
-          { title: 'Total',     field: 'n',          hozAlign: 'right', headerFilter: false },
-          { title: 'Pending',   field: 'pending',    hozAlign: 'right', headerFilter: false },
-          { title: '£ Seen',    field: 'total_seen', formatter: 'money', hozAlign: 'right', headerFilter: false },
-          { title: 'Vendors',   field: 'vendors',
-            formatter: (c) => (c.getValue() || []).slice(0,5).join(', '),
-            widthGrow: 3 },
+          { title: 'Category', field: 'vendor_category', formatter: 'mono' },
+          { title: 'Total',    field: 'n', hozAlign: 'right', headerFilter: false },
+          { title: 'Pending',  field: 'pending', hozAlign: 'right', headerFilter: false },
+          { title: '£ Seen',   field: 'total_seen', formatter: 'money', hozAlign: 'right', headerFilter: false },
         ],
         row_link: (row) => {
-          this.invoiceTable.setHeaderFilterValue('vendor_category', row.vendor_category);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          if (this.invoiceTable) this.invoiceTable.setHeaderFilterValue('vendor_category', row.vendor_category);
           return null;
         },
       };
@@ -136,18 +253,13 @@ function inv() {
       const cfg = {
         page_size: 0,
         columns: [
-          { title: 'Vendor',   field: 'vendor_domain', formatter: 'mono' },
-          { title: 'Total',    field: 'n',             hozAlign: 'right', headerFilter: false },
-          { title: 'Pending',  field: 'pending',       hozAlign: 'right', headerFilter: false },
-          { title: 'Paid',     field: 'paid',          hozAlign: 'right', headerFilter: false },
-          { title: '£ Seen',   field: 'total_seen',    formatter: 'money', hozAlign: 'right', headerFilter: false },
+          { title: 'Vendor',  field: 'vendor_domain', formatter: 'mono' },
+          { title: 'Total',   field: 'n', hozAlign: 'right', headerFilter: false },
+          { title: '£ Seen',  field: 'total_seen', formatter: 'money', hozAlign: 'right', headerFilter: false },
         ],
         row_link: (row) => {
-          // clicking a vendor row filters the inbox table to that vendor
-          const v = row.vendor_domain;
-          this.invoiceTable.setHeaderFilterValue('vendor_domain', v);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-          return null;  // don't navigate
+          if (this.invoiceTable) this.invoiceTable.setHeaderFilterValue('vendor_domain', row.vendor_domain);
+          return null;
         },
       };
       if (this.vendorTable) this.vendorTable.destroy();
@@ -164,5 +276,30 @@ function inv() {
     },
   };
 }
+
+// Inline feedback modal (lightweight; no separate component file)
+window.openFeedback = async function(invoiceId) {
+  const text = prompt(`Feedback for invoice #${invoiceId}\n\n` +
+    'Examples:\n' +
+    '  • "This is a statement, not an invoice"\n' +
+    '  • "All invoices from this vendor are wet purchases"\n' +
+    '  • "Recategorise as cafe_stock"\n\n' +
+    'Your message:');
+  if (!text || text.trim().length < 3) return;
+  try {
+    const r = await fetch(`/api/invoice/${invoiceId}/feedback`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: text.trim()})
+    });
+    const o = await r.json();
+    if (o.ok) {
+      alert(`✓ Feedback saved (#${o.feedback_id}). Sonnet will propose an action overnight; approve in the Action Queue.`);
+    } else {
+      alert(`✗ ${o.error || 'unknown error'}`);
+    }
+  } catch (e) {
+    alert(`✗ network error: ${e}`);
+  }
+};
 </script>
 </body></html>

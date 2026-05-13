@@ -10,15 +10,21 @@
 <link href="/static/css/tables.css" rel="stylesheet">
 <script src="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"></script>
 <script src="/static/js/homeai-table.js"></script>
+<script src="/static/js/u45-components.js"></script>
 <style>
   :root { color-scheme: dark; }
   body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
   .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .dw-btn { padding: 4px 10px; font-size: 12px; border-radius: 6px; background: rgba(15,23,42,0.6); border: 1px solid rgba(148,163,184,0.2); cursor: pointer; color: #cbd5e1; }
+  .dw-btn:hover { background: rgba(15,23,42,0.9); }
+  .dw-btn.active { background: rgb(99,102,241); color: white; border-color: transparent; }
 </style>
 </head>
 <body class="text-slate-100">
-<div x-data="wf()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+<div x-data="wf()" x-init="boot()"
+     @date-window-changed.window="onDateChange($event.detail)"
+     class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
 
 <header class="flex flex-wrap items-center justify-between gap-3">
   <div>
@@ -38,6 +44,100 @@
     <a href="/" class="text-xs text-slate-400 hover:text-slate-200">← Mission Control</a>
   </div>
 </header>
+
+<!-- U45 — Date window + filter strip -->
+<section class="glass rounded-xl p-3 flex flex-wrap items-center gap-3">
+  <div x-data="dateWindow('workforce')" x-init="boot()" class="flex items-center gap-2 flex-wrap">
+    <span class="text-xs uppercase tracking-wide text-slate-400">Window</span>
+    <button class="dw-btn" :class="{active: preset==='today'}" @click="setPreset('today')">Today</button>
+    <button class="dw-btn" :class="{active: preset==='7d'}"    @click="setPreset('7d')">7d</button>
+    <button class="dw-btn" :class="{active: preset==='mtd'}"   @click="setPreset('mtd')">MTD</button>
+    <button class="dw-btn" :class="{active: preset==='30d'}"   @click="setPreset('30d')">30d</button>
+    <button class="dw-btn" :class="{active: preset==='90d'}"   @click="setPreset('90d')">90d</button>
+    <span class="text-xs text-slate-500 mx-2">or</span>
+    <input type="date" x-model="customFrom" @change="setCustom()" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+    <span class="text-xs text-slate-500">→</span>
+    <input type="date" x-model="customTo" @change="setCustom()" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+    <span class="text-xs text-slate-400 ml-2" x-text="label"></span>
+  </div>
+</section>
+
+<!-- U45 — Today's rota -->
+<section class="glass rounded-xl p-3 md:p-4" x-show="rota">
+  <div class="flex items-baseline justify-between mb-2">
+    <h2 class="text-lg font-medium">Today's rota</h2>
+    <div class="text-xs text-slate-400 mono">
+      <span x-text="rota?.staff_count ?? 0"></span> staff ·
+      <span x-text="(rota?.total_hours ?? 0).toFixed(1)"></span> hrs ·
+      £<span x-text="(rota?.total_cost ?? 0).toFixed(2)"></span>
+    </div>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-xs">
+      <thead class="text-slate-500 text-left"><tr>
+        <th class="py-1 pr-3">Team</th><th>Name</th><th>Dept</th>
+        <th class="text-right pr-3">Hours</th><th class="text-right pr-3">Cost</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+        <template x-for="r in (rota?.items || [])" :key="r.id">
+          <tr class="border-t border-slate-800">
+            <td class="py-1 pr-3 mono" x-text="r.team || '—'"></td>
+            <td x-text="r.preferred_name || r.name"></td>
+            <td class="text-slate-500" x-text="r.dept_name"></td>
+            <td class="text-right pr-3 mono" x-text="(r.hours_worked||0).toFixed(2)"></td>
+            <td class="text-right pr-3 mono">£<span x-text="(r.cost_with_oncost||0).toFixed(2)"></span></td>
+            <td class="text-slate-500" x-text="r.status"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- U45 — Income vs cost cards -->
+<section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3" x-show="ivc">
+  <template x-for="card in ivcCards()" :key="card.key">
+    <div class="glass rounded-xl p-4">
+      <div class="text-xs uppercase tracking-wide text-slate-400" x-text="card.title"></div>
+      <div class="text-xs text-slate-500 mb-2" x-text="card.note || ''"></div>
+      <div class="text-2xl font-medium mono"
+           :style="`color:${card.pct == null ? '#94a3b8' : card.pct < 30 ? '#10b981' : card.pct <= 50 ? '#f59e0b' : '#f43f5e'}`"
+           x-text="card.pct != null ? card.pct.toFixed(1) + '%' : '—'"></div>
+      <div class="text-xs text-slate-500 mono mt-1">
+        £<span x-text="card.cost.toFixed(0)"></span>
+        / £<span x-text="card.income.toFixed(0)"></span>
+      </div>
+    </div>
+  </template>
+</section>
+
+<!-- U45 — Forecast vs actual -->
+<section class="glass rounded-xl p-3 md:p-4" x-show="fva">
+  <h2 class="text-lg font-medium mb-2">Forecast vs actual (last 7 days)</h2>
+  <div class="text-xs text-slate-500 mb-2" x-text="fva?.note || ''"></div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-xs">
+      <thead class="text-slate-500 text-left"><tr>
+        <th class="py-1 pr-3">Date</th>
+        <th class="text-right pr-3">Hours</th>
+        <th class="text-right pr-3">Forecast</th>
+        <th class="text-right pr-3">Actual</th>
+        <th class="text-right pr-3">Δ</th>
+      </tr></thead>
+      <tbody>
+        <template x-for="r in (fva?.items || [])" :key="r.report_date">
+          <tr class="border-t border-slate-800">
+            <td class="py-1 pr-3 mono" x-text="(r.report_date||'').slice(0,10)"></td>
+            <td class="text-right pr-3 mono" x-text="(r.labour_hours||0).toFixed(1)"></td>
+            <td class="text-right pr-3 mono">£<span x-text="(r.forecast_cost||0).toFixed(0)"></span></td>
+            <td class="text-right pr-3 mono">£<span x-text="(r.actual_cost||0).toFixed(0)"></span></td>
+            <td class="text-right pr-3 mono" x-text="(r.variance||0).toFixed(0)"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>
 
 <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
   <div class="glass rounded-xl p-4">
@@ -92,8 +192,41 @@ function wf() {
   return {
     days: 30,
     data: { coverage:{}, per_day:[], per_dept:[], per_team:[], top_staff:[], recent_sync:[] },
+    rota: null,
+    ivc: null,
+    fva: null,
+    dateFrom: '',
+    dateTo: '',
+    onDateChange({from, to}) {
+      this.dateFrom = from; this.dateTo = to;
+      this.loadIVC();
+    },
+    async loadRota() {
+      try { this.rota = await (await fetch('/api/workforce/rota_today')).json(); } catch {}
+    },
+    async loadIVC() {
+      if (!this.dateFrom || !this.dateTo) return;
+      try { this.ivc = await (await fetch(`/api/workforce/income_vs_cost?date_from=${this.dateFrom}&date_to=${this.dateTo}`)).json(); } catch {}
+    },
+    async loadFVA() {
+      try { this.fva = await (await fetch('/api/workforce/forecast_vs_actual?days=7')).json(); } catch {}
+    },
+    ivcCards() {
+      if (!this.ivc) return [];
+      return [
+        {key:'cafe',         title:'Café team vs café income',           ...this.ivc.cafe},
+        {key:'foh_kit',      title:'FOH+Kitchen vs pub income',          ...this.ivc.foh_kitchen},
+        {key:'kitchen_food', title:'Kitchen vs food (proxy 40%)',        ...this.ivc.kitchen_food, note:'40% proxy'},
+        {key:'housekeep',    title:'Housekeeping vs accom',              ...this.ivc.housekeeping},
+      ];
+    },
     tables: {},
-    async boot() { await this.reload(); },
+    async boot() {
+      await this.reload();
+      this.loadRota();
+      this.loadFVA();
+      // IVC loads when date-window-changed event fires (defaults 7d)
+    },
     async reload() {
       const r = await fetch(`/api/workforce/overview?days=${this.days}`);
       this.data = await r.json();
