@@ -30,6 +30,7 @@ def vault_get(p):
     return json.loads(urllib.request.urlopen(r, timeout=5).read())["data"]["data"]
 
 
+# U38: schema-constrained tool use.
 SYSTEM_BLOCKS = [{
     "type": "text",
     "text": (
@@ -40,23 +41,41 @@ SYSTEM_BLOCKS = [{
         "Output 0-5 proposals — empty list is fine when there's no clear pattern. "
         "Each proposal must:\n"
         "  - Be specific (name the worker, the failure shape, the suggested rule).\n"
-        "  - Be actionable: 'suggested_rule' should be a sentence the system can inject "
-        "    into a prompt, not abstract advice.\n"
+        "  - Be actionable: 'suggested_rule' should be a sentence the system can inject into a prompt.\n"
         "  - Have severity reflecting blast radius: 'high' if a pipeline is fully broken, "
         "    'medium' if degraded, 'low' for an optimisation.\n"
-        "Already-accepted heuristics are provided so you don't repeat them.\n\n"
-        "Output ONLY valid JSON matching this schema (no prose):\n"
-        "{\n"
-        '  "proposals": [\n'
-        '    {"scope": "<pipeline>", "ai_worker": "<worker>"|null,\n'
-        '     "observation": "<what you saw, 1-2 sentences>",\n'
-        '     "suggested_rule": "<one-sentence rule to add to prompt>",\n'
-        '     "severity": "low"|"medium"|"high"}\n'
-        "  ]\n"
-        "}"
+        "Already-accepted heuristics are provided so you don't repeat them.\n"
+        "Call the record_proposals tool — never produce free text."
     ),
     "cache_control": {"type": "ephemeral"},
 }]
+
+PROPOSALS_TOOL = {
+    "name": "record_proposals",
+    "description": "Record 0-5 prompt-engineering heuristic proposals derived from audit_log patterns.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "proposals": {
+                "type": "array",
+                "maxItems": 5,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "scope":          {"type": "string"},
+                        "ai_worker":      {"type": ["string", "null"]},
+                        "observation":    {"type": "string", "maxLength": 1000},
+                        "suggested_rule": {"type": "string", "maxLength": 1000},
+                        "severity":       {"type": "string", "enum": ["low", "medium", "high"]}
+                    },
+                    "required": ["scope", "observation", "suggested_rule", "severity"]
+                }
+            }
+        },
+        "required": ["proposals"]
+    }
+}
+SCHEMA_VERSION = "dreaming-proposals.schema.json@U38"
 
 
 async def main():
@@ -124,25 +143,24 @@ async def main():
         model=MODEL,
         max_tokens=2000,
         system=SYSTEM_BLOCKS,
+        tools=[PROPOSALS_TOOL],
+        tool_choice={"type": "tool", "name": "record_proposals"},
         messages=[{"role": "user", "content": "Today's audit-log mining:\n\n" + payload_str}],
     )
     in_tok = resp.usage.input_tokens
     out_tok = resp.usage.output_tokens
     cache_hits = getattr(resp.usage, "cache_read_input_tokens", 0) or 0
 
-    raw = "".join(b.text for b in resp.content if b.type == "text").strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1] if "\n" in raw else raw
-        if raw.endswith("```"): raw = raw[:-3]
-    try:
-        decoded = json.loads(raw)
-    except json.JSONDecodeError:
-        print(f"bad JSON from Sonnet:\n{raw[:500]}")
+    # Tool-use response — guaranteed schema-valid.
+    tool_uses = [b for b in resp.content if b.type == "tool_use"]
+    if not tool_uses:
+        print("no tool_use block returned")
         await conn.execute("""
           UPDATE dreaming_runs SET finished_at=now(), error_message=$2 WHERE id=$1
-        """, run_id, "json decode failed")
+        """, run_id, "no tool_use in response")
         await conn.close()
         return
+    decoded = tool_uses[0].input
 
     proposals = decoded.get("proposals", [])
     inserted = 0

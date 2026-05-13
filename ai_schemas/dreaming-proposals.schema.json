@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "title": "DreamingProposalsOutcome",
+  "description": "Output of the dreaming summariser. Used by u36-dreaming-nightly.sh (Sonnet) — mines audit_log for AI worker failure patterns and proposes prompt-engineering heuristics.",
+  "properties": {
+    "status":         { "type": "string", "enum": ["success", "escalate", "fail"] },
+    "confidence":     { "type": "number", "minimum": 0, "maximum": 1 },
+    "reasoning":      { "type": "string", "minLength": 1, "maxLength": 500 },
+    "worker":         { "type": "string", "const": "dreaming_summariser" },
+    "tier_used":      { "type": "string", "const": "sonnet" },
+    "requires_human": { "type": "boolean" },
+    "proposals":      {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "properties": {
+          "scope":          { "type": "string", "description": "Pipeline or worker scope (e.g. 'p6-caterbook', 'email-classifier')." },
+          "ai_worker":      { "type": ["string", "null"], "description": "Specific worker name if a single one is implicated." },
+          "observation":    { "type": "string", "minLength": 1, "maxLength": 1000, "description": "What you saw in the data. 1-2 sentences." },
+          "suggested_rule": { "type": "string", "minLength": 1, "maxLength": 1000, "description": "One-sentence rule to inject into the AI worker's prompt. Actionable, not abstract." },
+          "severity":       { "type": "string", "enum": ["low", "medium", "high"] }
+        },
+        "required": ["scope", "observation", "suggested_rule", "severity"]
+      }
+    }
+  },
+  "required": ["status", "confidence", "reasoning", "worker", "tier_used", "requires_human", "proposals"]
+}

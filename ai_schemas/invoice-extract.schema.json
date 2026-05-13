@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "title": "InvoiceExtractOutcome",
+  "description": "Output of the invoice-extract AI worker. Used by Invoice Pipeline P2 (Haiku) and u36-invoice-haiku-fallback.sh.",
+  "properties": {
+    "status":         { "type": "string", "enum": ["success", "escalate", "fail"] },
+    "confidence":     { "type": "number", "minimum": 0, "maximum": 1 },
+    "reasoning":      { "type": "string", "minLength": 1, "maxLength": 500 },
+    "worker":         { "type": "string", "const": "invoice_extractor" },
+    "tier_used":      { "type": "string", "enum": ["haiku", "sonnet"] },
+    "requires_human": { "type": "boolean" },
+    "vendor_name":    { "type": ["string", "null"] },
+    "invoice_number": { "type": ["string", "null"], "description": "Vendor's invoice reference (e.g. INV-2026-014)." },
+    "invoice_date":   { "type": ["string", "null"], "format": "date" },
+    "delivery_date":  { "type": ["string", "null"], "format": "date" },
+    "net":            { "type": ["number", "null"], "description": "Net amount in GBP, excluding VAT." },
+    "vat":            { "type": ["number", "null"], "description": "VAT amount in GBP." },
+    "gross":          { "type": ["number", "null"], "description": "Gross total in GBP (= net + vat)." },
+    "vat_rate":       { "type": ["number", "null"], "minimum": 0, "maximum": 25, "description": "VAT rate as a percentage (e.g. 20, 5, 0)." },
+    "currency":       { "type": "string", "const": "GBP" },
+    "line_items":     {
+      "type": "array",
+      "description": "Optional. Multi-line invoices return one entry per line.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": { "type": "string" },
+          "qty":         { "type": ["number", "null"] },
+          "unit_price":  { "type": ["number", "null"] },
+          "line_net":    { "type": ["number", "null"] },
+          "line_vat":    { "type": ["number", "null"] },
+          "line_gross":  { "type": ["number", "null"] }
+        }
+      }
+    }
+  },
+  "required": ["status", "confidence", "reasoning", "worker", "tier_used", "requires_human", "currency"]
+}

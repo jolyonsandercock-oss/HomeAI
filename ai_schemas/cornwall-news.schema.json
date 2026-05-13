@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "title": "CornwallNewsOutcome",
+  "description": "Output of the news-summariser AI worker. Used by Cornwall News Briefing (Ollama qwen2.5:7b) — weekly summary of hospitality + property briefings.",
+  "properties": {
+    "status":         { "type": "string", "enum": ["success", "escalate", "fail"] },
+    "confidence":     { "type": "number", "minimum": 0, "maximum": 1 },
+    "reasoning":      { "type": "string", "minLength": 1, "maxLength": 500 },
+    "worker":         { "type": "string", "const": "news_summariser" },
+    "tier_used":      { "type": "string", "enum": ["hot", "medium"] },
+    "requires_human": { "type": "boolean" },
+    "category":       {
+      "type": "string",
+      "enum": ["licensing", "food_hygiene", "property", "labour_law", "tax_vat", "general", "irrelevant"]
+    },
+    "relevance":      {
+      "type": "string",
+      "enum": ["high", "medium", "low", "none"],
+      "description": "Relevance to Jo's business (pub/inn/property)."
+    },
+    "summary":        { "type": "string", "minLength": 1, "maxLength": 800 },
+    "action_required": {
+      "type": ["string", "null"],
+      "maxLength": 300,
+      "description": "If Jo should do something (e.g. update licence, review compliance), what."
+    },
+    "source_url":     { "type": ["string", "null"], "format": "uri" }
+  },
+  "required": ["status", "confidence", "reasoning", "worker", "tier_used", "requires_human", "category", "relevance", "summary"]
+}

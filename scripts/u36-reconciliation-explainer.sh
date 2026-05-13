@@ -36,24 +36,34 @@ def vault_get(p):
     return json.loads(urllib.request.urlopen(r, timeout=5).read())["data"]["data"]
 
 
+# U38: schema-constrained tool use.
 SYSTEM_BLOCKS = [{
     "type": "text",
     "text": (
         "You are a UK small-business bookkeeping assistant. For each reconciliation flag, you "
-        "see (a) the bank transaction details (date, amount, description, reference), and "
-        "(b) nearby vendor invoices from the same week with similar amounts. Your job is to "
-        "write a short hypothesis explaining the discrepancy, a one-line suggested action, "
-        "and a confidence score 0-1. Be specific. Never invent figures.\n\n"
-        "Return ONLY valid JSON matching:\n"
-        "{\n"
-        '  "hypothesis": "<1-2 sentences>",\n'
-        '  "suggested_action": "<single action sentence>",\n'
-        '  "confidence": 0.0-1.0,\n'
-        '  "candidate_match_id": <vendor_invoice_inbox.id>|null\n'
-        "}"
+        "see (a) the bank transaction details, and (b) nearby vendor invoices from the same week "
+        "with similar amounts. Write a short hypothesis, a one-line suggested action, a confidence "
+        "0-1, and (if obvious) the matching invoice id. Be specific. Never invent figures. "
+        "Call the record_hypothesis tool — never produce free text."
     ),
     "cache_control": {"type": "ephemeral"},
 }]
+
+HYPOTHESIS_TOOL = {
+    "name": "record_hypothesis",
+    "description": "Record a structured reconciliation hypothesis for an open flag.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "hypothesis":         {"type": "string", "maxLength": 600},
+            "suggested_action":   {"type": "string", "maxLength": 300},
+            "confidence":         {"type": "number", "minimum": 0, "maximum": 1},
+            "candidate_match_id": {"type": ["integer", "null"]}
+        },
+        "required": ["hypothesis", "suggested_action", "confidence"]
+    }
+}
+SCHEMA_VERSION = "reconciliation-explainer.schema.json@U38"
 
 
 async def main():
@@ -122,6 +132,8 @@ async def main():
         try:
             resp = client.messages.create(
                 model=MODEL, max_tokens=400, system=SYSTEM_BLOCKS,
+                tools=[HYPOTHESIS_TOOL],
+                tool_choice={"type": "tool", "name": "record_hypothesis"},
                 messages=[{"role": "user", "content": payload_str}],
             )
         except Exception as e:
@@ -131,14 +143,10 @@ async def main():
         total_out   += resp.usage.output_tokens
         total_cache += getattr(resp.usage, "cache_read_input_tokens", 0) or 0
 
-        raw = "".join(b.text for b in resp.content if b.type == "text").strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n",1)[1] if "\n" in raw else raw
-            if raw.endswith("```"): raw = raw[:-3]
-        try:
-            d = json.loads(raw)
-        except json.JSONDecodeError:
+        tool_uses = [b for b in resp.content if b.type == "tool_use"]
+        if not tool_uses:
             continue
+        d = tool_uses[0].input
         desc = f"{d.get('hypothesis','')}\n\nSuggested action: {d.get('suggested_action','')}\n(confidence {d.get('confidence', 0):.2f})"
         if d.get("candidate_match_id"):
             desc += f"\nCandidate vendor invoice id: {d['candidate_match_id']}"

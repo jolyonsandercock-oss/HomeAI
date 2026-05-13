@@ -61,6 +61,7 @@ def fetch_pdf_text(acct, mid):
         return None
 
 
+# U38: schema-constrained tool use instead of free-JSON prompting.
 SYSTEM_BLOCKS = [{
     "type": "text",
     "text": (
@@ -70,23 +71,29 @@ SYSTEM_BLOCKS = [{
         "If multiple totals appear (subtotal, VAT, grand total), the 'gross' is the grand total. "
         "'net' is the subtotal before VAT. 'vat' is the VAT amount. "
         "vat_rate is the standard rate as a percentage (e.g. 20 or 5 or 0). "
-        "invoice_date is the date the invoice was issued. "
-        "delivery_date is the date goods/service were delivered (often == invoice_date). "
-        "Return ONLY valid JSON matching the schema. No prose.\n\n"
-        "Schema:\n"
-        "{\n"
-        '  "net": number|null,\n'
-        '  "vat": number|null,\n'
-        '  "gross": number|null,\n'
-        '  "vat_rate": number|null,\n'
-        '  "invoice_date": "YYYY-MM-DD"|null,\n'
-        '  "delivery_date": "YYYY-MM-DD"|null,\n'
-        '  "confidence": 0.0-1.0\n'
-        "}\n"
-        "confidence reflects YOUR certainty — 1.0 = unambiguous, 0.5 = some inference, 0.2 = guessing."
+        "Call the extract_invoice tool with your findings — never produce free text."
     ),
     "cache_control": {"type": "ephemeral"},
 }]
+
+EXTRACT_TOOL = {
+    "name": "extract_invoice",
+    "description": "Record structured invoice fields extracted from the document.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "net":            {"type": ["number", "null"], "description": "Net amount in GBP."},
+            "vat":            {"type": ["number", "null"], "description": "VAT amount in GBP."},
+            "gross":          {"type": ["number", "null"], "description": "Gross total in GBP."},
+            "vat_rate":       {"type": ["number", "null"], "minimum": 0, "maximum": 25, "description": "VAT rate as %."},
+            "invoice_date":   {"type": ["string", "null"], "description": "YYYY-MM-DD."},
+            "delivery_date":  {"type": ["string", "null"], "description": "YYYY-MM-DD."},
+            "confidence":     {"type": "number", "minimum": 0, "maximum": 1}
+        },
+        "required": ["confidence"]
+    }
+}
+SCHEMA_VERSION = "invoice-extract.schema.json@U38"
 
 
 def parse_date(s):
@@ -144,6 +151,8 @@ async def main():
                 model=MODEL,
                 max_tokens=400,
                 system=SYSTEM_BLOCKS,
+                tools=[EXTRACT_TOOL],
+                tool_choice={"type": "tool", "name": "extract_invoice"},
                 messages=[{"role": "user", "content": f"Invoice text:\n\n{text_for_ai}"}],
             )
         except Exception as e:
@@ -156,17 +165,13 @@ async def main():
         cache_hits_in     += getattr(resp.usage, "cache_read_input_tokens", 0) or 0
         cache_creates_in  += getattr(resp.usage, "cache_creation_input_tokens", 0) or 0
 
-        raw = "".join(b.text for b in resp.content if b.type == "text").strip()
-        # Strip ```json fences if Haiku decides to fence
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1] if "\n" in raw else raw
-            if raw.endswith("```"): raw = raw[:-3]
-        try:
-            d = json.loads(raw)
-        except json.JSONDecodeError:
-            print(f"  id={bid} bad json: {raw[:120]}")
+        # Tool-use response — guaranteed schema-valid. No JSON parsing required.
+        tool_uses = [b for b in resp.content if b.type == "tool_use"]
+        if not tool_uses:
+            print(f"  id={bid} no tool_use block returned")
             fail += 1
             continue
+        d = tool_uses[0].input
 
         conf = float(d.get("confidence") or 0)
         method = "haiku" if conf >= 0.4 else "haiku_low_conf"

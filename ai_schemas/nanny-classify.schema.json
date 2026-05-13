@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "title": "NannyClassifyOutcome",
+  "description": "Output of the nanny-classifier AI worker. Used by Nanny Pipeline P8 (Haiku).",
+  "properties": {
+    "status":         { "type": "string", "enum": ["success", "escalate", "fail"] },
+    "confidence":     { "type": "number", "minimum": 0, "maximum": 1 },
+    "reasoning":      { "type": "string", "minLength": 1, "maxLength": 500 },
+    "worker":         { "type": "string", "const": "nanny_classifier" },
+    "tier_used":      { "type": "string", "enum": ["haiku", "sonnet"] },
+    "requires_human": { "type": "boolean" },
+    "child_id":       {
+      "type": ["integer", "null"],
+      "description": "FK to children.id. Null if no specific child identified — escalate to human."
+    },
+    "event_type":     {
+      "type": "string",
+      "enum": ["medical", "academic", "behavioural", "trip", "fundraiser", "uniform", "permission", "schedule_change", "other"]
+    },
+    "event_date":     { "type": ["string", "null"], "format": "date" },
+    "medical_alert":  {
+      "type": "boolean",
+      "description": "True if this email contains medical info requiring an immediate response or storage in medical_history."
+    },
+    "summary":        { "type": "string", "minLength": 1, "maxLength": 500 },
+    "action_required": { "type": ["string", "null"], "maxLength": 300, "description": "If Jo must do something, what." },
+    "deadline":       { "type": ["string", "null"], "format": "date", "description": "If action_required has a deadline." }
+  },
+  "required": ["status", "confidence", "reasoning", "worker", "tier_used", "requires_human", "event_type", "medical_alert", "summary"]
+}
