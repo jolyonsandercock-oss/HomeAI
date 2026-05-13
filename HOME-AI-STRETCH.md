@@ -1106,6 +1106,117 @@ difference > £20.
 
 ---
 
+### 3.20 Email Task Extraction + To-Do Block ★ PRIORITY (Phase 2)
+
+Sonnet reads recent classified emails, extracts tasks/complaints/follow-ups,
+scores urgency as `age_days × severity`. Surfaces on Mission Control as an
+"Email To-Do" block ranked by urgency_score. Resolves when Jo clicks "done".
+
+V53 schema: `email_tasks` + `v_email_tasks_open` view. Sonnet tool-use with
+strict `input_schema`. Cost-capped per ai_usage tracking.
+
+**Full implementation:** U46 Track 5 (scaffold) + U47 Track 1 (mature).
+
+---
+
+### 3.21 Weekly 52-Week Recurring Task Suggester (Phase 2)
+
+Every Monday 09:00, Sonnet mines emails from 52 weeks ago + recent same-week-of-quarter
+windows to propose recurring tasks: insurance renewals, licence renewals, accountant
+year-end, supplier contract reviews, business rates, water rates direct-debit checks.
+
+Telegram digest of proposals; Action Queue cards for Accept/Dismiss. V55 schema
+`recurring_task_suggestions`.
+
+**Full implementation:** U47 Track 1.
+
+---
+
+### 3.22 Local Weather Integration (Phase 2, free API)
+
+Met Office DataPoint API for PL34 0DA (Tintagel). Daily backfill of hours
+sunshine, rain mm, avg/peak/min temp, max wind. 5-day forecast. Telegram
+alert on forecast days with >10mm rain, >35mph wind, or >20°C max.
+
+Joined to `v_daily_unit_economics` for sales forecasting + staffing decisions.
+V52 schema `weather_daily` + `weather_forecast`.
+
+**Full implementation:** U46 Track 4.
+
+---
+
+### 3.23 Reviews Scraper Real Implementation (Phase 2, follows U39 stub)
+
+TripAdvisor login via info@malthousetintagel.com Gmail account (Jo confirmed).
+Google Business Profile via admin@malthousetintagel.com Gmail account.
+
+Try Google Business Profile API first (more robust); fall back to Playwright
++ OAuth Gmail login for both. Existing U39 schema `guest_reviews` + `review_drafts`
+is reused; drafter (`u39-review-drafter.sh`) already runs `*/10`.
+
+**Full implementation:** U47 Track 2.
+
+---
+
+### 3.24 Dashboard Access Split: Staff vs Family (Phase 2)
+
+Two password-protected dashboards via Caddy basic-auth (interim until full
+Authelia lands). `/staff/` shows only operational data (entity_id IN 1,2);
+`/family/` shows everything (full Mission Control). Vault secrets for the
+bcrypt hashes.
+
+**Full implementation:** U47 Track 3. Full Authelia SSO comes in U48 Track 3.
+
+---
+
+### 3.25 SDD Storage Migration (Phase 2 — needs in-person sudo)
+
+5.5TB NTFS drive at `/dev/sdd2` currently unmounted. Move `/home_ai/storage/`
+contents there with a structured layout: `invoices/YYYY/MM/`, `emails/account/YYYY/MM/`,
+`caterbook/YYYY/MM/`, etc. Symlink `/home_ai/storage` → `/mnt/data` once verified.
+
+Restic-backed. `/etc/fstab` auto-mount on boot.
+
+**Full implementation:** U48 Track 1 (in-person, sudo).
+
+---
+
+### 3.26 Wix Integration: Remote Dashboard Hosting (Phase 2)
+
+Host the dashboard on a Wix-managed domain via Jo's `jolyon.sandercock@gmail.com`
+Wix account. Two architectures evaluated: (A) Wix Velo backend that server-side
+proxies our Tailscale-fenced API + iframes the dashboard; (B) Tailscale Funnel +
+basic Wix landing.
+
+Staff access via Wix members + role check. Side projects can also be hosted on
+the same Wix subscription.
+
+**Full implementation:** U48 Track 2. Big caveat: capability depends on Jo's Wix plan tier.
+
+---
+
+### 3.27 TouchOffice Sales via Tanda API (Phase 2 — fallback path)
+
+Current scraper is missing ~66% of sales (12/5 confirmed: café £134 scraped vs
+£352 actual; pub £1,152 vs £3,364). If the Playwright scraper can't be reliably
+fixed, the fallback is to use Tanda's "Live Sales" / "Sales Comparison" feature
+which connects to POS systems and exposes sales via the Tanda API.
+
+**Full implementation:** U46 Track 1 (diagnosis first; Tanda is 1b fallback).
+
+---
+
+### 3.28 Anthropic Token Cost Audit (Phase 2 — small)
+
+Verify the dashboard's spend tile matches actual Anthropic console billing
+to within 5%. Current pricing: Haiku 4.5 $1/$5/MTok, Sonnet 4.6 $3/$15, Opus 4.7
+$15/$75. Cache reads are 10% of input cost. Make sure `ai_usage.prompt_tokens`
+and `completion_tokens` are recording cache vs non-cache correctly.
+
+**Full implementation:** U46 Track 2 (30 min check).
+
+---
+
 ### 3.19 Materialized Views for Dashboard Performance (Phase 3+ optimisation — no SPEC section yet)
 
 Stretch-only pointer. Several dashboard views aggregate large rowsets; on a busy
