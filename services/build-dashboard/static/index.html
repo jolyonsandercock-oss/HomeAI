@@ -480,6 +480,69 @@
     <!-- with anomaly alert strip + 7d sparklines on top 3          -->
     <!-- ══════════════════════════════════════════════════════════ -->
     <div x-data="kpiRibbon()" x-init="boot()" class="sticky top-0 z-10 mb-4">
+      <!-- U39 — Guest review alert strip — only renders when ≥1 review needs action -->
+      <div x-show="reviews && reviews.pending_count > 0" x-cloak
+           class="glass p-3 mb-2 rounded-xl flex items-center gap-3"
+           :style="reviews.low_star_count > 0
+             ? 'border-left: 3px solid var(--tl-error); cursor:pointer'
+             : 'border-left: 3px solid var(--tl-active); cursor:pointer'"
+           @click="showReviewsDetail = !showReviewsDetail">
+        <span class="conn-dot pulse-dot"
+              :style="reviews.low_star_count > 0
+                ? 'background:var(--tl-error); box-shadow:0 0 0 3px var(--tl-error-bg)'
+                : 'background:var(--tl-active); box-shadow:0 0 0 3px var(--tl-active-bg)'"></span>
+        <div class="flex-1">
+          <div class="text-sm font-semibold"
+               :style="reviews.low_star_count > 0 ? 'color:rgb(159,18,57)' : 'color:rgb(146,64,14)'">
+            <span x-text="reviews.pending_count"></span>
+            guest review<span x-text="reviews.pending_count === 1 ? '' : 's'"></span>
+            drafted — awaiting your approval
+            <span x-show="reviews.low_star_count > 0" class="ml-2 text-xs">
+              (<span x-text="reviews.low_star_count"></span> ≤3★)
+            </span>
+          </div>
+          <div class="text-xs text-slate-500">
+            Sonnet-drafted hospitality responses. Approve / edit / reject in detail view; manual post to Google/TripAdvisor.
+          </div>
+        </div>
+        <span class="chev text-slate-400" :style="showReviewsDetail ? 'transform:rotate(90deg)' : ''">▸</span>
+      </div>
+      <div x-show="showReviewsDetail" x-cloak class="glass p-3 mb-2 rounded-xl text-xs">
+        <template x-for="r in (reviews?.items || []).filter(i => !i.approved_at && !i.rejected_at)" :key="r.draft_id">
+          <div class="mb-3 pb-3 border-b border-slate-200 last:border-b-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="font-semibold" x-text="r.location"></span>
+              <span class="text-slate-500" x-text="r.source"></span>
+              <span :style="`color:${(r.rating||5) <= 3 ? 'var(--tl-error)' : 'var(--tl-done)'}; font-weight:600`"
+                    x-text="'★'.repeat(r.rating||0)"></span>
+              <span class="text-slate-500" x-text="r.reviewer_name || 'anonymous'"></span>
+            </div>
+            <div class="text-slate-600 italic mb-1" x-text="'\"' + (r.body||'').substring(0,200) + '\"'"></div>
+            <div class="bg-emerald-50 p-2 rounded text-slate-700">
+              <span class="font-semibold text-emerald-700">Draft:</span>
+              <span x-text="r.edited_text || r.draft_text"></span>
+            </div>
+            <div class="flex gap-2 mt-1">
+              <button class="pgn-btn"
+                      @click="approveReview(r.draft_id)"
+                      style="background:rgba(16,185,129,0.12); color:rgb(6,95,70)">
+                ✓ Approve
+              </button>
+              <button class="pgn-btn"
+                      @click="rejectReview(r.draft_id)"
+                      style="background:rgba(244,63,94,0.12); color:rgb(159,18,57)">
+                ✗ Reject
+              </button>
+              <button class="pgn-btn"
+                      @click="markPosted(r.draft_id)"
+                      x-show="r.approved_at">
+                📋 Mark posted
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+
       <!-- Drift alert strip — only renders when any worker drifting >2σ below baseline -->
       <div x-show="drift && drift.flagged_count > 0" x-cloak
            class="glass p-3 mb-2 rounded-xl flex items-center gap-3"
@@ -1538,10 +1601,12 @@ function kpiRibbon() {
     anomalies: null,         // { items, flagged_count, max_severity }
     sparklines: null,        // { dates, revenue, labour, in_house }
     drift: null,             // { items, flagged_count }
+    reviews: null,           // { items, pending_count, low_star_count }
     showAnomalyDetail: false,
     showDriftDetail: false,
+    showReviewsDetail: false,
     async boot() {
-      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadDrift()]);
+      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadDrift(), this.loadReviews()]);
       // Re-derive labour series from sparklines (server-side labour is cost, we want pct from daily rows)
       // Keeping it simple: use the labour_cost trend as a proxy for labour% trend direction.
       setInterval(() => this.refresh(), 60000);
@@ -1580,8 +1645,37 @@ function kpiRibbon() {
         this.drift = await r.json();
       } catch {}
     },
+    async loadReviews() {
+      try {
+        const r = await fetch('/api/reviews/queue');
+        this.reviews = await r.json();
+      } catch {}
+    },
+    async approveReview(draft_id) {
+      const r = await fetch('/api/reviews/approve', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({draft_id, action: 'approve'})
+      });
+      if ((await r.json()).ok) this.loadReviews();
+    },
+    async rejectReview(draft_id) {
+      const reason = prompt('Rejection reason (optional):');
+      if (reason === null) return;
+      const r = await fetch('/api/reviews/approve', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({draft_id, action: 'reject', reason})
+      });
+      if ((await r.json()).ok) this.loadReviews();
+    },
+    async markPosted(draft_id) {
+      const r = await fetch('/api/reviews/mark_posted', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({draft_id})
+      });
+      if ((await r.json()).ok) this.loadReviews();
+    },
     async refresh() {
-      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadDrift()]);
+      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadDrift(), this.loadReviews()]);
     },
     lwDir() {
       const t = Number(this.kpi.total_net_sales), l = Number(this.kpi.net_sales_lw);

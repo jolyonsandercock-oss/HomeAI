@@ -1204,6 +1204,104 @@ async def api_kpi_pending_instructions():
     return {"pending": int(n or 0)}
 
 
+@app.get("/api/reviews/queue")
+async def api_reviews_queue():
+    """U39 — Action Queue feed for guest reviews. Returns drafted-but-not-actioned
+    reviews newest first, plus the latest draft text per review."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        rows = await c.fetch("""
+          SELECT gr.source, gr.review_id, gr.location, gr.rating, gr.reviewer_name,
+                 gr.body, gr.posted_at, gr.status,
+                 rd.id AS draft_id, rd.draft_text, rd.created_at AS drafted_at,
+                 rd.approved_at, rd.posted_at AS draft_posted_at, rd.rejected_at,
+                 rd.edited_text
+            FROM guest_reviews gr
+       LEFT JOIN LATERAL (
+              SELECT id, draft_text, created_at, approved_at, posted_at, rejected_at, edited_text
+                FROM review_drafts rd2
+               WHERE rd2.source = gr.source AND rd2.review_id = gr.review_id
+               ORDER BY rd2.id DESC LIMIT 1
+            ) rd ON true
+           WHERE gr.status IN ('drafted', 'new', 'approved')
+           ORDER BY gr.rating ASC NULLS LAST, gr.posted_at DESC NULLS LAST
+           LIMIT 50
+        """)
+
+    def _row(r):
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"): out[k] = v.isoformat()
+            else: out[k] = v
+        return out
+    items = [_row(r) for r in rows]
+    return {
+        "items":         items,
+        "pending_count": sum(1 for i in items if i.get("status") == "drafted" and not i.get("approved_at") and not i.get("rejected_at")),
+        "low_star_count": sum(1 for i in items if (i.get("rating") or 5) <= 3),
+    }
+
+
+@app.post("/api/reviews/approve")
+async def api_reviews_approve(payload: dict):
+    """U39 — Approve (with optional edit) or reject a draft.
+    Payload: {"draft_id": int, "action": "approve"|"reject"|"edit", "edited_text": str (optional), "reason": str (optional)}"""
+    draft_id    = payload.get("draft_id")
+    action      = payload.get("action")
+    edited_text = payload.get("edited_text")
+    reason      = payload.get("reason")
+    if not draft_id or action not in ("approve", "reject", "edit"):
+        return {"ok": False, "error": "draft_id + action ∈ {approve,reject,edit} required"}
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity='1'")
+        async with c.transaction():
+            if action == "approve":
+                await c.execute("""
+                  UPDATE review_drafts SET approved_at=now(),
+                         edited_text=COALESCE($2, edited_text)
+                   WHERE id=$1
+                """, draft_id, edited_text)
+                await c.execute("""
+                  UPDATE guest_reviews gr SET status='approved'
+                    FROM review_drafts rd WHERE rd.id=$1
+                     AND gr.source=rd.source AND gr.review_id=rd.review_id
+                """, draft_id)
+            elif action == "edit":
+                await c.execute("""
+                  UPDATE review_drafts SET edited_text=$2 WHERE id=$1
+                """, draft_id, edited_text or "")
+            else:  # reject
+                await c.execute("""
+                  UPDATE review_drafts SET rejected_at=now(), rejection_reason=$2 WHERE id=$1
+                """, draft_id, reason)
+                await c.execute("""
+                  UPDATE guest_reviews gr SET status='rejected'
+                    FROM review_drafts rd WHERE rd.id=$1
+                     AND gr.source=rd.source AND gr.review_id=rd.review_id
+                """, draft_id)
+    return {"ok": True, "action": action}
+
+
+@app.post("/api/reviews/mark_posted")
+async def api_reviews_mark_posted(payload: dict):
+    """U39 — Jo manually posts the response to Google/TripAdvisor, then clicks 'mark posted'."""
+    draft_id = payload.get("draft_id")
+    if not draft_id: return {"ok": False, "error": "draft_id required"}
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity='1'")
+        async with c.transaction():
+            await c.execute("UPDATE review_drafts SET posted_at=now() WHERE id=$1", draft_id)
+            await c.execute("""
+              UPDATE guest_reviews gr SET status='posted'
+                FROM review_drafts rd WHERE rd.id=$1
+                 AND gr.source=rd.source AND gr.review_id=rd.review_id
+            """, draft_id)
+    return {"ok": True}
+
+
 @app.get("/api/drift/current")
 async def api_drift_current():
     """v_ai_worker_drift consumer — current AI worker drift status.
