@@ -52,7 +52,8 @@ Stretch backlog (no specific order): HR pipeline, full Qdrant RAG (Phase 5), Kar
 
 ## Known issues (unresolved)
 
-- **🔴 RECURRING: DeadLetterFlood auto-pause** — system.state auto-pauses every hour or two as new `invoice.detected` events come in without their sibling `document.received` from gmail-ingest-v1. Each batch needs manual clear + resume. **Permanent fix**: patch gmail-ingest-v1 to emit both events atomically, or add invoice-pipeline tolerance for missing document.received. Triaged twice in U38→U42 window (40 rows cleared total).
+- **✓ Recurring DeadLetterFlood RESOLVED in U43**. Root cause: `document.received` events were never being emitted (Sprint 2 design lived in deactivated n8n workflow). Python poller now emits one per attachment alongside `email.received`. 96 backfilled events on first run; 0 new dead_letter rows since.
+- **🟡 Secondary issue (U44 candidate)**: Invoice Pipeline's Validate Event defaults `account` to `'personal1'` for `invoice.detected` events that have no account field. Pipeline then tries `personal1` Gmail OAuth for invoices that are actually in admin@/info@ mailboxes — fails with `400 invalid_request`. Sync errors only; no dead_letter spawn. Needs `gmail-ingest-v1.invoice.detected` to include `account`.
 - **Gmail Poller `QMKzaCFrKBS4ewWm` is inactive** — was originally identified as the Gmail Poller workflow; may have been disabled in the recent ops drift. Re-enable once dead-letter source is identified.
 - n8n Dreaming workflow erroring 2 days running at 02:00 — my Python implementation runs at 02:15 to avoid clash; n8n one needs fixing or disabling
 - 3 Docker images >18 months old: hashicorp/vault:1.15.6 (security-relevant), prom/alertmanager:v0.27.0, prometheuscommunity/postgres-exporter:v0.15.0

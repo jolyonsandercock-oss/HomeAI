@@ -580,7 +580,12 @@ async def poll_and_emit(newer_than: str = Query("1d"), max_per_account: int = Qu
                         signature = _hmac.new(hmac_key, canonical.encode(), hashlib.sha256).hexdigest()
                         idem_key = f"email_{mid}"
 
-                        # Atomic claim + insert in a single transaction
+                        # Atomic claim + insert in a single transaction.
+                        # email.received claim is gated, but document.received claims are
+                        # INDEPENDENT — so re-polling existing emails will backfill any
+                        # missing attachment events. Per U43 fix — without this, the
+                        # Invoice Pipeline P2 dead-letters every invoice.detected because
+                        # the sibling document.received never arrives.
                         async with conn.transaction():
                             await conn.execute("SET LOCAL app.current_entity = 'all'")
                             claimed = await conn.fetchval(
@@ -593,12 +598,44 @@ async def poll_and_emit(newer_than: str = Query("1d"), max_per_account: int = Qu
                                          (event_type, source, entity_id, payload, payload_signature,
                                           idempotency_key, pipeline_version)
                                        VALUES ('email.received', 'gmail', NULL, $1::jsonb, $2,
-                                               $3, 'gmail_poller_py:1.0')""",
+                                               $3, 'gmail_poller_py:1.1')""",
                                     json.dumps(event_payload), signature, idem_key,
                                 )
                                 inserted += 1
                             else:
                                 skipped += 1
+
+                            # Per-attachment document.received emission (U43 fix).
+                            # Runs REGARDLESS of whether email.received was newly claimed,
+                            # so this also backfills attachment events for emails that
+                            # were polled before U43.
+                            for att in attachments:
+                                doc_payload = {
+                                    "gmail_message_id": mid,
+                                    "account": name,
+                                    "filename": att["filename"],
+                                    "mime_type": att["mime_type"],
+                                    "attachment_id": att["attachment_id"],
+                                    "size": att["size"],
+                                }
+                                doc_canon = json.dumps(doc_payload, sort_keys=True, separators=(",", ":"))
+                                doc_sig   = _hmac.new(hmac_key, doc_canon.encode(), hashlib.sha256).hexdigest()
+                                # Idempotency key includes attachment_id (multi-attachment safe).
+                                # Truncated to keep it short — attachment_ids are typically 300+ chars.
+                                doc_idem  = f"doc_{mid}_{att['attachment_id'][:24]}"
+                                doc_claimed = await conn.fetchval(
+                                    "SELECT claim_idempotency_key($1, 'gmail-poller-py')",
+                                    doc_idem,
+                                )
+                                if doc_claimed:
+                                    await conn.execute(
+                                        """INSERT INTO events
+                                             (event_type, source, entity_id, payload, payload_signature,
+                                              idempotency_key, pipeline_version)
+                                           VALUES ('document.received', 'gmail', NULL, $1::jsonb, $2,
+                                                   $3, 'gmail_poller_py:1.1')""",
+                                        json.dumps(doc_payload), doc_sig, doc_idem,
+                                    )
                     except Exception as e:
                         logger.exception("message %s/%s failed: %s", name, mid, e)
                         errors += 1
