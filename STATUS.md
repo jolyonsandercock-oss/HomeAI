@@ -7,8 +7,8 @@
 ## Build state
 
 - **Phase**: 1 closed, Phase 2 in flight
-- **Last completed sprint**: U39 (Guest Review Response Assistant, SPEC §7.4 PRIORITY, 2026-05-13)
-- **Latest migration**: V45 (`guest_reviews.sql`)
+- **Last completed sprint**: U42 (VAT Return Prep, dormant, SPEC §7.7, 2026-05-13)
+- **Latest migration**: V48 (`vat_return_dormant.sql`)
 - **Selftest**: 51/52 PASS (1 pre-existing fail — Gmail Poller workflow `QMKzaCFrKBS4ewWm` inactive). Dead-letter flood triaged + system resumed during U38→U39 transition.
 - **Gate A**: passed | **Gate B**: passed | **Gate C**: closed via U35 close-out + U36 trust restoration
 
@@ -52,7 +52,7 @@ Stretch backlog (no specific order): HR pipeline, full Qdrant RAG (Phase 5), Kar
 
 ## Known issues (unresolved)
 
-- **🔴 NEW: system.state='paused' since 2026-05-13 11:06 UTC** — auto-paused by DeadLetterFlood alert (17 dead-letter rows in 11:00-12:00 hour). Master Router won't process anything until resumed. Investigate the dead-letter source, then `/resume-all`.
+- **🔴 RECURRING: DeadLetterFlood auto-pause** — system.state auto-pauses every hour or two as new `invoice.detected` events come in without their sibling `document.received` from gmail-ingest-v1. Each batch needs manual clear + resume. **Permanent fix**: patch gmail-ingest-v1 to emit both events atomically, or add invoice-pipeline tolerance for missing document.received. Triaged twice in U38→U42 window (40 rows cleared total).
 - **Gmail Poller `QMKzaCFrKBS4ewWm` is inactive** — was originally identified as the Gmail Poller workflow; may have been disabled in the recent ops drift. Re-enable once dead-letter source is identified.
 - n8n Dreaming workflow erroring 2 days running at 02:00 — my Python implementation runs at 02:15 to avoid clash; n8n one needs fixing or disabling
 - 3 Docker images >18 months old: hashicorp/vault:1.15.6 (security-relevant), prom/alertmanager:v0.27.0, prometheuscommunity/postgres-exporter:v0.15.0
