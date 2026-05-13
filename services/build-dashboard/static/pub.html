@@ -119,6 +119,31 @@
     </div>
   </section>
 
+  <!-- Weather — 5-day forecast (PL34 0DA) -->
+  <section class="glass rounded-2xl p-4 md:p-5">
+    <div class="flex justify-between items-baseline mb-3">
+      <h2 class="text-sm uppercase tracking-wider text-slate-400">Weather — PL34 0DA (next 5 days)</h2>
+      <span class="text-xs text-slate-500">Open-Meteo · alerts: rain ≥10mm · wind ≥35mph · temp ≥20°C</span>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-2" x-show="(weather.forecast||[]).length">
+      <template x-for="d in (weather.forecast||[])" :key="d.forecast_date">
+        <div class="rounded-lg p-3 text-center bg-slate-900/60"
+             :class="(d.alert_categories && d.alert_categories.length) ? 'ring-1 ring-amber-500/60' : ''">
+          <div class="text-xs text-slate-400 uppercase"
+               x-text="new Date(d.forecast_date).toLocaleDateString('en-GB',{weekday:'short',day:'numeric'})"></div>
+          <div class="text-lg font-semibold mt-1"
+               x-text="(d.max_temp_c != null ? Math.round(d.max_temp_c) : '—') + '°'"></div>
+          <div class="text-xs text-slate-500" x-text="'min ' + (d.min_temp_c != null ? Math.round(d.min_temp_c) : '—') + '°'"></div>
+          <div class="text-xs mt-1" :class="(d.rain_mm||0) >= 10 ? 'text-sky-300' : 'text-slate-500'"
+               x-text="'💧 ' + (d.rain_mm != null ? Number(d.rain_mm).toFixed(1) : '—') + 'mm'"></div>
+          <div class="text-xs" :class="(d.max_wind_mph||0) >= 35 ? 'text-amber-300' : 'text-slate-500'"
+               x-text="'💨 ' + (d.max_wind_mph != null ? d.max_wind_mph : '—') + 'mph'"></div>
+        </div>
+      </template>
+    </div>
+    <div x-show="!(weather.forecast||[]).length" class="text-sm text-slate-500 italic">No forecast data yet — daily sync at 07:30.</div>
+  </section>
+
   <!-- Channel mix -->
   <section class="glass rounded-2xl p-4 md:p-5">
     <div class="flex justify-between items-baseline mb-3">
@@ -150,15 +175,25 @@
 function pub() {
   return {
     snap: {},
+    weather: {forecast: [], actuals: []},
     lastUpdated: '—',
     prettyDate: '',
     prettyTime: '',
 
     boot() {
       this.refresh();
+      this.refreshWeather();
       setInterval(() => this.refresh(), 60_000);
+      setInterval(() => this.refreshWeather(), 30 * 60_000);
       setInterval(() => this.tickClock(), 1_000);
       this.tickClock();
+    },
+
+    async refreshWeather() {
+      try {
+        const r = await fetch('/api/weather/5day');
+        if (r.ok) this.weather = await r.json();
+      } catch (_) {}
     },
 
     tickClock() {

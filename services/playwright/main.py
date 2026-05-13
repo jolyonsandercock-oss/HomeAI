@@ -153,12 +153,18 @@ async def _ingest_widget(
                 values = extract_row(row)
                 # Each table has site, report_date, idempotency_key + widget cols.
                 if table == "touchoffice_fixed_totals":
+                    # U46 fix: DO UPDATE not DO NOTHING — earlier scrapes captured
+                    # in-progress totals; the last scrape of the day is canonical.
                     n = await conn.fetchval(
                         """
                         INSERT INTO touchoffice_fixed_totals
                           (idempotency_key, site, report_date, totaliser_id, label, quantity, value, raw_cells)
                         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
-                        ON CONFLICT (site, report_date, totaliser_id) DO NOTHING
+                        ON CONFLICT (site, report_date, totaliser_id) DO UPDATE
+                          SET label = EXCLUDED.label,
+                              quantity = EXCLUDED.quantity,
+                              value = EXCLUDED.value,
+                              raw_cells = EXCLUDED.raw_cells
                         RETURNING 1
                         """, *values,
                     )
@@ -168,7 +174,10 @@ async def _ingest_widget(
                         INSERT INTO touchoffice_department_sales
                           (idempotency_key, site, report_date, department, quantity, value, raw_cells)
                         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
-                        ON CONFLICT (site, report_date, department) DO NOTHING
+                        ON CONFLICT (site, report_date, department) DO UPDATE
+                          SET quantity = EXCLUDED.quantity,
+                              value = EXCLUDED.value,
+                              raw_cells = EXCLUDED.raw_cells
                         RETURNING 1
                         """, *values,
                     )
@@ -178,7 +187,11 @@ async def _ingest_widget(
                         INSERT INTO touchoffice_plu_sales
                           (idempotency_key, site, report_date, plu_number, descriptor, quantity, value, raw_cells)
                         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
-                        ON CONFLICT (site, report_date, plu_number) DO NOTHING
+                        ON CONFLICT (site, report_date, plu_number) DO UPDATE
+                          SET descriptor = EXCLUDED.descriptor,
+                              quantity = EXCLUDED.quantity,
+                              value = EXCLUDED.value,
+                              raw_cells = EXCLUDED.raw_cells
                         RETURNING 1
                         """, *values,
                     )

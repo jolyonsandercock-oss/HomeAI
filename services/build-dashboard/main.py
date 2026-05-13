@@ -1207,6 +1207,28 @@ async def api_kpi_pending_instructions():
 _INVOICE_STORAGE_ROOT = "/home_ai/storage/invoices"
 
 
+@app.get("/api/gp/rolling")
+async def api_gp_rolling(date_from: str = "", date_to: str = ""):
+    """U46 — rolling-window GP over any date range. Defaults to last 7 days."""
+    from datetime import date as _date, timedelta as _td
+    if not date_from or not date_to:
+        t = _date.today(); date_from_d = t - _td(days=7); date_to_d = t
+    else:
+        date_from_d = _date.fromisoformat(date_from); date_to_d = _date.fromisoformat(date_to)
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        row = await c.fetchrow("SELECT * FROM gp_window($1::date, $2::date)", date_from_d, date_to_d)
+    if not row:
+        return {"window": {"from": date_from_d.isoformat(), "to": date_to_d.isoformat()}, "data": None}
+    out = {}
+    for k, v in dict(row).items():
+        if hasattr(v, "isoformat"): out[k] = v.isoformat()
+        elif hasattr(v, "to_eng_string"): out[k] = float(v)
+        else: out[k] = v
+    return {"data": out}
+
+
 @app.get("/api/gp/daily")
 async def api_gp_daily(date_from: str = "", date_to: str = "", site: str = "all"):
     """U45 — daily GP% series for the invoices header strip.
@@ -1258,6 +1280,59 @@ async def api_gp_daily(date_from: str = "", date_to: str = "", site: str = "all"
             "overall": avg("overall_gp_pct"),
         },
         "site": site,
+    }
+
+
+@app.get("/api/email-tasks/open")
+async def api_email_tasks_open(limit: int = 30):
+    """U46 — open email tasks ranked by urgency (age × severity)."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        rows = await c.fetch("""
+          SELECT id, email_id, account, subject, task_type, severity,
+                 to_char(detected_at,'YYYY-MM-DD HH24:MI') AS detected_at,
+                 due_by, from_address, from_name,
+                 to_char(received_at,'YYYY-MM-DD HH24:MI') AS received_at,
+                 age_days, urgency_score, days_overdue
+          FROM v_email_tasks_open
+          LIMIT $1
+        """, limit)
+    items = []
+    for r in rows:
+        d = dict(r)
+        if d.get("due_by") and hasattr(d["due_by"], "isoformat"):
+            d["due_by"] = d["due_by"].isoformat()
+        items.append(d)
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/api/weather/5day")
+async def api_weather_5day():
+    """U46 — 5-day forecast + last-7-day actuals for Mission Control weather tile."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        fc = await c.fetch("""
+          SELECT forecast_date, rain_mm, max_temp_c, min_temp_c, max_wind_mph, alert_categories
+          FROM v_weather_5day
+        """)
+        actuals = await c.fetch("""
+          SELECT observation_date, hours_sunshine, rain_mm, avg_temp_c, peak_temp_c, max_wind_mph
+          FROM weather_daily
+          WHERE observation_date >= CURRENT_DATE - 7
+          ORDER BY observation_date DESC
+        """)
+    def _ser(r):
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"): out[k] = v.isoformat()
+            elif hasattr(v, "__float__") and not isinstance(v, (int, bool)): out[k] = float(v)
+            else: out[k] = v
+        return out
+    return {
+      "forecast": [_ser(r) for r in fc],
+      "actuals":  [_ser(r) for r in actuals],
     }
 
 
