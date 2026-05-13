@@ -1204,6 +1204,130 @@ async def api_kpi_pending_instructions():
     return {"pending": int(n or 0)}
 
 
+@app.get("/api/drift/current")
+async def api_drift_current():
+    """v_ai_worker_drift consumer — current AI worker drift status.
+    Returns top 5 worst drifters and a flagged count."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        rows = await c.fetch("""
+          SELECT ai_worker, ai_model, today_avg_conf, baseline_avg_conf,
+                 baseline_stddev, delta_stddev, today_n, baseline_n, flagged
+            FROM v_ai_worker_drift
+           ORDER BY flagged DESC, delta_stddev ASC NULLS LAST
+           LIMIT 5
+        """)
+
+    def _row(r):
+        out = {}
+        for k, v in dict(r).items():
+            out[k] = float(v) if hasattr(v, "to_eng_string") else v
+        return out
+
+    items = [_row(r) for r in rows]
+    return {
+        "items":         items,
+        "flagged_count": sum(1 for i in items if i.get("flagged")),
+    }
+
+
+@app.get("/api/dreaming/heuristics")
+async def api_dreaming_heuristics():
+    """Recent dreaming proposals + run history."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        proposals = await c.fetch("""
+          SELECT id, scope, ai_worker, observation, suggested_rule, severity, status, generated_at
+            FROM dreaming_heuristics
+           ORDER BY id DESC LIMIT 20
+        """)
+        runs = await c.fetch("""
+          SELECT id, started_at, finished_at, patterns_found, proposals_new, error_message
+            FROM dreaming_runs ORDER BY id DESC LIMIT 7
+        """)
+
+    def _row(r):
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"): out[k] = v.isoformat()
+            else: out[k] = v
+        return out
+    return {
+        "proposals": [_row(r) for r in proposals],
+        "runs":      [_row(r) for r in runs],
+        "counts":    {
+            "proposed":  sum(1 for r in proposals if r["status"]=="proposed"),
+            "accepted":  sum(1 for r in proposals if r["status"]=="accepted"),
+            "rejected":  sum(1 for r in proposals if r["status"]=="rejected"),
+        },
+    }
+
+
+@app.get("/api/anomalies")
+async def api_anomalies():
+    """KPI anomalies: today vs 7-day rolling avg, flag if outside ±50%.
+    Catches silent extraction failures (empty PDF, missed email, zero values)."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        rows = await c.fetch("""
+          SELECT metric, report_date, today_value, rolling_avg_7d,
+                 rolling_stddev_7d, sample_n, delta_pct, flagged, severity
+            FROM v_kpi_anomalies
+        """)
+
+    def _row(r):
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"): out[k] = v.isoformat()
+            elif hasattr(v, "to_eng_string"): out[k] = float(v)
+            else: out[k] = v
+        return out
+
+    items = [_row(r) for r in rows]
+    return {
+        "items":         items,
+        "flagged_count": sum(1 for i in items if i.get("flagged")),
+        "max_severity":  max((i.get("severity") or 0) for i in items) if items else 0,
+    }
+
+
+@app.get("/api/kpi/sparklines")
+async def api_kpi_sparklines(days: int = 14):
+    """7-14d series for the top KPIs surfaced in the ribbon. Used for
+    inline SVG sparklines next to each headline number."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        rows = await c.fetch("""
+          SELECT report_date,
+                 total_revenue,
+                 labour_cost_est,
+                 in_house_count,
+                 pub_net_sales,
+                 sandwich_net_sales,
+                 accom_revenue
+            FROM v_daily_unit_economics
+           WHERE report_date >= CURRENT_DATE - ($1::int)
+           ORDER BY report_date ASC
+        """, days)
+
+    def _f(v): return float(v) if v is not None else None
+
+    return {
+        "days":     days,
+        "dates":    [r["report_date"].isoformat() for r in rows],
+        "revenue":  [_f(r["total_revenue"])      for r in rows],
+        "labour":   [_f(r["labour_cost_est"])    for r in rows],
+        "in_house": [_f(r["in_house_count"])     for r in rows],
+        "pub":      [_f(r["pub_net_sales"])      for r in rows],
+        "cafe":     [_f(r["sandwich_net_sales"]) for r in rows],
+        "accom":    [_f(r["accom_revenue"])      for r in rows],
+    }
+
+
 @app.get("/api/economics/overview")
 async def api_economics_overview(days: int = 90):
     p = await pool()
@@ -1375,13 +1499,28 @@ async def api_workforce_overview(days: int = 30):
            GROUP BY shift_date ORDER BY shift_date DESC
         """, days)
         per_dept = await c.fetch("""
-          SELECT department_external_id AS dept,
+          SELECT s.department_external_id AS dept,
+                 d.name AS dept_name,
+                 d.team,
                  COUNT(*) AS shifts,
-                 ROUND(SUM(hours_worked)::numeric, 1) AS hours,
-                 COUNT(DISTINCT user_external_id) AS staff
-            FROM workforce_shifts
-           WHERE shift_date >= CURRENT_DATE - ($1::int)
-           GROUP BY department_external_id ORDER BY hours DESC NULLS LAST
+                 ROUND(SUM(s.hours_worked)::numeric, 1) AS hours,
+                 COUNT(DISTINCT s.user_external_id) AS staff
+            FROM workforce_shifts s
+            LEFT JOIN workforce_departments d ON d.external_id = s.department_external_id
+           WHERE s.shift_date >= CURRENT_DATE - ($1::int)
+           GROUP BY s.department_external_id, d.name, d.team
+           ORDER BY hours DESC NULLS LAST
+        """, days)
+        per_team = await c.fetch("""
+          SELECT team,
+                 ROUND(SUM(hours)::numeric, 1)             AS hours,
+                 ROUND(SUM(cost_with_oncost)::numeric, 2)  AS cost_with_oncost,
+                 SUM(staff_count)                          AS staff_count,
+                 ROUND(AVG(avg_cost_per_hr)::numeric, 2)   AS avg_cost_per_hr
+            FROM v_daily_labour_by_team
+           WHERE report_date >= CURRENT_DATE - ($1::int)
+           GROUP BY team
+           ORDER BY hours DESC NULLS LAST
         """, days)
         top_staff = await c.fetch("""
           SELECT s.user_external_id, u.full_name,
@@ -1413,6 +1552,7 @@ async def api_workforce_overview(days: int = 30):
         "coverage":    _row(coverage) if coverage else {},
         "per_day":     [_row(r) for r in per_day],
         "per_dept":    [_row(r) for r in per_dept],
+        "per_team":    [_row(r) for r in per_team],
         "top_staff":   [_row(r) for r in top_staff],
         "recent_sync": [_row(r) for r in recent_sync],
     }

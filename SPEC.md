@@ -4260,7 +4260,217 @@ Start the model evaluator n8n automation workflows now that the system has real 
 - If score > current Tier 1 + 3%: Telegram alert for review
 - Below threshold: logged silently, no alert
 
-## 7.3 Disaster Recovery Scripts
+## 7.3 Structured Outputs / JSON Schema Constrained Generation
+
+**Phase 1 hardening — sequenced ahead of §7.4–§7.7.** This is a reliability foundation: every AI worker produces guaranteed-valid JSON matching a versioned schema, instead of being prompted to "return JSON" and parsed downstream. Hallucinated field names drop to 0% by construction. Done once; every subsequent AI worker inherits it for free. Retrofitting after §7.4–§7.7 ship would be ~3× the work.
+
+**Components:**
+
+- New directory `/home_ai/ai_schemas/` — one JSON Schema file per AI worker, version-controlled in git. Initial set:
+  - `email-classifier.schema.json` — OutcomeObject + email_category + entity_id
+  - `invoice-extract.schema.json` — net/vat/gross/dates/line items
+  - `nanny-classify.schema.json` — child_event fields
+  - `report-parser.schema.json` — generic report fields
+  - `dreaming-proposals.schema.json` — heuristic proposals
+  - `reconciliation-explainer.schema.json` — hypothesis/action/confidence
+- Update every n8n Code node that calls Ollama: use the `format` parameter (Ollama JSON Schema constrained generation, available since v0.5):
+  ```javascript
+  const response = await ollama.generate({
+    model: 'qwen2.5:7b',
+    prompt: systemPrompt + userContent,
+    format: {
+      type: 'object',
+      properties: {
+        status:     { type: 'string', enum: ['success', 'escalate', 'fail'] },
+        confidence: { type: 'number', minimum: 0, maximum: 1 },
+        reasoning:  { type: 'string' },
+        supplier_name: { type: 'string' },
+        gross_amount:  { type: 'number' }
+      },
+      required: ['status', 'confidence', 'reasoning']
+    }
+  });
+  // response is guaranteed valid JSON matching the schema
+  ```
+- Update every Anthropic call site (`services/bot-responder/responder.py`, `scripts/u36-invoice-haiku-fallback.sh`, `scripts/u36-dreaming-nightly.sh`, `scripts/u36-reconciliation-explainer.sh`) to use **tool use with `input_schema`** instead of "return JSON" in the system prompt. The model output is then a schema-validated tool call, not a free-text JSON blob.
+- Migration V44 adds `schema_version TEXT` to `audit_log` so we can track which workers are on which schema generation. Workers emit `schema_version = '<filename>@<git-sha>'` (e.g. `email-classifier.schema.json@1.2.0`).
+
+**Acceptance:**
+
+- All 6 Ollama-using Code nodes use the `format` parameter.
+- All 4 Anthropic call sites use tool-use with schemas.
+- `ai_schemas/` directory committed with version markers.
+- Synthetic-email-suite passes 100 runs with 0 JSON parse errors.
+- `audit_log.schema_version` populated for every new AI worker run.
+
+**Sequencing:** ship §7.3 BEFORE §7.4–§7.7. The new pipelines (guest reviews, Companies House, Land Registry, VAT) should be born on this pattern, not retrofitted.
+
+---
+
+## 7.4 Guest Review Response Assistant ★ PRIORITY
+
+**Highest-value Phase 2 deliverable.** Hospitality review response time directly affects star averages, which affect bookings. Manual daily checking is unreliable; full auto-posting is risky. Action Queue pattern (Sonnet drafts → Jo approves → manual post) hits the right balance.
+
+**Goal:** catch new Google + TripAdvisor reviews for the Malthouse (pub) and the Sandwich shop within 48 hours. Sonnet pre-drafts a context-aware response. Surfaced in the Action Queue. Jo approves/edits; posting stays manual.
+
+**Architecture:**
+
+```
+Weekly cron 09:00 Mon
+  → Playwright scraper (extends competitor-watch pattern)
+      → Google Business listings for both locations
+      → TripAdvisor pages for both locations
+    → INSERT into guest_reviews (idempotent on source+review_id)
+      → Sonnet drafter (cached system prompt, location-aware tone)
+        → INSERT into review_drafts
+          → Action Queue card type 'guest_review'
+            → Jo approves / edits / rejects in dashboard
+              → manual post to Google/TripAdvisor (no auto-post)
+  → Telegram alert if any review ≤3 stars (immediate, not weekly)
+```
+
+**Tables (V44 adds both):**
+
+- `guest_reviews` (review_id TEXT, source TEXT CHECK IN ('google','tripadvisor'), location TEXT CHECK IN ('malthouse','sandwich'), rating INT, body TEXT, posted_at TIMESTAMPTZ, scraped_at TIMESTAMPTZ DEFAULT now(), raw_payload JSONB, status TEXT DEFAULT 'new' CHECK IN ('new','drafted','approved','posted','rejected'), entity_id INT, PRIMARY KEY (source, review_id))
+- `review_drafts` (id BIGSERIAL PK, review_id TEXT, source TEXT, draft_text TEXT, sonnet_model TEXT, prompt_cache_hit BOOL, created_at, approved_by TEXT, approved_at TIMESTAMPTZ, posted_at TIMESTAMPTZ, rejected_at TIMESTAMPTZ, FK (source, review_id) → guest_reviews)
+- RLS: entity_id scoped per the standard pattern.
+
+**Playwright scraper** (`services/review-scraper/`): extends the existing competitor-watch container. Per location, scrape last 30 days of reviews. Use the same anti-bot patterns (random delays, real UA). Output JSON normalised to the `guest_reviews` shape.
+
+**Sonnet drafter system prompt** (cached, ephemeral):
+
+- Hospitality tone: warm, specific, no apologetic-doormat.
+- Location-aware: pub responses differ in tone from cafe responses (pub = "see you in for a pint", cafe = "pop in for a coffee").
+- Address specifics from the review — never generic "thank you for your review".
+- For 1-3 star reviews: acknowledge the specific issue, offer a path forward (manager email, return visit), no defensiveness, no "I'm sorry you feel that way".
+- Never invent a manager name — use "the manager" or "Jo (owner)".
+- 80-150 words. No markdown formatting (review platforms strip it).
+
+**Action Queue integration:** new card type `guest_review` in the dashboard. Renders review text on the left, draft on the right, [Approve] [Edit] [Reject] buttons. Edit opens an inline textarea. Approve marks draft `approved_at = now()` and surfaces a "copy to clipboard" + link to the review platform. Posted_at set manually when Jo confirms post.
+
+**Telegram alert (immediate, not batched):**
+
+- Trigger: any new `guest_reviews` row with rating ≤3.
+- Body: `"⭐ {rating}★ review on {source} for {location} — {first 100 chars of body}\nResponse drafted in Action Queue."`
+- Routes through `notify-telegram.sh` with source='guest-review' for `telegram_outbox` audit.
+
+**Acceptance gates:**
+
+- Playwright scraper successfully fetches last 7 days of reviews from Google Business + TripAdvisor for both locations (manual smoke run).
+- First Sonnet draft generated for at least one new review; output reads as appropriate hospitality tone (Jo's sanity check).
+- Action Queue card renders with approve/edit/reject; clicking approve advances status.
+- Telegram alert fires on a synthetic 2-star test review insertion.
+- Idempotency: re-running the scraper on the same day doesn't create duplicate `guest_reviews` rows.
+
+---
+
+## 7.5 Companies House API Integration
+
+**Goal:** track filing deadlines for Atlantic Road Trading Ltd (ARTL) and Atlantic Road Estates Limited (AREL); on-demand company verification for any supplier/tenant. Free API, no auth needed. Catches the £150 late confirmation-statement penalty and £150–£1500 late-accounts penalties before they happen.
+
+**Endpoint** (no auth header required for basic queries):
+
+```
+GET https://api.company-information.service.gov.uk/company/{company_number}
+```
+
+Returns: name, registered address, accounts_next_due_date, confirmation_statement_next_due_date, officers, persons_of_significant_control, filing_history.
+
+**One-time setup:** Jo provides ARTL and AREL company numbers. `UPDATE entities SET companies_house_number = '<num>'` for entity_id=1 and 2.
+
+**Components:**
+
+- Weekly cron Mon 04:00 (`scripts/u37-companies-house-sync.sh`): for each entity with `companies_house_number`, hit the API; insert snapshot row; compute `days_until` for both deadlines.
+- Daily digest section: "Filing deadlines in next 30 days" (auto-hidden if empty list).
+- On-demand: bot-responder gets a `verify_company` tool slug. Jo emails the bot "verify company 12345678" → Sonnet replies with name, status, registered address, last filed accounts date.
+
+**Tables (V44 adds):**
+
+- `companies_house_log` (id, snapshot_at, company_number, name TEXT, status TEXT, registered_address JSONB, accounts_next_due_date DATE, confirmation_statement_next_due_date DATE, raw_payload JSONB)
+- `companies_house_alerts` (id, entity_id, alert_type TEXT CHECK IN ('accounts_due','confirmation_due'), due_date DATE, days_until INT, status TEXT DEFAULT 'open' CHECK IN ('open','acknowledged','filed'), created_at)
+
+**Alert rules:** insert into `companies_house_alerts` when `days_until <= 30` AND no open alert exists for that (entity, type, due_date) tuple (idempotent re-runs).
+
+**Acceptance:**
+
+- `companies_house_log` has at least 1 row per company after first weekly run.
+- Synthetic test: temporarily set ARTL's confirmation due date to today+25 via a stub of the API response; alert row created; digest shows it.
+- bot-responder `verify_company` tool returns sane JSON for the Sandercock companies (real-data smoke test).
+- `bot_sender_whitelist` integration: `verify_company` is a public-style query (any whitelisted sender can ask).
+
+---
+
+## 7.6 Land Registry Price Paid API
+
+**Goal:** monthly comparable-sales report for the 7 Atlantic Road Estates properties. Real market data, no manual Rightmove checking. Genuine market intelligence for insurance renewal, refinancing, and periodic valuation sanity checks. Free, no auth.
+
+**Endpoint** (CSV response):
+
+```
+GET https://landregistry.data.gov.uk/app/ppd/ppd_data.csv?postcode={postcode}&from={date}
+```
+
+Returns: all UK property sales in a postcode area, with prices and dates.
+
+**One-time setup:** Jo provides 7 property postcodes + acquisition prices + dates. Seed table `properties` (NEW — V44 migration). Cornwall TR-postcodes for most; 1-2 elsewhere; Jo to confirm exact list.
+
+**Components:**
+
+- Monthly cron 1st 04:30 (`scripts/u37-land-registry-sync.sh`): for each property in `properties`, fetch last 90 days of sales in that postcode; parse CSV; insert sale rows into log; compute average + sample count.
+- Daily digest (1st of month only): "Estates market — last 90d sales by postcode" with avg price, sample size, delta vs Jo's acquisition price.
+
+**Tables (V44 adds):**
+
+- `properties` (id, entity_id DEFAULT 2, postcode TEXT, address TEXT, acquisition_date DATE, acquisition_price_gbp NUMERIC(12,2), notes TEXT)
+- `property_market_log` (id, property_id FK, snapshot_at, sales JSONB (array of {date, price, address, type, tenure}), avg_price NUMERIC(12,2), sample_n INT)
+- `v_property_comparable_summary` — view joining `properties` to most recent `property_market_log`, with delta vs acquisition price formatted.
+
+**Acceptance:**
+
+- `property_market_log` has 1 row per property after first monthly run.
+- `v_property_comparable_summary` returns 7 rows, each with sensible `avg_price` (within plausible market range for the postcode).
+- Digest renders the section on a 1st-of-month synthetic test (force-trigger via cron line in advance of the 1st).
+- Failure mode: if Land Registry endpoint returns empty CSV (rural postcode with no recent sales), property_market_log row inserted with `sample_n=0` and digest renders "no recent comparable sales in this postcode".
+
+---
+
+## 7.7 VAT Return Preparation Workflow (DORMANT)
+
+**Goal:** quarterly, pre-fill UK VAT return Box 1-9 figures from Xero data; flag anomalies; surface in Action Queue. Jo still files manually through Xero — this just means the figures are pre-checked and anomalies caught before submission. Reduces quarterly accountant review burden.
+
+**Dormancy:** depends on Pipeline 3 (Xero sync) which is parked on Xero support response. Build the schema + logic now; activate when Xero unblocks.
+
+**Gating mechanism:** new `system_state` table (V44) with rows like `(key='p3_xero', value='parked')`. The quarterly cron checks this before doing any work. When Xero comes back: `UPDATE system_state SET value='live' WHERE key='p3_xero'`.
+
+**Components:**
+
+- Quarterly cron 3rd Apr/Jul/Oct/Jan 06:00 (`scripts/u37-vat-return-prep.sh`):
+  1. Check `system_state.p3_xero='live'`. If parked, log "p3_xero=parked, skipping" and exit 0.
+  2. Pull last quarter's Xero figures via Xero API.
+  3. Structure into Box 1-9 (UK VAT return format).
+  4. Run anomaly rules.
+  5. INSERT `vat_returns_log` row + 1 Action Queue card per anomaly.
+- Anomaly rules (V44 logic):
+  - Box 4 (input VAT) > 2× rolling 4-quarter average → severity 'high'
+  - Any `vendor_invoice_inbox.gross_amount > 500` without matching `bank_transactions` row → severity 'medium'
+  - `(Net standard-rated sales) × 0.20` vs Box 1 difference > £20 → severity 'medium'
+
+**Tables (V44 adds):**
+
+- `vat_returns_log` (id, entity_id, quarter_end DATE, box_1_through_9 JSONB, anomalies JSONB (array), status TEXT DEFAULT 'draft' CHECK IN ('draft','reviewed','filed'), created_at, accountant_reviewed_at, filed_at)
+- `system_state` (key TEXT PK, value TEXT, updated_at). Seed `('p3_xero','parked')`.
+
+**Action Queue card type:** `vat_review` rendering each Box 1-9 with the figure + any flags on that box. Approve = mark `status='reviewed'`. Filed = `status='filed'` + `filed_at = now()` (manual after Jo files in Xero).
+
+**Acceptance:**
+
+- Schema applied (V44 includes the `system_state` seed).
+- Dormancy verified: `bash u37-vat-return-prep.sh` logs "p3_xero=parked, skipping" and inserts no rows.
+- Activation simulation: temporarily `UPDATE system_state SET value='live' WHERE key='p3_xero'` AND populate a synthetic Xero fixture; verify Box 1-9 produced and one anomaly flagged. Revert.
+
+---
+
+## 7.8 Disaster Recovery Scripts
 
 **Goal:** Fresh Ubuntu 26.04 install → fully running system with all data restored in 2-3 hours. Build at the end of Milestone C. Test on a VM before you need them on real hardware.
 
@@ -4385,7 +4595,7 @@ echo "  4. Run /verify-phase1 to confirm system health"
 
 **Store the private GitHub repo URL in your password manager** — it's the single most important recovery artifact after the Vault unseal keys.
 
-## 7.4 Phase 2 Testing Checklist
+## 7.9 Phase 2 Testing Checklist
 
 ```
 [ ] NatWest Open Banking: bank_transactions populated without CSV upload

@@ -64,6 +64,11 @@
   <div id="per-day-table"></div>
 </section>
 
+<section class="glass rounded-xl p-3 md:p-4">
+  <h2 class="text-lg font-medium mb-2 px-1">By team</h2>
+  <div id="team-table"></div>
+</section>
+
 <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
   <div class="glass rounded-xl p-3 md:p-4">
     <h2 class="text-lg font-medium mb-2 px-1">By department</h2>
@@ -86,7 +91,7 @@
 function wf() {
   return {
     days: 30,
-    data: { coverage:{}, per_day:[], per_dept:[], top_staff:[], recent_sync:[] },
+    data: { coverage:{}, per_day:[], per_dept:[], per_team:[], top_staff:[], recent_sync:[] },
     tables: {},
     async boot() { await this.reload(); },
     async reload() {
@@ -110,10 +115,31 @@ function wf() {
         ],
       });
 
+      this.tables.team = homeai_table('#team-table', this.data.per_team, {
+        persistenceID: 'workforce-team',
+        columns: [
+          { title: 'Team',   field: 'team', formatter: 'mono', headerFilter: 'input' },
+          { title: 'Hours',  field: 'hours', hozAlign: 'right', headerFilter: false },
+          { title: 'Cost (with on-cost) £', field: 'cost_with_oncost', hozAlign: 'right',
+            formatter: (c) => '£' + (Number(c.getValue()||0)).toLocaleString(undefined,{maximumFractionDigits:2}),
+            headerFilter: false },
+          { title: 'Staff',  field: 'staff_count', hozAlign: 'right', headerFilter: false },
+          { title: '£/hr (avg)', field: 'avg_cost_per_hr', hozAlign: 'right',
+            formatter: (c) => {
+              const v = Number(c.getValue()||0);
+              const colour = v < 16 ? '#10b981' : v <= 20 ? '#f59e0b' : '#f43f5e';
+              return `<span style="color:${colour}">£${v.toFixed(2)}</span>`;
+            },
+            headerFilter: false },
+        ],
+      });
+
       this.tables.dept = homeai_table('#dept-table', this.data.per_dept, {
         persistenceID: 'workforce-dept',
         columns: [
-          { title: 'Dept',   field: 'dept', formatter: 'mono' },
+          { title: 'Dept',   field: 'dept_name', formatter: 'mono',
+            formatter: (c) => c.getValue() || ('dept_'+c.getRow().getData().dept) },
+          { title: 'Team',   field: 'team', formatter: 'mono', width: 130 },
           { title: 'Shifts', field: 'shifts', hozAlign: 'right', headerFilter: false },
           { title: 'Staff',  field: 'staff',  hozAlign: 'right', headerFilter: false },
           { title: 'Hours',  field: 'hours',  hozAlign: 'right', headerFilter: false },

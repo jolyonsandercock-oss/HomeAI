@@ -168,11 +168,22 @@ services:
     ports: ["3000:3000"]
     restart: unless-stopped
 
+  # Phase 2 SSO. Profile-gated so `docker compose up` won't auto-start it.
+  # To bring online: fix `identity_providers: {}` in security/authelia-v2/configuration.yml
+  # (Authelia 4.39 rejects an empty mapping — either drop the key entirely or
+  # populate with OIDC clients), then run:
+  #   docker compose --profile phase2 up -d authelia
+  # Vault drift was reconciled in U33; users_database.yml has an argon2id hash
+  # of the password stored at secret/authelia/admin_initial.
   authelia:
     image: authelia/authelia:4.39.19
     container_name: homeai-authelia
-    networks: [ai-services]
-    volumes: [./security/authelia:/config]
+    networks: [ai-internal, ai-proxy]
+    volumes: [./security/authelia-v2:/config]
+    environment:
+      TZ: "Europe/London"
+    ports:
+      - "100.104.82.53:9091:9091"
     profiles: ["phase2"]
     restart: unless-stopped
 
@@ -214,23 +225,6 @@ services:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./monitoring/prometheus-rules:/etc/prometheus/rules
     restart: unless-stopped
-
-  # ── Authelia (Phase 2 SSO — DISABLED until ./scripts/authelia-bootstrap.sh runs) ──
-  # Uncomment the block below after running authelia-bootstrap.sh.
-  # The bootstrap script populates secrets in security/authelia-v2/configuration.yml
-  # and creates users_database.yml from the template.
-  #
-  # authelia:
-  #   image: authelia/authelia:4.39
-  #   container_name: homeai-authelia
-  #   networks: [ai-internal, ai-proxy]
-  #   volumes:
-  #     - ./security/authelia-v2:/config
-  #   environment:
-  #     TZ: "Europe/London"
-  #   ports:
-  #     - "100.104.82.53:9091:9091"
-  #   restart: unless-stopped
 
   alertmanager:
     image: prom/alertmanager:v0.27.0
@@ -423,11 +417,28 @@ services:
       # Debug dumps land here so they're accessible from the host without
       # docker cp. Path on host matches path in container for log clarity.
       - /home_ai/storage/scraper-debug:/host-tmp
+      # U33 data-lane router writes inbound attachments (NatWest CSVs,
+      # vendor PDFs, unknown-sender files) under /home_ai/data.
+      - /home_ai/data:/home_ai/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/healthz', timeout=2)"]
       interval: 30s
       timeout: 5s
       retries: 3
+    restart: unless-stopped
+
+  # homeai-bot-responder — U33 autonomous query responder.
+  # Long-running idle container; host cron invokes responder.py every 5 min.
+  # ai-internal: vault, postgres, google-fetch.
+  # ai-egress:  api.anthropic.com, api.telegram.org.
+  bot-responder:
+    build: ./services/bot-responder
+    container_name: homeai-bot-responder
+    networks: [ai-internal, ai-egress]
+    environment:
+      VAULT_ADDR: "http://vault:8200"
+      VAULT_TOKEN: "${VAULT_TOKEN}"
+      PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
     restart: unless-stopped
 
 volumes:

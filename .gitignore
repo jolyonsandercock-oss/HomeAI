@@ -49,3 +49,9 @@ __pycache__/
 
 # Build artefacts
 node_modules/
+/logs/
+
+# Authelia runtime + backups (never commit secrets or session DB)
+/security/authelia-v2/configuration.yml.bak.*
+/security/authelia-v2/db.sqlite3
+/security/authelia-v2/notification.txt

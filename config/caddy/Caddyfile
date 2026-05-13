@@ -67,11 +67,21 @@ http://:80 {
         redir /markitdown/ permanent
     }
 
+    # U35 — Authelia is running on ai-internal, but not yet wired with full
+    # forward_auth on protected routes. That needs:
+    #  1. A proper FQDN (e.g. via `tailscale cert` for jolybox.<tailnet>.ts.net)
+    #     so session cookies match the access host. Current 100.104.82.53 IP
+    #     access doesn't carry cookies cleanly across the Authelia portal.
+    #  2. Updating Authelia config: `session.cookies.domain` + `authelia_url`
+    #     to match the chosen FQDN.
+    # Until then, Authelia is reachable at /auth/* for testing the portal,
+    # and forward_auth on /dashboard etc is intentionally not enabled —
+    # we'd lock Jo out of his own Tailscale-fenced dashboard.
     handle_path /auth/* {
-        respond "Authelia not yet bootstrapped (U12 Stage D)" 503
+        reverse_proxy homeai-authelia:9091
     }
     handle /auth {
-        respond "Authelia not yet bootstrapped (U12 Stage D)" 503
+        redir /auth/ permanent
     }
 
     # U21 — SearXNG private search

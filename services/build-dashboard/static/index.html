@@ -475,10 +475,75 @@
     </header>
 
     <!-- ══════════════════════════════════════════════════════════ -->
-    <!-- U32 KPI ribbon — labour traffic-light + revenue + pending  -->
+    <!-- U33 KPI ribbon — Executive Command Ribbon                  -->
+    <!-- labour% · revenue · SPLH · occupancy · inbox               -->
+    <!-- with anomaly alert strip + 7d sparklines on top 3          -->
     <!-- ══════════════════════════════════════════════════════════ -->
-    <div x-data="kpiRibbon()" x-init="boot()"
-         class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4 sticky top-0 z-10 backdrop-blur-md"
+    <div x-data="kpiRibbon()" x-init="boot()" class="sticky top-0 z-10 mb-4">
+      <!-- Drift alert strip — only renders when any worker drifting >2σ below baseline -->
+      <div x-show="drift && drift.flagged_count > 0" x-cloak
+           class="glass p-3 mb-2 rounded-xl flex items-center gap-3"
+           style="border-left: 3px solid var(--tl-active); cursor:pointer"
+           @click="showDriftDetail = !showDriftDetail">
+        <span class="conn-dot pulse-dot" style="background:var(--tl-active); box-shadow:0 0 0 3px var(--tl-active-bg)"></span>
+        <div class="flex-1">
+          <div class="text-sm font-semibold" style="color:rgb(146,64,14)">
+            <span x-text="drift.flagged_count"></span>
+            AI worker<span x-text="drift.flagged_count === 1 ? '' : 's'"></span>
+            drifting below baseline
+          </div>
+          <div class="text-xs text-slate-500"
+               x-text="drift.items.filter(i => i.flagged).map(i => i.ai_worker + '/' + (i.ai_model||'?') + ' (' + (i.delta_stddev||'?') + 'σ)').join(' · ')"></div>
+        </div>
+        <span class="chev text-slate-400" :style="showDriftDetail ? 'transform:rotate(90deg)' : ''">▸</span>
+      </div>
+      <!-- Anomaly alert strip — only renders when flagged_count > 0 -->
+      <div x-show="anomalies && anomalies.flagged_count > 0" x-cloak
+           class="glass p-3 mb-2 rounded-xl flex items-center gap-3"
+           style="border-left: 3px solid var(--tl-error); cursor:pointer"
+           @click="showAnomalyDetail = !showAnomalyDetail"
+           :title="'Click to ' + (showAnomalyDetail ? 'hide' : 'show') + ' detail'">
+        <span class="conn-dot pulse-dot" style="background:var(--tl-error); box-shadow:0 0 0 3px var(--tl-error-bg)"></span>
+        <div class="flex-1">
+          <div class="text-sm font-semibold" style="color:rgb(159,18,57)">
+            <span x-text="anomalies.flagged_count"></span>
+            KPI<span x-text="anomalies.flagged_count === 1 ? '' : 's'"></span>
+            outside ±50% of 7-day average
+          </div>
+          <div class="text-xs text-slate-500">
+            Catches silent extraction failures (empty PDF · missed email · zero readings).
+            <span class="ml-2"
+                  x-text="anomalies.items.filter(i => i.flagged).map(i => i.metric + ' ' + (i.delta_pct > 0 ? '+' : '') + i.delta_pct + '%').join(' · ')"></span>
+          </div>
+        </div>
+        <span class="chev text-slate-400" :style="showAnomalyDetail ? 'transform:rotate(90deg)' : ''">▸</span>
+      </div>
+      <div x-show="showAnomalyDetail" x-cloak class="glass p-3 mb-2 rounded-xl text-xs">
+        <table class="w-full">
+          <thead>
+            <tr class="text-slate-500" style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em">
+              <th class="text-left py-1 pr-3">Metric</th>
+              <th class="text-right pr-3">Today</th>
+              <th class="text-right pr-3">7d avg</th>
+              <th class="text-right pr-3">Δ%</th>
+              <th class="text-right">Severity</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="i in (anomalies?.items || [])" :key="i.metric">
+              <tr :class="i.flagged ? 'tl-error' : 'text-slate-600'">
+                <td class="py-0.5 pr-3 font-medium" x-text="i.metric"></td>
+                <td class="text-right pr-3 num-stable" x-text="i.today_value != null ? Number(i.today_value).toLocaleString(undefined,{maximumFractionDigits:1}) : '—'"></td>
+                <td class="text-right pr-3 num-stable text-slate-500" x-text="i.rolling_avg_7d != null ? Number(i.rolling_avg_7d).toLocaleString(undefined,{maximumFractionDigits:1}) : '—'"></td>
+                <td class="text-right pr-3 num-stable" x-text="i.delta_pct != null ? (i.delta_pct > 0 ? '+' : '') + i.delta_pct + '%' : '—'"></td>
+                <td class="text-right num-stable" x-text="i.severity"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    <div
+         class="grid grid-cols-2 md:grid-cols-6 gap-3 backdrop-blur-md"
          style="font-family:'JetBrains Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums">
       <a href="/economics" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
         <div class="text-xs uppercase tracking-wide" style="color:#64748b">Labour %</div>
@@ -488,24 +553,43 @@
           <span x-text="kpi.labour_pct != null ? kpi.labour_pct + '%' : '—'"></span>
         </div>
         <div class="text-xs" style="color:#94a3b8">target &lt;30%</div>
+        <svg x-show="sparklines?.labour?.some(v => v != null)" x-html="sparkSvg(sparklines?.labour, '#0ea5e9')"
+             class="spark mt-1" viewBox="0 0 100 18" preserveAspectRatio="none"></svg>
       </a>
-      <a href="/economics" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
-        <div class="text-xs uppercase tracking-wide" style="color:#64748b">Revenue</div>
+      <a href="/pub" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
+        <div class="text-xs uppercase tracking-wide" style="color:#64748b">Pub net</div>
         <div class="text-2xl font-semibold mt-0.5" style="color:#e2e8f0"
-             x-text="kpi.total_revenue ? '£' + Number(kpi.total_revenue).toLocaleString() : '—'"></div>
-        <div class="text-xs" :style="`color:${lwDir() >= 0 ? '#10b981' : '#f43f5e'}`" x-text="lwString()"></div>
+             x-text="kpi.pub_net_sales != null ? '£' + Number(kpi.pub_net_sales).toLocaleString(undefined,{maximumFractionDigits:0}) : '—'"></div>
+        <div class="text-xs" style="color:#94a3b8" x-text="kpi.pub_covers ? Number(kpi.pub_covers).toFixed(0) + ' covers' : ''"></div>
+        <svg x-show="sparklines?.pub?.some(v => v != null)" x-html="sparkSvg(sparklines?.pub, '#10b981')"
+             class="spark mt-1" viewBox="0 0 100 18" preserveAspectRatio="none"></svg>
+      </a>
+      <a href="/touchoffice" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
+        <div class="text-xs uppercase tracking-wide" style="color:#64748b">Café net</div>
+        <div class="text-2xl font-semibold mt-0.5" style="color:#e2e8f0"
+             x-text="kpi.sandwich_net_sales != null ? '£' + Number(kpi.sandwich_net_sales).toLocaleString(undefined,{maximumFractionDigits:0}) : '—'"></div>
+        <div class="text-xs" style="color:#94a3b8" x-text="kpi.sandwich_covers ? Number(kpi.sandwich_covers).toFixed(0) + ' covers' : ''"></div>
+        <svg x-show="sparklines?.cafe?.some(v => v != null)" x-html="sparkSvg(sparklines?.cafe, '#f59e0b')"
+             class="spark mt-1" viewBox="0 0 100 18" preserveAspectRatio="none"></svg>
       </a>
       <a href="/economics" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
         <div class="text-xs uppercase tracking-wide" style="color:#64748b">SPLH</div>
         <div class="text-2xl font-semibold mt-0.5" style="color:#e2e8f0"
              x-text="kpi.splh ? '£' + kpi.splh : '—'"></div>
-        <div class="text-xs" style="color:#94a3b8">sales/hour</div>
+        <div class="text-xs" style="color:#94a3b8" x-text="lwString()"></div>
       </a>
       <a href="/caterbook" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
-        <div class="text-xs uppercase tracking-wide" style="color:#64748b">In-house</div>
-        <div class="text-2xl font-semibold mt-0.5" style="color:#e2e8f0"
-             x-text="kpi.in_house_count ?? '—'"></div>
-        <div class="text-xs" style="color:#94a3b8" x-text="kpi.total_covers ? kpi.total_covers + ' covers' : ''"></div>
+        <div class="text-xs uppercase tracking-wide" style="color:#64748b">Occupancy</div>
+        <div class="text-2xl font-semibold mt-0.5"
+             :style="`color:${kpi.occupancy_pct == null ? '#94a3b8' : (kpi.occupancy_pct >= 80 ? '#10b981' : kpi.occupancy_pct >= 50 ? '#f59e0b' : '#f43f5e')}`">
+          <span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle"
+                :style="`background:${kpi.occupancy_pct == null ? '#64748b' : (kpi.occupancy_pct >= 80 ? '#10b981' : kpi.occupancy_pct >= 50 ? '#f59e0b' : '#f43f5e')}; box-shadow:0 0 8px currentColor`"></span>
+          <span x-text="kpi.occupancy_pct != null ? kpi.occupancy_pct + '%' : '—'"></span>
+        </div>
+        <div class="text-xs" style="color:#94a3b8"
+             x-text="(kpi.occupied_rooms != null && kpi.total_rooms != null) ? (kpi.occupied_rooms + '/' + kpi.total_rooms + ' rooms · ' + (kpi.in_house_count ?? '—') + ' guests') : '—'"></div>
+        <svg x-show="sparklines?.in_house?.some(v => v != null)" x-html="sparkSvg(sparklines?.in_house, '#a855f7')"
+             class="spark mt-1" viewBox="0 0 100 18" preserveAspectRatio="none"></svg>
       </a>
       <div class="glass p-3 rounded-xl">
         <div class="text-xs uppercase tracking-wide" style="color:#64748b">Inbox</div>
@@ -514,6 +598,7 @@
              x-text="pendingCount + '📨'"></div>
         <div class="text-xs" style="color:#94a3b8">pending instructions</div>
       </div>
+    </div>
     </div>
 
     <template x-if="!data">
@@ -1448,32 +1533,55 @@
 <script>
 function kpiRibbon() {
   return {
-    kpi: { labour_pct: null, total_revenue: null, splh: null, in_house_count: null, total_covers: null, net_sales_lw: null },
+    kpi: { labour_pct: null, total_revenue: null, splh: null, in_house_count: null, total_covers: null, net_sales_lw: null, occupancy_pct: null, occupied_rooms: null, total_rooms: null },
     pendingCount: 0,
+    anomalies: null,         // { items, flagged_count, max_severity }
+    sparklines: null,        // { dates, revenue, labour, in_house }
+    drift: null,             // { items, flagged_count }
+    showAnomalyDetail: false,
+    showDriftDetail: false,
     async boot() {
+      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadDrift()]);
+      // Re-derive labour series from sparklines (server-side labour is cost, we want pct from daily rows)
+      // Keeping it simple: use the labour_cost trend as a proxy for labour% trend direction.
+      setInterval(() => this.refresh(), 60000);
+    },
+    async loadKpi() {
       try {
         const r = await fetch('/api/economics/overview?days=14');
         const o = await r.json();
         this.kpi = o.kpi || {};
-        // Coerce numerics that arrive as strings
-        ['labour_pct','total_revenue','splh','total_covers','in_house_count','net_sales_lw','total_net_sales'].forEach(k => {
+        ['labour_pct','total_revenue','splh','total_covers','in_house_count','net_sales_lw','total_net_sales','occupancy_pct','occupied_rooms','total_rooms'].forEach(k => {
           if (this.kpi[k] != null && !isNaN(this.kpi[k])) this.kpi[k] = Number(this.kpi[k]);
         });
       } catch (e) { console.error('kpi ribbon load', e); }
+    },
+    async loadPending() {
       try {
-        const r2 = await fetch('/api/kpi/pending-instructions');
-        this.pendingCount = (await r2.json()).pending || 0;
+        const r = await fetch('/api/kpi/pending-instructions');
+        this.pendingCount = (await r.json()).pending || 0;
       } catch {}
-      setInterval(() => this.refresh(), 60000);  // refresh every minute
+    },
+    async loadAnomalies() {
+      try {
+        const r = await fetch('/api/anomalies');
+        this.anomalies = await r.json();
+      } catch {}
+    },
+    async loadSparklines() {
+      try {
+        const r = await fetch('/api/kpi/sparklines?days=14');
+        this.sparklines = await r.json();
+      } catch {}
+    },
+    async loadDrift() {
+      try {
+        const r = await fetch('/api/drift/current');
+        this.drift = await r.json();
+      } catch {}
     },
     async refresh() {
-      try {
-        const r = await fetch('/api/economics/overview?days=14');
-        const o = await r.json();
-        this.kpi = o.kpi || this.kpi;
-        const r2 = await fetch('/api/kpi/pending-instructions');
-        this.pendingCount = (await r2.json()).pending || 0;
-      } catch {}
+      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadDrift()]);
     },
     lwDir() {
       const t = Number(this.kpi.total_net_sales), l = Number(this.kpi.net_sales_lw);
@@ -1485,6 +1593,25 @@ function kpiRibbon() {
       if (!t || !l) return '';
       const pct = ((t - l) / l * 100).toFixed(1);
       return `vs LW: ${pct >= 0 ? '+' : ''}${pct}%`;
+    },
+    // Render an inline-SVG sparkline polyline (returns inner SVG content).
+    // Skips null entries; scales to viewBox 0..100 × 0..18 with 1px top/bottom pad.
+    sparkSvg(series, colour) {
+      if (!series || !series.length) return '';
+      const pts = series.map((v, i) => [i, v]).filter(([_, v]) => v != null && !isNaN(v));
+      if (pts.length < 2) return '';
+      const xs = pts.map(p => p[0]);
+      const ys = pts.map(p => p[1]);
+      const xmin = Math.min(...xs), xmax = Math.max(...xs);
+      const ymin = Math.min(...ys), ymax = Math.max(...ys);
+      const xrange = (xmax - xmin) || 1, yrange = (ymax - ymin) || 1;
+      const sx = i => ((i - xmin) / xrange) * 100;
+      const sy = v => 17 - ((v - ymin) / yrange) * 16;   // invert (svg y grows down)
+      const path = pts.map(([i, v], idx) => (idx === 0 ? 'M' : 'L') + sx(i).toFixed(1) + ',' + sy(v).toFixed(1)).join(' ');
+      // Area under the line, tinted
+      const area = path + ` L${sx(pts[pts.length-1][0]).toFixed(1)},18 L${sx(pts[0][0]).toFixed(1)},18 Z`;
+      return `<path d="${area}" fill="${colour}" fill-opacity="0.12" stroke="none"/>` +
+             `<path d="${path}" fill="none" stroke="${colour}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
     },
   };
 }
