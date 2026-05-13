@@ -62,6 +62,30 @@
             from = fmt(new Date(today.getTime() - 30 * 86400000)); to = tIso; this.label = 'Last 30 days'; break;
           case '90d':
             from = fmt(new Date(today.getTime() - 90 * 86400000)); to = tIso; this.label = 'Last 90 days'; break;
+          // U47b — additional presets Jo asked for
+          case 'yesterday': {
+            const y = new Date(today.getTime() - 86400000);
+            from = fmt(y); to = fmt(y); this.label = 'Yesterday'; break;
+          }
+          case 'this_week': {
+            // ISO week — Monday start
+            const dow = (today.getDay() + 6) % 7;  // 0=Mon..6=Sun
+            const mon = new Date(today.getTime() - dow * 86400000);
+            from = fmt(mon); to = tIso; this.label = 'This week'; break;
+          }
+          case 'last_week': {
+            const dow = (today.getDay() + 6) % 7;
+            const monThis = new Date(today.getTime() - dow * 86400000);
+            const monLast = new Date(monThis.getTime() - 7 * 86400000);
+            const sunLast = new Date(monThis.getTime() - 86400000);
+            from = fmt(monLast); to = fmt(sunLast); this.label = 'Last week'; break;
+          }
+          case 'last_month': {
+            const firstOfThis = new Date(today.getFullYear(), today.getMonth(), 1);
+            const lastOfPrev  = new Date(firstOfThis.getTime() - 86400000);
+            const firstOfPrev = new Date(lastOfPrev.getFullYear(), lastOfPrev.getMonth(), 1);
+            from = fmt(firstOfPrev); to = fmt(lastOfPrev); this.label = 'Last month'; break;
+          }
           default:
             from = fmt(new Date(today.getTime() - 7 * 86400000)); to = tIso; this.label = 'Last 7 days'; this.preset = '7d';
         }

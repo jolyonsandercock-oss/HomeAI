@@ -1894,13 +1894,13 @@ async def api_workforce_overview(days: int = 30):
            ORDER BY hours DESC NULLS LAST
         """, days)
         top_staff = await c.fetch("""
-          SELECT s.user_external_id, u.full_name,
-                 COUNT(*) AS shifts,
-                 ROUND(SUM(s.hours_worked)::numeric, 1) AS hours
-            FROM workforce_shifts s
-            LEFT JOIN workforce_users u ON u.external_id = s.user_external_id
+          SELECT s.user_external_id, s.full_name,
+                 COUNT(*)                                AS shifts,
+                 ROUND(SUM(s.hours_worked)::numeric, 1)  AS hours,
+                 ROUND(SUM(s.shift_cost)::numeric, 0)    AS shift_cost
+            FROM v_workforce_shifts_costed s
            WHERE s.shift_date >= CURRENT_DATE - ($1::int)
-           GROUP BY s.user_external_id, u.full_name
+           GROUP BY s.user_external_id, s.full_name
            ORDER BY hours DESC NULLS LAST LIMIT 20
         """, days)
         recent_sync = await c.fetch("""
@@ -1931,25 +1931,30 @@ async def api_workforce_overview(days: int = 30):
 
 @app.get("/api/workforce/rota_today")
 async def api_workforce_rota_today():
-    """U45 — who's on today, scheduled vs actual, cost per shift."""
+    """U45/U47b — who's on today (or the most-recently-loaded shift date if
+    today's rota hasn't synced yet). Returns shifts with names, team, cost."""
     p = await pool()
     async with p.acquire() as c:
         await c.execute("SET app.current_entity = '1'")
+        # Pick the target date: today if any shift exists, else the latest date with data
+        target = await c.fetchval("""
+          SELECT MAX(shift_date) FROM workforce_shifts
+          WHERE shift_date <= CURRENT_DATE
+        """)
+        if target is None:
+            return {"items": [], "total_hours": 0, "total_cost": 0, "staff_count": 0,
+                    "shift_date": None, "is_today": False}
         rows = await c.fetch("""
           SELECT s.id, s.shift_date,
-                 u.full_name AS name, u.preferred_name,
-                 d.name AS dept_name, d.team,
+                 s.full_name AS name, s.preferred_name,
+                 s.team AS dept_name, s.team,
                  s.start_time, s.end_time, s.hours_worked,
-                 (s.hours_worked * (m.hourly_rate_pence::numeric / 100.0)
-                  * (1::numeric + COALESCE(m.on_cost_pct, 12.5) / 100.0))::numeric(10,2) AS cost_with_oncost,
-                 s.status
-            FROM workforce_shifts s
-            LEFT JOIN workforce_users u  ON u.external_id = s.user_external_id
-            LEFT JOIN workforce_departments d ON d.external_id = s.department_external_id
-            LEFT JOIN staff_meta m       ON m.user_external_id = s.user_external_id
-           WHERE s.shift_date = CURRENT_DATE
-           ORDER BY d.team, s.start_time
-        """)
+                 s.shift_cost AS cost_with_oncost,
+                 s.cost_source
+            FROM v_workforce_shifts_costed s
+           WHERE s.shift_date = $1
+           ORDER BY s.team, s.start_time
+        """, target)
     def _row(r):
         out = {}
         for k, v in dict(r).items():
@@ -1960,11 +1965,14 @@ async def api_workforce_rota_today():
     items = [_row(r) for r in rows]
     total_hours = sum(i.get("hours_worked") or 0 for i in items)
     total_cost  = sum(i.get("cost_with_oncost") or 0 for i in items)
+    from datetime import date as _d2
     return {
         "items": items,
         "total_hours": round(total_hours, 1),
         "total_cost":  round(total_cost, 2),
         "staff_count": len(items),
+        "shift_date":  target.isoformat() if target else None,
+        "is_today":    target == _d2.today() if target else False,
     }
 
 
@@ -2020,29 +2028,93 @@ async def api_workforce_income_vs_cost(date_from: str = "", date_to: str = ""):
 
 
 @app.get("/api/workforce/forecast_vs_actual")
-async def api_workforce_forecast_vs_actual(days: int = 7):
-    """U45 — last N days forecast vs actual labour. Forecast = scheduled hours × rate.
-    Actual = clocked hours × rate. Until Tanda exposes scheduled/clocked split, we
-    approximate: forecast == actual (best-available)."""
+async def api_workforce_forecast_vs_actual(days: int = 14):
+    """U47b — forecast (sum of shifts) vs actual (workforce_timesheets) per week.
+    workforce_timesheets is period-level so we collapse shifts into the same
+    timesheet windows for a like-for-like comparison."""
     p = await pool()
     async with p.acquire() as c:
         await c.execute("SET app.current_entity = '1'")
         rows = await c.fetch("""
-          SELECT report_date, labour_hours, labour_cost_est
-            FROM v_daily_unit_economics
-           WHERE report_date >= CURRENT_DATE - ($1::int)
-             AND report_date <= CURRENT_DATE
-           ORDER BY report_date ASC
+          WITH ts AS (
+            SELECT period_start, period_end,
+                   SUM(hours_total) AS actual_hours,
+                   SUM(cost_total)  AS actual_cost
+              FROM workforce_timesheets
+             WHERE period_end >= CURRENT_DATE - ($1::int)
+             GROUP BY period_start, period_end
+          ),
+          fc AS (
+            SELECT ts.period_start, ts.period_end,
+                   SUM(s.hours_worked) AS forecast_hours,
+                   SUM(s.shift_cost)   AS forecast_cost
+              FROM ts
+              LEFT JOIN v_workforce_shifts_costed s
+                ON s.shift_date BETWEEN ts.period_start AND ts.period_end
+             GROUP BY ts.period_start, ts.period_end
+          )
+          SELECT ts.period_start, ts.period_end,
+                 fc.forecast_hours, fc.forecast_cost,
+                 ts.actual_hours, ts.actual_cost,
+                 (ts.actual_hours - fc.forecast_hours)             AS hours_variance,
+                 (ts.actual_cost  - fc.forecast_cost)              AS cost_variance,
+                 CASE WHEN fc.forecast_cost > 0
+                      THEN ROUND(100*(ts.actual_cost - fc.forecast_cost)/fc.forecast_cost, 1)
+                 END                                               AS cost_variance_pct
+            FROM ts JOIN fc USING (period_start, period_end)
+           ORDER BY ts.period_end DESC
         """, days)
     items = []
     for r in rows:
         d = dict(r)
-        d["forecast_cost"] = float(d["labour_cost_est"]) if d.get("labour_cost_est") else None
-        d["actual_cost"]   = float(d["labour_cost_est"]) if d.get("labour_cost_est") else None
-        d["variance"] = 0.0
-        d["report_date"] = d["report_date"].isoformat() if d.get("report_date") else None
+        for k, v in d.items():
+            if hasattr(v, "isoformat"): d[k] = v.isoformat()
+            elif hasattr(v, "to_eng_string"): d[k] = float(v)
         items.append(d)
-    return {"days": days, "items": items, "note": "Forecast == actual until Tanda scheduled/clocked split is wired (Sprint U46 candidate)."}
+    note = ("Forecast = sum of workforce_shifts (rota) in the timesheet window. "
+            "Actual = workforce_timesheets.")
+    if not items:
+        note = ("⚠ No timesheet data yet — Tanda /api/v2/timesheets sync is not "
+                "configured. Only the /shifts endpoint (rota) is being pulled, "
+                "so we can't compute variance until the timesheets sync is enabled.")
+    return {"days": days, "items": items, "note": note}
+
+
+@app.get("/api/workforce/sales_per_hour")
+async def api_workforce_sales_per_hour(date_from: str = "", date_to: str = ""):
+    """U47b — per-staff attributable sales leaderboard over a window.
+    Sales apportioned by each staff member's share of their team's daily hours.
+    FoH gets a shared_attribution flag because they handle both food and drink."""
+    from datetime import date as _d, timedelta as _td
+    if not date_from or not date_to:
+        t = _d.today(); date_from_d = t - _td(days=7); date_to_d = t
+    else:
+        date_from_d = _d.fromisoformat(date_from); date_to_d = _d.fromisoformat(date_to)
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = '1'")
+        rows = await c.fetch(
+          "SELECT * FROM staff_sales_window($1::date, $2::date)",
+          date_from_d, date_to_d,
+        )
+    items = []
+    rank_by_team = {}
+    for r in rows:
+        d = dict(r)
+        for k, v in d.items():
+            if hasattr(v, "to_eng_string"): d[k] = float(v)
+        team = d.get("team")
+        rank_by_team.setdefault(team, 0)
+        rank_by_team[team] += 1
+        d["rank_within_team"] = rank_by_team[team]
+        items.append(d)
+    return {
+        "from":  date_from_d.isoformat(),
+        "to":    date_to_d.isoformat(),
+        "items": items,
+        "count": len(items),
+        "note":  "FoH staff have shared_attribution=true (food + drink). Sales apportioned by share of team daily hours.",
+    }
 
 
 @app.get("/api/accommodation/adr")

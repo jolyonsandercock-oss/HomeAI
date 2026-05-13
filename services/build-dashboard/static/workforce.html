@@ -49,11 +49,15 @@
 <section class="glass rounded-xl p-3 flex flex-wrap items-center gap-3">
   <div x-data="dateWindow('workforce')" x-init="boot()" class="flex items-center gap-2 flex-wrap">
     <span class="text-xs uppercase tracking-wide text-slate-400">Window</span>
-    <button class="dw-btn" :class="{active: preset==='today'}" @click="setPreset('today')">Today</button>
-    <button class="dw-btn" :class="{active: preset==='7d'}"    @click="setPreset('7d')">7d</button>
-    <button class="dw-btn" :class="{active: preset==='mtd'}"   @click="setPreset('mtd')">MTD</button>
-    <button class="dw-btn" :class="{active: preset==='30d'}"   @click="setPreset('30d')">30d</button>
-    <button class="dw-btn" :class="{active: preset==='90d'}"   @click="setPreset('90d')">90d</button>
+    <button class="dw-btn" :class="{active: preset==='today'}"      @click="setPreset('today')">Today</button>
+    <button class="dw-btn" :class="{active: preset==='yesterday'}"  @click="setPreset('yesterday')">Yesterday</button>
+    <button class="dw-btn" :class="{active: preset==='this_week'}"  @click="setPreset('this_week')">This wk</button>
+    <button class="dw-btn" :class="{active: preset==='last_week'}"  @click="setPreset('last_week')">Last wk</button>
+    <button class="dw-btn" :class="{active: preset==='7d'}"         @click="setPreset('7d')">7d</button>
+    <button class="dw-btn" :class="{active: preset==='mtd'}"        @click="setPreset('mtd')">MTD</button>
+    <button class="dw-btn" :class="{active: preset==='last_month'}" @click="setPreset('last_month')">Last mo</button>
+    <button class="dw-btn" :class="{active: preset==='30d'}"        @click="setPreset('30d')">30d</button>
+    <button class="dw-btn" :class="{active: preset==='90d'}"        @click="setPreset('90d')">90d</button>
     <span class="text-xs text-slate-500 mx-2">or</span>
     <input type="date" x-model="customFrom" @change="setCustom()" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
     <span class="text-xs text-slate-500">→</span>
@@ -62,10 +66,15 @@
   </div>
 </section>
 
-<!-- U45 — Today's rota -->
+<!-- U45/U47b — Today's rota (with fallback to most recent if today not synced) -->
 <section class="glass rounded-xl p-3 md:p-4" x-show="rota">
   <div class="flex items-baseline justify-between mb-2">
-    <h2 class="text-lg font-medium">Today's rota</h2>
+    <h2 class="text-lg font-medium">
+      <template x-if="rota?.is_today"><span>Today's rota</span></template>
+      <template x-if="!rota?.is_today">
+        <span>Rota — most recent (<span class="text-amber-400 mono" x-text="rota?.shift_date"></span> · today not yet synced)</span>
+      </template>
+    </h2>
     <div class="text-xs text-slate-400 mono">
       <span x-text="rota?.staff_count ?? 0"></span> staff ·
       <span x-text="(rota?.total_hours ?? 0).toFixed(1)"></span> hrs ·
@@ -111,27 +120,99 @@
   </template>
 </section>
 
-<!-- U45 — Forecast vs actual -->
+<!-- U47b — Forecast (rota) vs actual (timesheets) per pay period -->
 <section class="glass rounded-xl p-3 md:p-4" x-show="fva">
-  <h2 class="text-lg font-medium mb-2">Forecast vs actual (last 7 days)</h2>
+  <h2 class="text-lg font-medium mb-2">Rota forecast vs timesheet actuals</h2>
   <div class="text-xs text-slate-500 mb-2" x-text="fva?.note || ''"></div>
   <div class="overflow-x-auto">
     <table class="w-full text-xs">
       <thead class="text-slate-500 text-left"><tr>
-        <th class="py-1 pr-3">Date</th>
-        <th class="text-right pr-3">Hours</th>
-        <th class="text-right pr-3">Forecast</th>
-        <th class="text-right pr-3">Actual</th>
-        <th class="text-right pr-3">Δ</th>
+        <th class="py-1 pr-3">Period</th>
+        <th class="text-right pr-3">Rota hrs</th>
+        <th class="text-right pr-3">Actual hrs</th>
+        <th class="text-right pr-3">Δ hrs</th>
+        <th class="text-right pr-3">Rota £</th>
+        <th class="text-right pr-3">Actual £</th>
+        <th class="text-right pr-3">Δ £</th>
+        <th class="text-right pr-3">Δ %</th>
       </tr></thead>
       <tbody>
-        <template x-for="r in (fva?.items || [])" :key="r.report_date">
+        <template x-for="r in (fva?.items || [])" :key="r.period_start">
           <tr class="border-t border-slate-800">
-            <td class="py-1 pr-3 mono" x-text="(r.report_date||'').slice(0,10)"></td>
-            <td class="text-right pr-3 mono" x-text="(r.labour_hours||0).toFixed(1)"></td>
+            <td class="py-1 pr-3 mono text-slate-300">
+              <span x-text="(r.period_start||'').slice(0,10)"></span> →
+              <span x-text="(r.period_end||'').slice(0,10)"></span>
+            </td>
+            <td class="text-right pr-3 mono" x-text="(r.forecast_hours||0).toFixed(1)"></td>
+            <td class="text-right pr-3 mono" x-text="(r.actual_hours||0).toFixed(1)"></td>
+            <td class="text-right pr-3 mono"
+                :class="(r.hours_variance||0) > 0 ? 'text-amber-400' : 'text-emerald-400'"
+                x-text="((r.hours_variance||0) > 0 ? '+' : '') + (r.hours_variance||0).toFixed(1)"></td>
             <td class="text-right pr-3 mono">£<span x-text="(r.forecast_cost||0).toFixed(0)"></span></td>
             <td class="text-right pr-3 mono">£<span x-text="(r.actual_cost||0).toFixed(0)"></span></td>
-            <td class="text-right pr-3 mono" x-text="(r.variance||0).toFixed(0)"></td>
+            <td class="text-right pr-3 mono"
+                :class="(r.cost_variance||0) > 0 ? 'text-amber-400' : 'text-emerald-400'"
+                x-text="((r.cost_variance||0) > 0 ? '+£' : '−£') + Math.abs(r.cost_variance||0).toFixed(0)"></td>
+            <td class="text-right pr-3 mono"
+                :class="(r.cost_variance_pct||0) > 5 ? 'text-rose-400'
+                       : (r.cost_variance_pct||0) > 0 ? 'text-amber-400'
+                       : 'text-emerald-400'"
+                x-text="r.cost_variance_pct != null ? ((r.cost_variance_pct > 0 ? '+' : '') + r.cost_variance_pct.toFixed(1) + '%') : '—'"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- U47b — Sales per productive hour leaderboard -->
+<section class="glass rounded-xl p-3 md:p-4" x-show="leader && leader.items?.length">
+  <div class="flex items-baseline justify-between mb-2">
+    <h2 class="text-lg font-medium">Sales per productive hour</h2>
+    <div class="text-xs text-slate-400">
+      <span x-text="(leader?.from || '') + ' → ' + (leader?.to || '')"></span> ·
+      <span x-text="leader?.count + ' staff'"></span>
+    </div>
+  </div>
+  <div class="text-xs text-slate-500 mb-2" x-text="leader?.note || ''"></div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-xs">
+      <thead class="text-slate-500 text-left"><tr>
+        <th class="py-1 pr-3">#</th>
+        <th class="py-1 pr-3">Team</th>
+        <th>Name</th>
+        <th class="text-right pr-3">Shifts</th>
+        <th class="text-right pr-3">Hours</th>
+        <th class="text-right pr-3">Shift £</th>
+        <th class="text-right pr-3">Attrib. sales £</th>
+        <th class="text-right pr-3">£/hr</th>
+        <th>Note</th>
+      </tr></thead>
+      <tbody>
+        <template x-for="(r, idx) in (leader?.items || [])" :key="r.user_external_id">
+          <tr class="border-t border-slate-800"
+              :class="idx < 5 ? 'bg-amber-500/5' : ''">
+            <td class="py-1 pr-3 mono text-slate-500"
+                :class="idx < 5 ? 'text-amber-400 font-bold' : ''"
+                x-text="(idx+1)"></td>
+            <td class="py-1 pr-3 mono text-slate-400" x-text="r.team"></td>
+            <td x-text="r.full_name"></td>
+            <td class="text-right pr-3 mono" x-text="r.shifts"></td>
+            <td class="text-right pr-3 mono" x-text="(r.hours||0).toFixed(1)"></td>
+            <td class="text-right pr-3 mono">£<span x-text="(r.shift_cost||0).toFixed(0)"></span></td>
+            <td class="text-right pr-3 mono">£<span x-text="(r.attributable_sales||0).toFixed(0)"></span></td>
+            <td class="text-right pr-3 mono font-medium"
+                :style="`color:${(r.sales_per_hour||0) > 100 ? '#6ee7b7'
+                                : (r.sales_per_hour||0) > 60  ? '#fcd34d'
+                                : '#cbd5e1'}`">
+              £<span x-text="(r.sales_per_hour||0).toFixed(1)"></span>
+            </td>
+            <td class="text-xs">
+              <span x-show="r.has_shared_attribution"
+                    class="cell-badge"
+                    style="background:rgba(99,102,241,0.2);color:#a5b4fc"
+                    title="FoH staff share food attribution with kitchen">shared</span>
+            </td>
           </tr>
         </template>
       </tbody>
@@ -195,11 +276,21 @@ function wf() {
     rota: null,
     ivc: null,
     fva: null,
+    leader: null,
     dateFrom: '',
     dateTo: '',
     onDateChange({from, to}) {
       this.dateFrom = from; this.dateTo = to;
       this.loadIVC();
+      this.loadLeader();
+    },
+    async loadLeader() {
+      if (!this.dateFrom || !this.dateTo) return;
+      try {
+        this.leader = await (await fetch(
+          `/api/workforce/sales_per_hour?date_from=${this.dateFrom}&date_to=${this.dateTo}`
+        )).json();
+      } catch {}
     },
     async loadRota() {
       try { this.rota = await (await fetch('/api/workforce/rota_today')).json(); } catch {}
@@ -209,7 +300,7 @@ function wf() {
       try { this.ivc = await (await fetch(`/api/workforce/income_vs_cost?date_from=${this.dateFrom}&date_to=${this.dateTo}`)).json(); } catch {}
     },
     async loadFVA() {
-      try { this.fva = await (await fetch('/api/workforce/forecast_vs_actual?days=7')).json(); } catch {}
+      try { this.fva = await (await fetch('/api/workforce/forecast_vs_actual?days=28')).json(); } catch {}
     },
     ivcCards() {
       if (!this.ivc) return [];
@@ -280,11 +371,18 @@ function wf() {
       });
 
       this.tables.staff = homeai_table('#staff-table', this.data.top_staff, {
-        persistenceID: 'workforce-staff',
+        persistenceID: 'workforce-staff-v47b',
         columns: [
-          { title: 'Name', field: 'full_name', formatter: (c) => c.getValue() || ('uid '+c.getRow().getData().user_external_id) },
+          { title: 'Name', field: 'full_name',
+            formatter: (c) => c.getValue() || ('uid '+c.getRow().getData().user_external_id) },
           { title: 'Shifts', field: 'shifts', hozAlign: 'right', headerFilter: false },
           { title: 'Hours',  field: 'hours',  hozAlign: 'right', headerFilter: false },
+          { title: 'Shift £', field: 'shift_cost', hozAlign: 'right',
+            formatter: (c) => {
+              const v = Number(c.getValue() || 0);
+              return v > 0 ? '£' + v.toLocaleString(undefined, {maximumFractionDigits: 0}) : '—';
+            },
+            headerFilter: false },
         ],
         row_link: (row) => row.user_external_id
           ? `https://my.workforce.com/users/${row.user_external_id}`
