@@ -806,6 +806,48 @@
             </div>
           </div>
         </div> <!-- end hero strip -->
+
+        <!-- ── U47a · AI uncertain queue ── -->
+        <div class="glass p-5 card-shell" x-data="classifierQueue()" x-init="boot()"
+             x-show="rows.length > 0"
+             style="margin-top:14px">
+          <div class="card-head">
+            <span class="title">AI uncertain — needs your eye</span>
+            <span class="text-xs text-slate-500 ml-2"
+                  x-text="rows.length + ' email' + (rows.length === 1 ? '' : 's')"></span>
+          </div>
+          <div class="text-xs text-slate-400 mb-2">
+            Classifications the AI gave low confidence to. One click to confirm or correct — Sonnet learns from your input overnight.
+          </div>
+          <div class="space-y-1" style="max-height:360px;overflow-y:auto">
+            <template x-for="r in rows.slice(0, 12)" :key="r.email_id">
+              <div class="flex items-center gap-2 py-1.5 px-2 hover:bg-slate-800/40 rounded">
+                <span class="text-xs mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300"
+                      :title="'confidence: ' + r.confidence_score.toFixed(2)"
+                      x-text="(r.confidence_score * 100).toFixed(0) + '%'"></span>
+                <span class="text-xs uppercase tracking-wide text-slate-400 w-28 truncate"
+                      :title="r.classification"
+                      x-text="r.classification || '?'"></span>
+                <span class="text-xs text-slate-500 w-20 truncate" x-text="r.account"></span>
+                <span class="text-sm flex-1 truncate" :title="r.subject" x-text="r.subject || '(no subject)'"></span>
+                <span class="text-xs text-slate-500 mono"
+                      :title="r.received_at"
+                      x-text="r.age_days + 'd'"></span>
+                <a :href="'/viewer/email/' + encodeURIComponent(r.account) + '/' + encodeURIComponent(r.gmail_message_id)"
+                   target="_blank"
+                   class="text-xs px-2 py-0.5 rounded bg-slate-700 hover:bg-sky-600">view</a>
+                <button class="text-xs px-2 py-0.5 rounded bg-emerald-700 hover:bg-emerald-600"
+                        @click="confirm(r)" title="Confirm classification is correct">✓ ok</button>
+                <button class="text-xs px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-500"
+                        @click="correct(r)" title="Tell the AI the correct category">✎ fix</button>
+              </div>
+            </template>
+          </div>
+          <div x-show="rows.length > 12" class="text-xs text-slate-500 mt-2">
+            +<span x-text="rows.length - 12"></span> more — visit
+            <a href="/viewer/classifier-queue" class="text-sky-400 hover:underline">full queue</a>
+          </div>
+        </div>
         </div> <!-- end TIER 1 -->
 
         <!-- ════════════════════════════════════════════════════════ -->
@@ -1594,6 +1636,48 @@
 </div>
 
 <script>
+// U47a — classifier uncertain queue (inline component)
+function classifierQueue() {
+  return {
+    rows: [],
+    async boot() {
+      await this.load();
+      setInterval(() => this.load(), 5 * 60_000);
+    },
+    async load() {
+      try {
+        const r = await fetch('/api/classifier/uncertain?limit=50');
+        if (r.ok) {
+          const o = await r.json();
+          this.rows = o.items || [];
+        }
+      } catch (_) {}
+    },
+    async confirm(r) {
+      await fetch('/api/classifier/feedback', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({email_id: r.email_id, notes: 'Confirmed by user'}),
+      });
+      this.rows = this.rows.filter(x => x.email_id !== r.email_id);
+    },
+    async correct(r) {
+      const correct = prompt(
+        `Email subject: ${r.subject}\n` +
+        `AI classified as: ${r.classification} (${(r.confidence_score*100).toFixed(0)}%)\n\n` +
+        `What's the correct category? (e.g. invoice, fyi, pub, property, junk, action-required)`,
+        r.classification || ''
+      );
+      if (!correct) return;
+      const notes = prompt('Optional: what should the AI learn from this for next time?', '') || '';
+      await fetch('/api/classifier/feedback', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({email_id: r.email_id, corrected_class: correct.trim(), notes: notes.trim()}),
+      });
+      this.rows = this.rows.filter(x => x.email_id !== r.email_id);
+    },
+  };
+}
+
 function kpiRibbon() {
   return {
     kpi: { labour_pct: null, total_revenue: null, splh: null, in_house_count: null, total_covers: null, net_sales_lw: null, occupancy_pct: null, occupied_rooms: null, total_rooms: null },

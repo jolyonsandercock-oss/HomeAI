@@ -24,6 +24,31 @@
   .gp-amber { background: rgba(245,158,11,0.14); color: rgb(252,211,77); }
   .gp-bad { background: rgba(244,63,94,0.16); color: rgb(252,165,165); }
   .gp-neutral { background: rgba(148,163,184,0.10); color: rgb(203,213,225); }
+  /* Feedback button — make ✎ visible, not a 1px emoji */
+  .feedback-btn { display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px; font-size: 12px; border-radius: 6px;
+    background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.4);
+    color: rgb(252,211,77); cursor: pointer; font-weight: 500; }
+  .feedback-btn:hover { background: rgba(245,158,11,0.35); color: white; }
+  .feedback-btn-label { font-size: 11px; }
+  /* Feedback modal */
+  .fb-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 50;
+    display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+  .fb-modal { width: min(560px, 90vw); background: #0f172a; border: 1px solid rgba(148,163,184,0.25);
+    border-radius: 12px; padding: 18px 20px; color: #e2e8f0; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .fb-modal h3 { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+  .fb-modal .subtle { font-size: 12px; color: #94a3b8; margin-bottom: 12px; }
+  .fb-modal textarea { width: 100%; min-height: 110px; background: #020617;
+    border: 1px solid rgba(148,163,184,0.25); border-radius: 6px; padding: 10px;
+    color: #e2e8f0; font-family: ui-monospace, Menlo, monospace; font-size: 13px; resize: vertical; }
+  .fb-modal .examples { font-size: 11px; color: #64748b; margin-top: 8px; line-height: 1.6; }
+  .fb-modal .actions { margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end; }
+  .fb-modal .actions button { padding: 7px 14px; border-radius: 6px; font-size: 13px;
+    border: 1px solid rgba(148,163,184,0.25); background: rgba(15,23,42,0.7); color: #cbd5e1; cursor: pointer; }
+  .fb-modal .actions button.primary { background: rgb(245,158,11); color: #0f172a;
+    border-color: transparent; font-weight: 600; }
+  .fb-modal .actions button:hover { background: rgba(30,41,59,0.9); }
+  .fb-modal .actions button.primary:hover { background: rgb(252,211,77); }
 </style>
 </head>
 <body class="text-slate-100">
@@ -71,41 +96,40 @@
   </div>
 </section>
 
-<!-- GP% header strip -->
-<section class="grid grid-cols-2 md:grid-cols-4 gap-3" x-show="gp">
-  <div class="gp-tile" :class="gpClass('drink')">
-    <div class="text-xs uppercase tracking-wide opacity-80">Drink GP</div>
-    <div class="text-3xl font-medium mono"
-         x-text="gp?.latest?.pub_drink_gp_pct != null ? gp.latest.pub_drink_gp_pct.toFixed(1) + '%' : '—'"></div>
-    <div class="text-xs opacity-70 mono">
-      7d avg: <span x-text="gp?.rolling_7d?.drink != null ? gp.rolling_7d.drink.toFixed(1) + '%' : '—'"></span>
+<!-- GP% header strip — U47a: rev + cost + 30d-smoothed % + amber low-coverage -->
+<section class="grid grid-cols-2 md:grid-cols-4 gap-3" x-show="gpr">
+  <template x-for="key in ['drink','food','cafe','overall']" :key="key">
+    <div class="gp-tile"
+         :class="[
+           gpClass(key),
+           gpr?.tiles?.[key]?.amber ? 'ring-1 ring-amber-500/60' : '',
+         ]"
+         :title="gpr?.tiles?.[key]?.amber
+           ? `Low invoice coverage in window (${(gpr.coverage_ratio*100).toFixed(0)}% of expected). GP may be flattering.`
+           : `Smoothed across ${gpr?.data?.smoothing_days || 14}d invoice window. Coverage: ${(gpr?.coverage_ratio*100).toFixed(0)}%`">
+      <div class="text-xs uppercase tracking-wide opacity-80 capitalize"
+           x-text="key === 'overall' ? 'Overall' : (key === 'cafe' ? 'Café' : key) + ' GP'"></div>
+      <div class="text-3xl font-medium mono">
+        <template x-if="gpr?.tiles?.[key]?.no_cost_data">
+          <span class="text-slate-500 text-base">no cost data</span>
+        </template>
+        <template x-if="!gpr?.tiles?.[key]?.no_cost_data">
+          <span x-text="gpr?.tiles?.[key]?.gp_pct != null
+            ? Number(gpr.tiles[key].gp_pct).toFixed(1) + '%' : '—'"></span>
+        </template>
+      </div>
+      <div class="text-xs opacity-70 mono">
+        rev <span x-text="'£' + Math.round(gpr?.tiles?.[key]?.revenue || 0).toLocaleString()"></span>
+        · cost <span x-text="'£' + Math.round(gpr?.tiles?.[key]?.cost || 0).toLocaleString()"></span>
+      </div>
     </div>
-  </div>
-  <div class="gp-tile" :class="gpClass('food')">
-    <div class="text-xs uppercase tracking-wide opacity-80">Food GP</div>
-    <div class="text-3xl font-medium mono"
-         x-text="gp?.latest?.pub_food_gp_pct != null ? gp.latest.pub_food_gp_pct.toFixed(1) + '%' : '—'"></div>
-    <div class="text-xs opacity-70 mono">
-      7d avg: <span x-text="gp?.rolling_7d?.food != null ? gp.rolling_7d.food.toFixed(1) + '%' : '—'"></span>
-    </div>
-  </div>
-  <div class="gp-tile" :class="gpClass('cafe')">
-    <div class="text-xs uppercase tracking-wide opacity-80">Café GP</div>
-    <div class="text-3xl font-medium mono"
-         x-text="gp?.latest?.cafe_gp_pct != null ? gp.latest.cafe_gp_pct.toFixed(1) + '%' : '—'"></div>
-    <div class="text-xs opacity-70 mono">
-      7d avg: <span x-text="gp?.rolling_7d?.cafe != null ? gp.rolling_7d.cafe.toFixed(1) + '%' : '—'"></span>
-    </div>
-  </div>
-  <div class="gp-tile" :class="gpClass('overall')">
-    <div class="text-xs uppercase tracking-wide opacity-80">Overall GP</div>
-    <div class="text-3xl font-medium mono"
-         x-text="gp?.latest?.overall_gp_pct != null ? gp.latest.overall_gp_pct.toFixed(1) + '%' : '—'"></div>
-    <div class="text-xs opacity-70 mono">
-      7d avg: <span x-text="gp?.rolling_7d?.overall != null ? gp.rolling_7d.overall.toFixed(1) + '%' : '—'"></span>
-    </div>
-  </div>
+  </template>
 </section>
+<div class="text-xs text-slate-500 -mt-2 px-1" x-show="gpr?.amber_low_coverage">
+  ⚠ Invoice coverage in this window is below expected
+  (<span x-text="((gpr?.coverage_ratio || 0)*100).toFixed(0)"></span>% of average) —
+  GP figures may be flattering; lengthen the window to smooth.
+</div>
 
 <!-- Totals -->
 <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -153,6 +177,7 @@ function inv() {
     dateTo: '',
     data: { totals: {}, by_vendor: [], invoices: [] },
     gp: null,
+    gpr: null,
     invoiceTable: null,
     vendorTable: null,
     catTable: null,
@@ -165,12 +190,14 @@ function inv() {
     async reload() {
       if (!this.dateFrom || !this.dateTo) return;
       const qs = `date_from=${this.dateFrom}&date_to=${this.dateTo}&site=${this.site}`;
-      const [r1, r2] = await Promise.all([
+      const [r1, r2, r3] = await Promise.all([
         fetch(`/api/invoices/list?${qs}`),
         fetch(`/api/gp/daily?${qs}`),
+        fetch(`/api/gp/rolling?${qs}&smoothed=true&smoothing=14`),
       ]);
       this.data = await r1.json();
       this.gp   = await r2.json();
+      this.gpr  = await r3.json();
       this.renderCategories();
       this.renderInvoices();
       this.renderVendors();
@@ -183,7 +210,8 @@ function inv() {
       return sum > 0 ? '£' + sum.toLocaleString(undefined,{maximumFractionDigits:0}) : '—';
     },
     gpClass(stream) {
-      const v = this.gp?.latest?.[
+      // Prefer the smoothed rolling figure (gpr.tiles), fall back to daily.
+      const v = this.gpr?.tiles?.[stream]?.gp_pct ?? this.gp?.latest?.[
         stream==='drink'   ? 'pub_drink_gp_pct' :
         stream==='food'    ? 'pub_food_gp_pct'  :
         stream==='cafe'    ? 'cafe_gp_pct'      :
@@ -222,10 +250,14 @@ function inv() {
               ? `<a href="/api/invoice/${c.getRow().getData().id}/pdf" target="_blank" onclick="event.stopPropagation()">📄</a>`
               : '',
             hozAlign: 'center', width: 50, headerFilter: false },
-          { title: 'Feedback', field: 'id',
-            formatter: (c) => `<button class="dw-btn" style="font-size:11px;padding:2px 6px"
-              onclick="event.stopPropagation(); window.openFeedback(${c.getValue()})">✎</button>`,
-            hozAlign: 'center', width: 70, headerFilter: false },
+          { title: 'Teach AI', field: 'id',
+            titleFormatter: () => `<span title="Click ✎ on a row to tell the AI how to handle it next time. Sonnet processes feedback overnight.">Teach AI ⓘ</span>`,
+            formatter: (c) => `<button class="feedback-btn"
+              onclick="event.stopPropagation(); window.openFeedback(${c.getValue()}, this)"
+              title="Open the conversation panel — tell the AI how to handle this invoice">
+              ✎ <span class="feedback-btn-label">Feedback</span>
+              </button>`,
+            hozAlign: 'center', width: 110, headerFilter: false },
         ],
         row_link: (row) => `/viewer/email/${encodeURIComponent(row.account)}/${encodeURIComponent(row.source_email_id)}`,
       };
@@ -277,28 +309,76 @@ function inv() {
   };
 }
 
-// Inline feedback modal (lightweight; no separate component file)
-window.openFeedback = async function(invoiceId) {
-  const text = prompt(`Feedback for invoice #${invoiceId}\n\n` +
-    'Examples:\n' +
-    '  • "This is a statement, not an invoice"\n' +
-    '  • "All invoices from this vendor are wet purchases"\n' +
-    '  • "Recategorise as cafe_stock"\n\n' +
-    'Your message:');
-  if (!text || text.trim().length < 3) return;
+// U47a — proper feedback modal (replaces the old window.prompt flow).
+window.openFeedback = function(invoiceId) {
+  // Build overlay
+  const overlay = document.createElement('div');
+  overlay.className = 'fb-overlay';
+  overlay.innerHTML = `
+    <div class="fb-modal" role="dialog" aria-modal="true" aria-labelledby="fb-title">
+      <h3 id="fb-title">Teach the AI — invoice #${invoiceId}</h3>
+      <div class="subtle">
+        Tell the AI in plain English how to handle this invoice (and similar ones)
+        next time. Your input goes to <em>bot_feedback</em>; Sonnet proposes an
+        action overnight which you approve in the Action Queue.
+      </div>
+      <textarea id="fb-text" placeholder="e.g. &quot;This is a statement, not an invoice&quot; &nbsp;or&nbsp;
+&quot;All invoices from this vendor are wet purchases&quot; &nbsp;or&nbsp;
+&quot;Recategorise as cafe_stock&quot; &nbsp;or&nbsp;
+&quot;Split GP between drink and food 70/30 for this vendor.&quot;"></textarea>
+      <div class="examples">
+        Examples of what works well:<br>
+        &nbsp;• <strong>Reclassify:</strong> "This vendor is dry purchase, not wet"<br>
+        &nbsp;• <strong>Statement flag:</strong> "This is a statement, not an invoice — ignore"<br>
+        &nbsp;• <strong>Site assignment:</strong> "This always belongs to the café"<br>
+        &nbsp;• <strong>GP split:</strong> "For this vendor split 70% food / 30% drink"<br>
+        &nbsp;• <strong>Action:</strong> "Email accounts to pay this on receipt"
+      </div>
+      <div class="actions">
+        <button onclick="window.closeFeedback()">Cancel</button>
+        <button class="primary" onclick="window.submitFeedback(${invoiceId})">Save feedback</button>
+      </div>
+      <div id="fb-status" class="subtle" style="margin-top:8px;color:#fcd34d"></div>
+    </div>
+  `;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) window.closeFeedback(); });
+  document.body.appendChild(overlay);
+  window._fbOverlay = overlay;
+  setTimeout(() => document.getElementById('fb-text').focus(), 50);
+  document.addEventListener('keydown', window._fbEsc = (e) => {
+    if (e.key === 'Escape') window.closeFeedback();
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) window.submitFeedback(invoiceId);
+  });
+};
+
+window.closeFeedback = function() {
+  if (window._fbOverlay) { window._fbOverlay.remove(); window._fbOverlay = null; }
+  if (window._fbEsc) { document.removeEventListener('keydown', window._fbEsc); window._fbEsc = null; }
+};
+
+window.submitFeedback = async function(invoiceId) {
+  const text = (document.getElementById('fb-text').value || '').trim();
+  const status = document.getElementById('fb-status');
+  if (text.length < 3) {
+    status.textContent = '✗ Type at least 3 characters of feedback.';
+    return;
+  }
+  status.textContent = '… saving …';
   try {
     const r = await fetch(`/api/invoice/${invoiceId}/feedback`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({text: text.trim()})
+      body: JSON.stringify({text}),
     });
     const o = await r.json();
     if (o.ok) {
-      alert(`✓ Feedback saved (#${o.feedback_id}). Sonnet will propose an action overnight; approve in the Action Queue.`);
+      status.style.color = '#6ee7b7';
+      status.innerHTML = `✓ Saved (#${o.feedback_id}). Sonnet will propose an action overnight; approve it in the Action Queue.`;
+      setTimeout(() => window.closeFeedback(), 1800);
     } else {
-      alert(`✗ ${o.error || 'unknown error'}`);
+      status.textContent = `✗ ${o.error || 'unknown error'}`;
     }
   } catch (e) {
-    alert(`✗ network error: ${e}`);
+    status.textContent = `✗ network error: ${e}`;
   }
 };
 </script>

@@ -1217,6 +1217,93 @@ and `completion_tokens` are recording cache vs non-cache correctly.
 
 ---
 
+### 3.29 Invoice UX repairs — visible pencil, site filter, conversational feedback (Phase 2)
+
+13/5 review: ✎ button (invoices.html:227) is too subtle, site=cafe returns 0
+(no `site` column on `vendor_invoice_inbox`), and the detail panel has no
+free-text learning input. Adds `site` generated column (pub/cafe/shared from
+`account_canonical`), restyles the pencil as a real button with tooltip,
+and adds a conversational textarea in the detail modal that POSTs to the
+existing `/api/invoice/{id}/feedback` loop. Sonnet feedback-applier (already
+running 21:30) picks it up overnight.
+
+**Full implementation:** U47 Track 1.
+
+---
+
+### 3.30 GP boxes — show £rev + £cost + 30d-smoothed % (Phase 2)
+
+13/5 review: GP tiles all show ~100% because café has no `cafe` bucket cost
+yet and short windows are distorted by lumpy invoice arrival. Fix: always
+display revenue, cost AND %; default tile window = 30d rolling; amber
+"low-cost-coverage" badge when invoice count is under-represented for the
+window length; café tile shows "no cost data" until café vendors are tagged.
+
+**Full implementation:** U47 Track 2.
+
+---
+
+### 3.31 Pub live-ops tiles wired to real Caterbook (Phase 2)
+
+13/5 review: `/pub` page is rendering placeholders rather than live data.
+Audit each tile's SQL, fix view/JOIN gaps (channel source NULLs, UTC vs
+Europe/London day boundary, current-week inclusion), and add an end-to-end
+test against fixture data.
+
+**Full implementation:** U47 Track 3.
+
+---
+
+### 3.32 Weather 400-day historical backfill (Phase 2)
+
+13/5 ask: extend `weather_daily` from 30d to 400d using Open-Meteo's archive
+endpoint (single bulk API call, no auth). Unlocks year-prior comparison view
+`v_weather_seasonality` and lets us query sales × weather across a full
+calendar of seasonality.
+
+**Full implementation:** U47 Track 4.
+
+---
+
+### 3.33 Workforce page repairs — today's roster, rota-vs-actual variance, date presets, shift cost (Phase 2)
+
+13/5 review: `/workforce` rota is empty, no forecast (rota) vs actual
+(timesheet) cost variance shown, top staff table omits shift cost, date
+picker has no preset buttons. Fix the SQL behind `/api/workforce/rota_today`
+and `/forecast_vs_actual`, add Yesterday/This week/Last week/Last month
+preset buttons, add `shift_cost` column to the top staff table.
+
+**Full implementation:** U47 Track 5.
+
+---
+
+### 3.34 Sales-per-productive-hour leaderboard (Phase 2)
+
+13/5 ask: attribute sales to staff by department + shift window. Kitchen →
+food sales, bar → drink, FoH → drink+food (with shared-attribution badge),
+café → café sales. Materialised view `v_staff_sales_window` refreshed
+nightly; endpoint `/api/workforce/sales_per_hour` returns leaderboard with
+rank-within-department. Quiet shifts return NULL (not £0) to avoid
+divide-by-zero ranking noise.
+
+**Full implementation:** U47 Track 6.
+
+---
+
+### 3.35 Email classifier review queue — surface low-confidence rows (Phase 2)
+
+13/5 review: current UX requires Jo to paste emails in. Better: classifier
+already emits `confidence_score`; rows where `confidence < 0.7` surface on
+Mission Control as "AI uncertain — needs your eye". Click → opens existing
+email source viewer + correction form (dropdown for correct category, radio
+for priority, free-text learning notes). Submit → INSERT to `bot_feedback`
+(NEW V57). Sonnet overnight pass extends `u44-feedback-applier.sh` to ingest
+classifier corrections.
+
+**Full implementation:** U47 Track 7.
+
+---
+
 ### 3.19 Materialized Views for Dashboard Performance (Phase 3+ optimisation — no SPEC section yet)
 
 Stretch-only pointer. Several dashboard views aggregate large rowsets; on a busy

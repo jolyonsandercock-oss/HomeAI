@@ -1208,17 +1208,28 @@ _INVOICE_STORAGE_ROOT = "/home_ai/storage/invoices"
 
 
 @app.get("/api/gp/rolling")
-async def api_gp_rolling(date_from: str = "", date_to: str = ""):
-    """U46 — rolling-window GP over any date range. Defaults to last 7 days."""
+async def api_gp_rolling(date_from: str = "", date_to: str = "",
+                         smoothing: int = 14, smoothed: bool = True):
+    """U46/U47 — rolling-window GP over any date range. Defaults to last 30 days
+    with 14d invoice smoothing (set smoothed=false to compare against raw)."""
     from datetime import date as _date, timedelta as _td
     if not date_from or not date_to:
-        t = _date.today(); date_from_d = t - _td(days=7); date_to_d = t
+        t = _date.today(); date_from_d = t - _td(days=30); date_to_d = t
     else:
         date_from_d = _date.fromisoformat(date_from); date_to_d = _date.fromisoformat(date_to)
     p = await pool()
     async with p.acquire() as c:
         await c.execute("SET app.current_entity = 'all'")
-        row = await c.fetchrow("SELECT * FROM gp_window($1::date, $2::date)", date_from_d, date_to_d)
+        if smoothed:
+            row = await c.fetchrow(
+              "SELECT * FROM gp_window_smoothed($1::date, $2::date, $3)",
+              date_from_d, date_to_d, smoothing,
+            )
+        else:
+            row = await c.fetchrow(
+              "SELECT * FROM gp_window($1::date, $2::date)",
+              date_from_d, date_to_d,
+            )
     if not row:
         return {"window": {"from": date_from_d.isoformat(), "to": date_to_d.isoformat()}, "data": None}
     out = {}
@@ -1226,7 +1237,39 @@ async def api_gp_rolling(date_from: str = "", date_to: str = ""):
         if hasattr(v, "isoformat"): out[k] = v.isoformat()
         elif hasattr(v, "to_eng_string"): out[k] = float(v)
         else: out[k] = v
-    return {"data": out}
+    # Build per-stream tiles: rev, cost, gp_pct, amber flag
+    coverage = out.get("coverage_ratio") or 1.0
+    amber = coverage < 0.4
+    pub = float(out.get("pub_net_sales") or 0)
+    tiles = {
+      "drink": {
+        "revenue":  round(pub * 0.60, 2),
+        "cost":     round(float(out.get("wet_cost") or 0), 2),
+        "gp_pct":   out.get("pub_drink_gp_pct"),
+        "amber":    amber,
+      },
+      "food": {
+        "revenue":  round(pub * 0.40, 2),
+        "cost":     round(float(out.get("dry_cost") or 0), 2),
+        "gp_pct":   out.get("pub_food_gp_pct"),
+        "amber":    amber,
+      },
+      "cafe": {
+        "revenue":  round(float(out.get("sandwich_net_sales") or 0), 2),
+        "cost":     round(float(out.get("cafe_cost") or 0), 2),
+        "gp_pct":   out.get("cafe_gp_pct"),
+        "no_cost_data": (float(out.get("cafe_cost") or 0) == 0),
+        "amber":    amber,
+      },
+      "overall": {
+        "revenue":  round(float(out.get("total_revenue") or 0), 2),
+        "cost":     round(float(out.get("total_cost") or 0), 2),
+        "gp_pct":   out.get("overall_gp_pct"),
+        "amber":    amber,
+      },
+    }
+    return {"data": out, "tiles": tiles, "smoothed": smoothed,
+            "coverage_ratio": coverage, "amber_low_coverage": amber}
 
 
 @app.get("/api/gp/daily")
@@ -1281,6 +1324,58 @@ async def api_gp_daily(date_from: str = "", date_to: str = "", site: str = "all"
         },
         "site": site,
     }
+
+
+@app.get("/api/classifier/uncertain")
+async def api_classifier_uncertain(limit: int = 30):
+    """U47a — low-confidence classifier queue. Surfaces emails the AI flagged
+    as uncertain so Jo can confirm/correct in one click."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        rows = await c.fetch("""
+          SELECT email_id, gmail_message_id, account, from_address, from_name,
+                 subject, classification, confidence_score, requires_human,
+                 action_required,
+                 to_char(received_at,'YYYY-MM-DD HH24:MI') AS received_at,
+                 age_days
+          FROM v_classifier_uncertain LIMIT $1
+        """, limit)
+    items = []
+    for r in rows:
+        d = dict(r)
+        if d.get("confidence_score") is not None:
+            d["confidence_score"] = float(d["confidence_score"])
+        items.append(d)
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/classifier/feedback")
+async def api_classifier_feedback(body: dict):
+    """U47a — Jo submits a correction or confirmation for an uncertain email."""
+    email_id = body.get("email_id")
+    corrected = (body.get("corrected_class") or "").strip()
+    notes = (body.get("notes") or "").strip()
+    if not email_id or (not corrected and not notes):
+        return {"ok": False, "error": "email_id + (corrected_class or notes) required"}
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        orig = await c.fetchrow(
+          "SELECT classification, confidence_score FROM emails WHERE id = $1", email_id
+        )
+        if not orig:
+            return {"ok": False, "error": f"email {email_id} not found"}
+        fb_id = await c.fetchval("""
+          INSERT INTO bot_feedback
+            (email_id, domain, original_class, corrected_class,
+             original_conf, notes)
+          VALUES ($1, 'classifier', $2, $3, $4, $5)
+          RETURNING id
+        """, email_id, orig["classification"],
+             corrected or orig["classification"],
+             orig["confidence_score"], notes or "(confirmed by user)")
+    return {"ok": True, "feedback_id": fb_id}
 
 
 @app.get("/api/email-tasks/open")
@@ -2309,38 +2404,49 @@ async def api_touchoffice_overview(days: int = 30):
 
 @app.get("/api/pub/snapshot")
 async def pub_snapshot():
-    """Aggregate today's pub-side metrics: EPoS revenue, accommodation
-    occupancy, this week's bookings calendar, today's arrivals + tomorrow's
-    departures. One round-trip for the front-end."""
+    """U47a — Pub-side metrics from real tables (caterbook + touchoffice).
+    The legacy epos_daily/accommodation_* tables are stubs and were always
+    empty. We now read from touchoffice_fixed_totals + caterbook_bookings /
+    caterbook_room_nights directly."""
     p = await pool()
     async with p.acquire() as c:
         await c.execute("SET app.current_entity = 'all'")
         today_epos = await c.fetchrow("""
-          SELECT COALESCE(SUM(gross), 0)::numeric(10,2) AS gross,
-                 COALESCE(SUM(covers), 0)               AS covers,
-                 COUNT(*)                                AS sessions
-            FROM epos_daily WHERE report_date = CURRENT_DATE
+          SELECT
+            COALESCE(SUM(value) FILTER (WHERE label = 'GROSS Sales'), 0)::numeric(10,2) AS gross,
+            COALESCE(SUM(value) FILTER (WHERE label = 'NET sales'),  0)::numeric(10,2) AS net,
+            COALESCE(SUM(value) FILTER (WHERE label = 'Covers'),     0)::numeric        AS covers
+          FROM touchoffice_fixed_totals
+          WHERE report_date = CURRENT_DATE
         """)
         today_accom = await c.fetchrow("""
-          SELECT occupancy_pct, rooms_occupied, total_rooms, room_revenue
-            FROM accommodation_daily WHERE report_date = CURRENT_DATE LIMIT 1
+          SELECT
+            COUNT(DISTINCT room)::int                          AS rooms_occupied,
+            COALESCE(SUM(rate_per_night), 0)::numeric(10,2)    AS room_revenue
+          FROM caterbook_room_nights
+          WHERE night_date = CURRENT_DATE
         """)
+        rooms_total = 7   # Malthouse has 7 rooms (kept as constant; promote to entity meta later)
         today_bookings = await c.fetchrow("""
-          SELECT COUNT(*) FILTER (WHERE status IN ('Confirmed','New')) AS new_today,
-                 COALESCE(SUM(total_amount) FILTER (WHERE status IN ('Confirmed','New')), 0)::numeric(10,2) AS gross_today
-            FROM accommodation_bookings WHERE created_at::date = CURRENT_DATE
+          SELECT
+            COUNT(*) FILTER (WHERE first_seen::date = CURRENT_DATE)            AS new_today,
+            COALESCE(SUM(total_amount) FILTER (WHERE first_seen::date = CURRENT_DATE), 0)::numeric(10,2) AS gross_today
+          FROM caterbook_bookings
         """)
         arrivals_today = await c.fetch("""
-          SELECT id, guest_name, room, source, total_amount, currency
-            FROM accommodation_bookings
-           WHERE checkin_date = CURRENT_DATE AND status IN ('Confirmed','New')
+          SELECT ref AS id, guest_name, room,
+                 'caterbook' AS source, total_amount,
+                 'GBP' AS currency
+            FROM caterbook_bookings
+           WHERE arrival_date = CURRENT_DATE
            ORDER BY guest_name LIMIT 10
         """)
         departures_tomorrow = await c.fetch("""
-          SELECT id, guest_name, room, source, total_amount, currency
-            FROM accommodation_bookings
-           WHERE checkout_date = CURRENT_DATE + INTERVAL '1 day'
-             AND status IN ('Confirmed','New')
+          SELECT ref AS id, guest_name, room,
+                 'caterbook' AS source, total_amount,
+                 'GBP' AS currency
+            FROM caterbook_bookings
+           WHERE departure_date = CURRENT_DATE + INTERVAL '1 day'
            ORDER BY guest_name LIMIT 10
         """)
         week_calendar = await c.fetch("""
@@ -2352,38 +2458,45 @@ async def pub_snapshot():
                    )::date AS d
           )
           SELECT days.d AS day,
-                 COUNT(b.id) FILTER (WHERE b.status IN ('Confirmed','New')) AS confirmed,
-                 COUNT(b.id) FILTER (WHERE b.status = 'Cancelled')          AS cancelled,
-                 COALESCE(SUM(b.total_amount) FILTER (WHERE b.status IN ('Confirmed','New')), 0)::numeric(10,2) AS gross
+                 COUNT(DISTINCT rn.ref) FILTER (WHERE rn.night_date = days.d) AS confirmed,
+                 0::bigint AS cancelled,
+                 COALESCE(SUM(rn.rate_per_night) FILTER (WHERE rn.night_date = days.d), 0)::numeric(10,2) AS gross
             FROM days
-            LEFT JOIN accommodation_bookings b
-              ON b.checkin_date <= days.d AND COALESCE(b.checkout_date, days.d) > days.d
+            LEFT JOIN caterbook_room_nights rn ON rn.night_date = days.d
            GROUP BY days.d
            ORDER BY days.d
         """)
         channel_mix_14d = await c.fetch("""
-          SELECT source,
-                 COUNT(*) AS bookings,
+          SELECT COALESCE(rate_code, 'direct') AS source,
+                 COUNT(*)                       AS bookings,
                  COALESCE(SUM(total_amount), 0)::numeric(10,2) AS gross
-            FROM accommodation_bookings
-           WHERE checkin_date BETWEEN CURRENT_DATE - INTERVAL '14 days' AND CURRENT_DATE + INTERVAL '14 days'
-             AND status IN ('Confirmed','New')
-           GROUP BY source
-           ORDER BY bookings DESC
+            FROM caterbook_bookings
+           WHERE arrival_date BETWEEN CURRENT_DATE - INTERVAL '14 days'
+                                  AND CURRENT_DATE + INTERVAL '14 days'
+           GROUP BY 1
+           ORDER BY bookings DESC LIMIT 8
         """)
-        # 14-day sparklines for EPoS gross and occupancy
         epos_sparkline = await c.fetch("""
-          SELECT report_date::text AS d, SUM(gross)::numeric(10,2) AS v
-            FROM epos_daily
+          SELECT report_date::text AS d,
+                 SUM(value) FILTER (WHERE label = 'GROSS Sales')::numeric(10,2) AS v
+            FROM touchoffice_fixed_totals
            WHERE report_date >= CURRENT_DATE - INTERVAL '14 days'
            GROUP BY report_date ORDER BY report_date
         """)
         occ_sparkline = await c.fetch("""
-          SELECT report_date::text AS d, AVG(occupancy_pct)::numeric(5,1) AS v
-            FROM accommodation_daily
-           WHERE report_date >= CURRENT_DATE - INTERVAL '14 days'
-           GROUP BY report_date ORDER BY report_date
+          SELECT night_date::text AS d,
+                 (COUNT(DISTINCT room) * 100.0 / 7)::numeric(5,1) AS v
+            FROM caterbook_room_nights
+           WHERE night_date >= CURRENT_DATE - INTERVAL '14 days'
+           GROUP BY night_date ORDER BY night_date
         """)
+        # Synthesise a single-row "today_accom" with occupancy_pct
+        today_accom = {
+            "occupancy_pct": (float(today_accom["rooms_occupied"]) * 100.0 / rooms_total) if today_accom else 0,
+            "rooms_occupied": today_accom["rooms_occupied"] if today_accom else 0,
+            "total_rooms": rooms_total,
+            "room_revenue": today_accom["room_revenue"] if today_accom else 0,
+        }
 
     def row_to(rs):
         return [dict(r) for r in rs]
@@ -2393,12 +2506,13 @@ async def pub_snapshot():
         "today": {
             "date":             datetime.now(timezone.utc).date().isoformat(),
             "epos_gross":       float(today_epos["gross"]) if today_epos else 0,
-            "epos_covers":      int(today_epos["covers"]) if today_epos else 0,
-            "epos_sessions":    int(today_epos["sessions"]) if today_epos else 0,
-            "occupancy_pct":    float(today_accom["occupancy_pct"]) if today_accom and today_accom["occupancy_pct"] is not None else None,
-            "rooms_occupied":   today_accom["rooms_occupied"] if today_accom else None,
-            "total_rooms":      today_accom["total_rooms"] if today_accom else None,
-            "room_revenue":     float(today_accom["room_revenue"]) if today_accom and today_accom["room_revenue"] is not None else 0,
+            "epos_net":         float(today_epos["net"])   if today_epos else 0,
+            "epos_covers":      int(today_epos["covers"])  if today_epos and today_epos["covers"] is not None else 0,
+            "epos_sessions":    1 if today_epos and float(today_epos["gross"] or 0) > 0 else 0,
+            "occupancy_pct":    today_accom["occupancy_pct"],
+            "rooms_occupied":   today_accom["rooms_occupied"],
+            "total_rooms":      today_accom["total_rooms"],
+            "room_revenue":     float(today_accom["room_revenue"]),
             "new_bookings":     today_bookings["new_today"],
             "bookings_gross":   float(today_bookings["gross_today"]),
         },
