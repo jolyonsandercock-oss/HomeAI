@@ -1,0 +1,126 @@
+# Caddyfile staged for U57 — adds FQDN + TLS + Authelia forward_auth.
+#
+# Strategy: keep all existing IP-based routes (http://:80) UNCHANGED so they
+# remain a tested fallback. Add a new https://jolybox.tailc27dff.ts.net
+# listener that has forward_auth on /dashboard* — after smoke tests prove
+# the FQDN path works, a follow-up cleanup can remove the IP backdoor.
+
+{
+    auto_https off
+}
+
+# Direct port-passthrough proxies (existing services on their familiar ports)
+http://100.104.82.53:5678 {
+    reverse_proxy homeai-n8n:5678
+}
+
+http://100.104.82.53:3000 {
+    reverse_proxy homeai-metabase:3000
+}
+
+http://100.104.82.53:8080 {
+    reverse_proxy homeai-open-webui:8080
+}
+
+# IP-based path-routed listener — UNCHANGED, kept as rollback path.
+http://:80 {
+    handle_path /dashboard/* {
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /dashboard {
+        redir /dashboard/ permanent
+    }
+    handle /pub {
+        rewrite * /pub
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /pub/* {
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /forensics {
+        rewrite * /forensics
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /forensics/* {
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /api/forensics/* {
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /api/pub/* {
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /playground {
+        rewrite * /playground
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle /api/playground/* {
+        reverse_proxy homeai-build-dashboard:8090
+    }
+    handle_path /markitdown/* {
+        reverse_proxy homeai-markitdown:8004
+    }
+    handle /markitdown {
+        redir /markitdown/ permanent
+    }
+    handle_path /auth/* {
+        reverse_proxy homeai-authelia:9091
+    }
+    handle /auth {
+        redir /auth/ permanent
+    }
+    handle_path /search/* {
+        reverse_proxy homeai-searxng:8080
+    }
+    handle /search {
+        redir /search/ permanent
+    }
+    handle /healthz {
+        respond "ok" 200
+    }
+    handle / {
+        rewrite * /landing
+        reverse_proxy homeai-build-dashboard:8090
+    }
+}
+
+# FQDN + TLS listener — U57 R3+R4.
+# /dashboard is gated by Authelia forward_auth; /auth/ passes through so the
+# portal is reachable; /healthz is open for smoke probes.
+https://jolybox.tailc27dff.ts.net {
+    tls /etc/caddy/tls/jolybox.tailc27dff.ts.net.crt /etc/caddy/tls/jolybox.tailc27dff.ts.net.key
+
+    # Authelia portal — must be reachable WITHOUT auth so users can log in.
+    handle_path /auth/* {
+        reverse_proxy homeai-authelia:9091
+    }
+    handle /auth {
+        redir /auth/ permanent
+    }
+
+    # Health probe — open so the watchdog can liveness-check.
+    handle /healthz {
+        respond "ok" 200
+    }
+
+    # Dashboard — forward_auth via Authelia. Remote-Groups carries the user's
+    # realm membership (owner/work/family) — build-dashboard middleware reads
+    # it and sets app.current_realm per request.
+    handle /dashboard* {
+        forward_auth homeai-authelia:9091 {
+            uri /api/verify?rd=https://jolybox.tailc27dff.ts.net/auth/
+            copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+        }
+        handle_path /dashboard/* {
+            reverse_proxy homeai-build-dashboard:8090
+        }
+        handle /dashboard {
+            redir /dashboard/ permanent
+        }
+    }
+
+    # Default — friendly redirect to /dashboard.
+    handle / {
+        redir /dashboard/ permanent
+    }
+}

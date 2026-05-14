@@ -69,11 +69,26 @@ async def cached(key: str, fn, ttl: int = CACHE_TTL):
     return val
 
 # ─── YAML loaders (re-read on each call) ────────────────────────
+def _isoify(o):
+    """Walk a yaml-loaded structure and convert datetime.date / datetime.datetime
+    to ISO strings so the result is JSON-serialisable. YAML literal `2026-05-14`
+    becomes a date object by default; we want a string in the API surface."""
+    from datetime import date, datetime as _dt
+    if isinstance(o, dict):
+        return {k: _isoify(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_isoify(v) for v in o]
+    if isinstance(o, _dt):
+        return o.isoformat()
+    if isinstance(o, date):
+        return o.isoformat()
+    return o
+
 def load_yaml(name: str) -> dict:
     p = DATA / name
     if not p.exists():
         return {}
-    return yaml.safe_load(p.read_text()) or {}
+    return _isoify(yaml.safe_load(p.read_text()) or {})
 
 # ─── Postgres pool ──────────────────────────────────────────────
 _pool: asyncpg.Pool | None = None
@@ -490,10 +505,21 @@ async def realm_middleware(request, call_next):
         _current_realm.set("owner")
         return await call_next(request)
 
+    # Two header sources, in order of trust:
+    #   1. X-Realm — explicit override (used for testing or manual injection)
+    #   2. Remote-Groups — Authelia forward_auth carries the authenticated
+    #      user's group list comma-separated; pick the first valid realm.
     realm = (request.headers.get("X-Realm") or "").strip()
+    if not realm:
+        groups = (request.headers.get("Remote-Groups") or "").strip()
+        for g in (g.strip() for g in groups.split(",")):
+            if g in ("owner", "work", "family"):
+                realm = g
+                break
     if realm not in ("owner", "work", "family"):
         return JSONResponse(
-            {"error": "missing or invalid X-Realm header"}, status_code=401
+            {"error": "missing or invalid realm — no X-Realm and no valid Remote-Groups"},
+            status_code=401,
         )
     _current_realm.set(realm)
     return await call_next(request)

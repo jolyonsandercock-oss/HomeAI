@@ -193,6 +193,7 @@ services:
     networks: [ai-proxy, ai-internal]
     volumes:
       - ./config/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./config/caddy/tls:/etc/caddy/tls:ro
       - caddy_data:/data
       - caddy_config:/config
     ports:
