@@ -93,6 +93,8 @@ async def main():
     client  = anthropic.Anthropic(api_key=api_key)
     conn = await asyncpg.connect(PG_DSN)
     await conn.execute("SET app.current_entity='1'")
+    # R6: feedback applies cross-realm (emails span work/family) — OWNER scope.
+    await conn.execute("SET app.current_realm = 'owner'")
 
     rows = await conn.fetch("""
       SELECT f.id AS feedback_id, f.invoice_id, f.feedback_text,

@@ -111,6 +111,8 @@ async def main():
     client  = anthropic.Anthropic(api_key=api_key)
     conn = await asyncpg.connect(PG_DSN)
     await conn.execute("SET app.current_entity='1'")
+    # R6: invoice rows are entity_id=1 — WORK realm only.
+    await conn.execute("SET app.current_realm = 'work'")
     # Re-Haiku anything that's low-confidence OR has a math error (net+vat≠gross).
     # Skip notification_only (no PDF) and pdf_fail (nothing to send to AI).
     rows = await conn.fetch("""

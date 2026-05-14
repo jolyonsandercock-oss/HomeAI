@@ -76,6 +76,8 @@ TOOL = {
 async def main():
     client = anthropic.Anthropic(api_key=vault_get("anthropic")["api_key"])
     conn = await asyncpg.connect(PG_DSN)
+    # R6: emails span work/family — extractor runs as OWNER to see all.
+    await conn.execute("SET app.current_realm = 'owner'")
 
     rows = await conn.fetch(f"""
       SELECT e.id, e.gmail_message_id, e.account, e.subject,

@@ -71,6 +71,8 @@ async def main():
     client  = anthropic.Anthropic(api_key=api_key)
     conn = await asyncpg.connect(PG_DSN)
     await conn.execute("SET app.current_entity='all'")
+    # R6: reconciliation flags can be cross-realm — explainer runs as OWNER.
+    await conn.execute("SET app.current_realm = 'owner'")
 
     # Cost guard
     spent_this_month = await conn.fetchval("""

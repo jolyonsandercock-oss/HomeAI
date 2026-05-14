@@ -110,6 +110,8 @@ async def main():
     client  = anthropic.Anthropic(api_key=api_key)
     conn = await asyncpg.connect(PG_DSN)
     await conn.execute("SET app.current_entity='1'")
+    # R6: guest reviews are pub-side — WORK realm only.
+    await conn.execute("SET app.current_realm = 'work'")
 
     rows = await conn.fetch("""
       SELECT review_id, source, location, rating, reviewer_name, body, posted_at

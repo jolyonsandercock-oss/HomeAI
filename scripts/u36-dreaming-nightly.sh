@@ -82,6 +82,8 @@ async def main():
     api_key = vault_get("anthropic")["api_key"]
     client  = anthropic.Anthropic(api_key=api_key)
     conn = await asyncpg.connect(PG_DSN)
+    # R6: Dreaming mines cross-realm patterns in audit_log → OWNER scope.
+    await conn.execute("SET app.current_realm = 'owner'")
     started = datetime.now()
     run_row = await conn.fetchrow("""
       INSERT INTO dreaming_runs (audit_window_h) VALUES ($1) RETURNING id
