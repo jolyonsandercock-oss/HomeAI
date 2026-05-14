@@ -8,23 +8,18 @@ hands_off:
 
   - id: caddy-routes
     title: Caddy reverse-proxy routes for new services
-    detail: /dashboard, /metabase, /auth/ via Caddy. Currently Tailscale-IP:port direct.
-    estimate: 30 min
+    detail: /dashboard, /metabase, /auth/ via Caddy. Currently Tailscale-IP:port direct. Bundled with U57 in-person sprint (depends on tailscale cert FQDN).
+    estimate: 30 min — bundled with U57
 
-  - id: ci-autofix
-    title: CI Auto-Fix (GitHub Actions)
-    detail: Repo exists. Workflow runs RLS suite + sanitiser + P2 + schema drift on PRs.
-    estimate: 45 min
-
-  - id: vehicle-table
-    title: Vehicles / MOT tracker
-    detail: User has 4 vehicles in Obsidian markdown (MOT/insurance/service/V5). Migrate to a vehicles table + scheduled MOT-due alerts. V62 already added the table; UI route still needs wiring.
+  - id: ai-worker-role-switch
+    title: Switch AI workers from postgres-superuser to homeai_pipeline
+    detail: >
+      U55 patched 9 AI worker scripts to SET app.current_realm. They connect
+      as `postgres` (BYPASSRLS) so the realm GUC is documentation-active
+      only. Move PG_DSN env for those scripts to homeai_pipeline so RLS
+      actually fires. Verify INSERT/UPDATE grants per script before flipping
+      (some write to ai_usage, dreaming_runs, vendor_invoice_inbox).
     estimate: 90 min
-
-  - id: cashing-up-form
-    title: Manager note + cashing-up UI on /m
-    detail: V35 manager_notes table is live. /m needs a small inline form to POST a note for any date. Also need a UI to mark flagged till_reconciliation entries 'resolved' with a note.
-    estimate: 60 min
 
 needs_user:
   - id: xero-oauth
@@ -69,6 +64,21 @@ recently_done:
   - id: u53-realm-r5-ingest
     shipped: 2026-05-14
     detail: V67 immutability + home_ai.realm_override() + google-fetch _MAILBOX_REALM map (pipeline_version 1.3). 795 historical events backfilled to correct realm.
+  - id: u54-pipeline-watchdog-card-recon
+    shipped: 2026-05-14
+    detail: Master Router 25h outage drained. scripts/u54-pipeline-watchdog.sh (cron */15) pages Telegram on >2h pending OR >15m no master-router exec — outside n8n. V69 v_card_reconciliation + writer cron (07:45) flagged 4 historical mismatches.
+  - id: u55-realm-r6-ai-scope
+    shipped: 2026-05-14
+    detail: 9 AI worker scripts now SET app.current_realm explicitly (dreaming/reconciliation→owner; invoice/review→work; etc). V70 v_ai_calls_by_realm. Enforcement requires PG_DSN switch to homeai_pipeline (queued — see hands_off).
+  - id: u56-r7-backup-ci
+    shipped: 2026-05-14
+    detail: scripts/u56-realm-scoped-backup.sh (weekly Sun 04:00, per-realm CSV.gz × 88 tables × 3 realms). .github/workflows/ci.yml — lint + entropy-scan + migration-order on push/PR.
+  - id: u54-d-mgr-note-till-resolve
+    shipped: 2026-05-14
+    detail: POST /api/manager-notes + /api/till-recon/{id}/resolve + inline 6th card on /m with date picker + textarea + recent-notes scroll. First note + first till_recon resolution both verified end-to-end.
+  - id: vehicle-table-ui
+    shipped: 2026-05-14
+    detail: /vehicles route + /api/vehicles endpoint already shipped earlier. 4 vehicles + 8 expiry alerts live. Discovered already-shipped during U54-D sprint planning.
   - id: subject-aware-vendor-rules
     shipped: 2026-05-13
     detail: V63 / V63a / V63b — vendor_category_rules.subject_pattern + resolve_invoice_site. J&R MAL125 routes to cafe; pub wet/dry 0 → 106 (£26.5k) after V63b fixed the STORED-generated-column-NULL-in-NEW gotcha.

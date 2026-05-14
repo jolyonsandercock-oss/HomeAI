@@ -19,6 +19,18 @@ items:
   #   complete bookings, 467 room-nights. Dashboard /caterbook live. 07:00
   #   cron live. Schema at V28.
 
+  - severity: low
+    title: AI workers use postgres-superuser DSN — R6 enforcement gap
+    detail: >
+      U55 patched 9 AI worker scripts to SET app.current_realm at connection.
+      They connect via PG_DSN as 'postgres' (BYPASSRLS), so the realm GUC
+      is documentation-active only — RLS doesn't actually fire. Switch
+      PG_DSN to homeai_pipeline for those scripts to close the loop.
+      Verify INSERT/UPDATE grants per script before flipping (some write
+      to ai_usage, dreaming_runs, vendor_invoice_inbox, etc).
+    unblocks: True R6 enforcement
+    estimate: 90 min
+
   - severity: medium
     title: Realm R3 (Auth) — blocked on tailscale-cert FQDN before forward_auth
     detail: >

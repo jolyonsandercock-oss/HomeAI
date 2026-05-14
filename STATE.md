@@ -1,11 +1,83 @@
 # Home AI — Live State Snapshot (for external review)
 
-*Generated 2026-05-12, R2 status appended 2026-05-14, R5 + U50 closeout
-appended 2026-05-14 (U53). Designed to be ingested by another LLM
-(Gemini, GPT, etc.) for a second-opinion review of what's live, what's
-planned, and where the design has shifted from the original spec.*
+*Generated 2026-05-12. R2 appended 2026-05-14 (U52). R5 + U50 closeout
+appended 2026-05-14 (U53). U54/U55/U56/U54-D appended 2026-05-14 (6h
+autonomous run). Designed to be ingested by another LLM (Gemini, GPT,
+etc.) for a second-opinion review of what's live, what's planned, and
+where the design has shifted from the original spec.*
 
-## 0. Most recent change (2026-05-14 — U53)
+## 0. Most recent autonomous run (2026-05-14 — U54+U55+U56+U54-D)
+
+**Sprint A — U54 Pipeline Stability + Dojo Recon (~45 min)**
+- Master Router was silent 2026-05-13 16:15 → 2026-05-14 17:25 (~25h
+  outage). Queue drained naturally after n8n restart; 80 stale-lease
+  dead letters auto-resolved with U54 attribution.
+- `scripts/u54-pipeline-watchdog.sh` (cron */15) — independent paging
+  outside n8n. Telegram-pages critical when oldest pending
+  email.received > 2h OR no master-router exec in 15m. 30-min
+  suppression window.
+- V69 `v_card_reconciliation` — per-(date, site) join of v_dojo_daily
+  to touchoffice_fixed_totals (totaliser_id=6 'CREDIT in Drawer').
+  Site map: malthouse→pub / sandwich→cafe. Status: ok / minor /
+  mismatch.
+- `scripts/u54-card-recon-writer.sh` (cron 07:45) — INSERTs
+  reconciliation_flags rows for new mismatches. First run wrote 4
+  historical flags (2026-05-07/08/10/11 pub-side).
+
+**Sprint B — U55 Realm R6 AI scope (~45 min)**
+- 9 Python AI worker scripts patched to call `SET app.current_realm`
+  explicitly at connection: dreaming/reconciliation/feedback/email-
+  task-extractor/uncertain-resolve/apply-feedback → owner; invoice-
+  haiku/review-drafter/due-date-haiku → work. Documents intent and
+  prepares for the (separate) PG_DSN role migration.
+- V70 `v_ai_calls_by_realm` — ai_usage roll-up by day × realm × task
+  × model with GBP cost. Diagnostic for catching workers that
+  silently write under the wrong realm.
+- Caveat: workers connect as `postgres` superuser → BYPASSRLS, so
+  SET calls are documentation-active, not enforcement-active, until
+  workers move to homeai_pipeline (queued).
+
+**Sprint C — U56-lite R7 backup + ci-autofix (~30 min)**
+- `scripts/u56-realm-scoped-backup.sh` (cron weekly Sun 04:00) — per-
+  realm CSV.gz exports of every realm-bearing table (88 × 3 = 264
+  files per run). manifest.json tracks rows + sha256 per file. First
+  run: owner 4.2M / work 3.5M / family 760K. Each realm dir is a
+  self-contained restore target alongside schema.sql.gz.
+- `.github/workflows/ci.yml` — three self-contained jobs: lint
+  (bash -n + py_compile), entropy-scan (private-key / hvs.* / long
+  literal patterns + 64-char hex outside known contexts), migration-
+  order (V<N> sequence with V16 and V49 known-gaps grandfathered).
+
+**Sprint D — Manager-note + till-recon UI on /m (~30 min)**
+- `POST /api/manager-notes`, `GET /api/manager-notes?days=N`, `POST
+  /api/till-recon/{id}/resolve` — all run inside
+  `home_ai.set_realm('work')` transactions.
+- `/m` gains an inline manager-note card (date picker + textarea +
+  Save + recent-notes scroll, mobile-friendly).
+- Caveat: dashboard image rebuilt twice (json import omission +
+  asyncpg date-binding) — recorded for future ref.
+
+**Realm phase status after this run**
+
+| R | Status |
+|---|--------|
+| R1 Label                                 | ✅ V64/V64a |
+| R2 RLS enforcement                       | ✅ U52 |
+| R3 Auth                                  | ❌ tailscale-cert FQDN — Jo at box |
+| R4 App route split + REALM_ENFORCE=1     | ⏳ middleware dormant; awaits R3 |
+| R5 Ingest tagging + immutability         | ✅ U53 (V67 + google-fetch) |
+| R6 Bot/AI scope (documentation-active)   | ✅ U55 (enforcement awaits PG_DSN switch) |
+| R7 Realm-scoped backup                   | ✅ U56 |
+
+**Outstanding for U57 (in-person, Jo at the box)**:
+- `tailscale cert <fqdn>` for the tailnet FQDN
+- Authelia forward_auth wired into Caddy for /dashboard /metabase
+  /auth/ (drains the cosmetic Vault/config drift on the way past)
+- Flip `REALM_ENFORCE=1` on build-dashboard + bot-responder
+- Install `~/.claude/settings.json` PreToolUse hooks
+  (`bash u13-install-hooks.sh`)
+
+## 0.1 Earlier 2026-05-14 — U53
 
 **Realm R5 (ingest tagging) + R4 immutability + U50 closeout shipped.**
 
@@ -39,7 +111,7 @@ v_daily_unit_economics rewrite) was already live.
 [[feedback_authelia_cookie_domain]]), R4 full route split (pending
 R3), R6 Bot/AI call-site scope (queued U54), R7 backup (queued U55).
 
-## 0.1 R1 + R2 (shipped earlier 2026-05-14 — U52)
+## 0.2 R1 + R2 (shipped earlier 2026-05-14 — U52)
 
 **Realm-split R1 + R2 shipped (U52).** Three-realm access model
 (OWNER / WORK / FAMILY) now enforced at the database layer:
