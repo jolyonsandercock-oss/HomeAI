@@ -1,0 +1,117 @@
+# /home_ai/config/payments/services.yaml
+#
+# Per-source payment ingestion configuration (SPEC §4b.4).
+# Validated by scripts/payments/validate-services.py before n8n picks it up.
+# Secrets are NOT in this file — only Vault paths.
+
+schema_version: 1
+
+sources:
+
+  dojo:
+    realm: work
+    primary_adapter: csv           # API access pending; CSV is current source of truth
+    fallback_chain: [scrape]
+    freshness_minutes: 1440
+    schedule:
+      api: null
+      scrape: "0 7 * * *"
+      csv: "watch"
+    vault:
+      api: "secret/payments/dojo/api"
+      scrape: "secret/payments/dojo/portal"
+      mailbox_2fa: "secret/payments/dojo/2fa"
+    config:
+      merchant_id_vault_key: "merchant_id"
+      terminals:
+        - { id: "T-PUB-01",  site: "pub",  description: "Bar 1" }
+        - { id: "T-PUB-02",  site: "pub",  description: "Bar 2 / restaurant" }
+        - { id: "T-CAFE-01", site: "cafe", description: "Sandwich Bar counter" }
+    csv_format:
+      identifier_columns: ["Transaction ID", "MID", "Terminal ID"]
+      date_format: "%Y-%m-%dT%H:%M:%SZ"
+      amount_column: "Amount (GBP)"
+      sign_convention: "amount_plus_type_flag"
+
+  clover:
+    realm: work
+    primary_adapter: api
+    fallback_chain: [csv]
+    freshness_minutes: 360
+    schedule:
+      api: "*/30 * * * *"
+      csv: "watch"
+    vault:
+      api: "secret/payments/clover/api"
+    config:
+      merchant_id_vault_key: "merchant_id"
+      device_ids: ["VT-PRIMARY"]
+      window_lookback_minutes: 60
+    csv_format:
+      identifier_columns: ["Order ID", "Device ID"]
+      date_format: "%Y-%m-%d %H:%M:%S"
+      amount_column: "Amount"
+      sign_convention: "amount_plus_type_flag"
+
+  natwest:
+    realm: work
+    primary_adapter: csv
+    fallback_chain: []
+    freshness_minutes: 4320          # 3 days
+    schedule:
+      csv: "watch"
+    vault:
+      csv: "secret/payments/natwest/identity"
+    config:
+      accounts:
+        - { account_ref: "521047-17065488", entity_id: 1, account_name: "ATR Trading current" }
+        - { account_ref: "600001-48747300", entity_id: 1, account_name: "Tax Reserve (ATR savings)" }
+        - { account_ref: "521047-17046041", entity_id: 2, account_name: "AREL Estates current" }
+        - { account_ref: "600001-36345245", entity_id: 3, account_name: "Personal current" }
+        - { account_ref: "600001-49056204", entity_id: 4, account_name: "Joint Family" }
+    csv_format:
+      identifier_columns: ["Account Number", "Date", "Value", "Balance", "Description"]
+      date_format: "%d %b %Y"
+      amount_column: "Value"
+      sign_convention: "negative_is_outflow"
+
+  amex:
+    realm: work
+    primary_adapter: scrape
+    fallback_chain: [csv]
+    freshness_minutes: 1440
+    schedule:
+      scrape: "0 7 * * *"
+      csv: "watch"
+    vault:
+      scrape: "secret/payments/amex/portal"
+      mailbox_2fa: "secret/payments/amex/2fa"
+    config:
+      card_last4: ["####"]
+      portal_url: "https://www.americanexpress.com/uk/account/"
+    csv_format:
+      identifier_columns: ["Date", "Description", "Amount", "Reference"]
+      date_format: "%d/%m/%Y"
+      amount_column: "Amount"
+      sign_convention: "negative_is_outflow"
+
+  touchoffice:
+    realm: work
+    primary_adapter: scrape
+    fallback_chain: [csv]
+    freshness_minutes: 240
+    schedule:
+      scrape: "0 3 * * *"
+      csv: "watch"
+    vault:
+      scrape: "secret/payments/touchoffice/portal"
+    config:
+      sites:
+        - { id: "pub",  portal_site_id: "MAL125-PUB" }
+        - { id: "cafe", portal_site_id: "MAL125-CAFE" }
+        - { id: "inn",  portal_site_id: "MAL125-INN" }
+    csv_format:
+      identifier_columns: ["Site", "Date", "Z-Report Number", "Ticket Number"]
+      date_format: "%Y-%m-%d"
+      amount_column: "Gross"
+      sign_convention: "amount_plus_type_flag"
