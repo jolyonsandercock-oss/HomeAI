@@ -1,7 +1,24 @@
 # HOME AI ADMINISTRATIVE ENGINE
-## Master Build Specification — v5.2 (Definitive)
+## Master Build Specification — v5.4 (Definitive)
 ## Owner: Jo | Atlantic Road Trading Ltd / Atlantic Road Estates Limited
 ## April 2026 | Supersedes: all previous versions including v4.x series
+
+---
+
+## CHANGELOG — v5.4 (2026-05-14)
+
+**Adds PART 4b — Payment Reconciliation & Cash Surveillance.**
+
+A complete new top-level module covering payment-data ingestion, idempotency, the raw / staging / mart schema layering for new payment sources, three-level transaction reconciliation, cash variance surveillance, daily exception alerting, and a 9-phase delivery plan. Subsections 4b.0 → 4b.9 map directly to Sections A–H of the v5.4 acceptance brief plus a conformance preamble and a host-cron registry.
+
+**Conflicts surfaced during drafting and resolved**:
+
+1. **Brief asked for v4.6 → v4.7**; the live spec is v5.2 (Definitive) and v5.3 was already in flight (Outcome-Native pipeline pattern + Dreaming Workflow H — see Appendix H). Bumped to **v5.4** to avoid clobbering.
+2. **Brief required `raw.*` / `staging.*` / `mart.*` schemas**; the live DB uses flat `public.*` for every existing table (events, emails, vendor_invoice_inbox, dojo_transactions, bank_transactions, touchoffice_*, caterbook_*, workforce_*). **Resolution: new schemas introduced for payment data only**. Existing `public.*` tables grandfathered as "v5.x legacy pattern" with a non-blocking migration ticket queued. Section 3.2 gains a one-line forward reference to 4b.3.
+3. **Brief's phased delivery overlaps shipped work**: Phase 2 (Bank CSV ingestion — NatWest + cards), Phase 4 (TouchOffice scrape), Phase 5 (Dojo), and Phase 6 (Caterbook) all shipped in earlier sprints (P4, P5, P6, U54 Dojo importer, U58 NatWest importer). Each phase carries a `Status:` line stating whether work is fresh-build or migrate-legacy.
+4. **Brief reaffirms `./start.sh` is the only entry point**. Live spec mentions `docker compose` in operational guidance; recent sprint work (U52/U54/U57 rebuilds) bypassed start.sh repeatedly. 4b.0 pins the rule for new module work; past violations stay shipped.
+5. **Brief: no cron outside n8n unless documented**. Crontab has ~12 host-cron entries from U29/U33/U46/U50/U54/U56 sprints. **Resolution: 4b.9 ("Cron registry") catalogues them with an end-of-life policy**; new payment ingestion must use n8n.
+6. **TOC placement**: brief asked for "new top-level section, after data warehouse / ingestion sections, before UI/dashboard sections." Spec has no explicit UI section; renumbering existing parts is invasive. Inserted as **PART 4b** between PART 4 (System Architecture / Pipelines) and PART 5 (Docker Compose), mirroring the existing PART 6a precedent (Model Stack Evaluator wedged between PART 6 and PART 7).
 
 ---
 
@@ -723,6 +740,8 @@ All AI workers return this JSON structure. Non-conforming output is rejected.
 ```
 
 ## 3.2 Complete Database Schema (init-db.sql)
+
+> **v5.4 note**: payment-data tables (raw ingestion, staging payments/bank lines, mart reconciliation) live under dedicated `raw.*`, `staging.*`, `mart.*` schemas — see **PART 4b.3**. The `public.*` tables defined below remain the canonical store for events, emails, invoices, EPoS reads, accommodation, workforce, etc. The two schemas coexist; payment ingestion does not migrate existing `public.*` data.
 
 ```sql
 -- ============================================================
@@ -1937,6 +1956,1034 @@ After any auto-remediation attempt:
 Geoffrey Huntley's Ralph pattern: *when you see a failure domain, resolve the problem so it never happens again.* Every time the verification loop triggers a Telegram alert, treat it as a signal to strengthen the auto-remediation. If Vault seals three times in a week, the auto-unseal script needs hardening. If the dead letter flood fires repeatedly on the same pipeline, the pipeline prompt needs updating. The loop's failure history in audit_log is your maintenance backlog.
 
 **The loop is not a replacement for monitoring.** Grafana and Prometheus remain for trend analysis and slow-burn issues. The Ralph loop handles acute failures — things that are broken right now and have a known fix. The two systems complement each other: Prometheus tells you a pipeline's error rate has been climbing for three days; the Ralph loop catches the outright crash and restarts it at 3am before the morning digest fails.
+
+---
+
+# PART 4b: PAYMENT RECONCILIATION & CASH SURVEILLANCE
+
+*Added in v5.4. Slot mirrors the PART 6a precedent (Model Stack Evaluator wedged between PART 6 and PART 7). PART 4b sits between PART 4 (System Architecture / Pipelines) and PART 5 (Docker Compose) so it follows the data-ingestion narrative before the deployment chapter.*
+
+This part defines how every payment-related data source — card processors, banks, accommodation booking platforms, EPoS — is ingested, normalised, idempotency-protected, and reconciled across three matching levels, with cash variance surveillance and a single morning exceptions digest. It is a pure data-engineering module: no three-tier Ollama cascade is required; AI workers are not on the reconciliation hot path.
+
+## 4b.0 Conformance Notes
+
+This module conforms to existing spec patterns. The rules below are reaffirmed because v5.x sprint work has eroded some of them in the implementation; new code under PART 4b restores strict conformance.
+
+| Rule | Where it comes from | Enforcement in PART 4b |
+|---|---|---|
+| **Raw / staging / mart layering** | New in v5.4 (4b.3). Existing `public.*` tables in §3.2 are grandfathered legacy. | All new payment ingestion writes to `raw.*`; transformation to `staging.*`; reconciliation marts in `mart.*`. |
+| **Monthly partitioning on time-series tables** | §3.2 (events table precedent) | Every raw + staging table that grows over time is `PARTITION BY RANGE (transaction_date)` with monthly partitions. `events_2026_MM` precedent. |
+| **HashiCorp Vault for all secrets, no `.env` fallbacks** | §2.1 | Every adapter reads credentials from Vault at runtime. No secret may appear in `services.yaml`, n8n credential JSON, or container env vars. The pattern is documented in 4b.4. |
+| **n8n for orchestration; no cron outside n8n unless documented** | §4.4 Pipeline Design Rules | All new payment-ingest schedules are n8n workflow triggers. Existing host-cron entries are catalogued in 4b.9 with an end-of-life policy. |
+| **`./start.sh` is the only entry point for container management** | §5.x repo structure + Appendix D | New images, env changes, and recreation flows go through `./start.sh`. Direct `docker compose up -d` calls are forbidden in production paths; the only exception is short-lived debug containers from `scripts/u*-*.sh` that do not affect long-running services. |
+| **Three-tier Ollama cascade not required here** | §6a (model tiers) | Reconciliation is deterministic SQL. Haiku may be used for descriptive enrichment (e.g. supplier-name normalisation) but never for matching decisions. |
+
+**Grandfathered legacy** (cited so the conformance audit is honest, not exhaustive):
+
+- `public.bank_transactions` (9,664 rows imported via `scripts/u58-natwest-statement-import.sh` in U58) — flat schema, idempotency via `idempotency_key` column.
+- `public.dojo_transactions` (9,215 rows imported via `scripts/dojo-import.py` in dojo-master-table sprint) — flat schema.
+- `public.touchoffice_fixed_totals` + `_department_sales` + `_plu_sales` + `_scrapes` (P5 pipeline since U27).
+- `public.caterbook_email_reports` + `_observations` + `_daily_snapshots` (P6 pipeline since U28).
+- `public.bank_transaction_rules` (categorisation rules from U58 Phase A).
+
+A migration ticket is queued under `tasks.yaml` future bucket to move each of these into the 4b.3 schema; the migration is **non-blocking** — existing analytics keep working against `public.*` until a per-source cutover plan is approved.
+
+---
+
+## 4b.1 Three-Adapter Ingestion Pattern (Section A)
+
+Every payment data source supports three ingestion adapters, configurable per source. Exactly one is **primary**; the others form an **ordered fallback chain**. CSV is always enabled as a safety-net fallback even when API or scrape is primary, so an operator can always drop a file and recover.
+
+### Adapters
+
+**1. API adapter** — REST/OAuth pull. Used wherever the merchant grants programmatic access (Clover, future Dojo Direct API).
+   - Fetches transactions, fees, and settlements for a date window.
+   - Authenticates via OAuth2 client credentials or API key, both stored in Vault.
+   - Writes the normalised JSON-lines artifact + manifest into the source's inbox folder.
+
+**2. Scrape adapter** — Playwright-based browser automation. Used where the merchant exposes only a portal.
+   - Logs into the portal with credentials from Vault.
+   - Reads 2FA codes from `admin@malthousetintagel.com` via the existing google-fetch service (mailbox-of-receipt = work realm).
+   - Navigates to the transactions/export page, downloads or scrapes, normalises, drops the same JSON-lines + manifest artifact.
+   - Failure modes: portal layout change (DOM selector miss), session expiry, 2FA timeout. All log to `mart.exceptions` and trigger the fallback chain.
+
+**3. CSV adapter** — file-watch on `/home_ai/inbox/{source}/`. Used as the universal fallback.
+   - An n8n watch trigger fires when a `.csv` lands.
+   - The file is parsed against the source's declared CSV format (column-set fingerprint), normalised, and dropped as the same JSON-lines + manifest artifact.
+   - This adapter is **always enabled**. Operators can manually upload exports from any portal at any time and have them ingested as if they came from the primary adapter.
+
+### Common artifact
+
+All three adapters produce the same downstream pair, into `/home_ai/inbox/{source}/staged/{date}/{run_id}/`:
+
+- **`payments.jsonl`** — one JSON object per transaction, normalised to the source-agnostic shape defined in 4b.3 (`staging.payments` columns plus a small `source_specific` JSONB carryover).
+- **`manifest.json`** — describes the run (see schema below).
+
+A single ingestion processor (`raw-ingestor`, n8n workflow `RAW-INGEST-001`) consumes the manifest, computes `file_sha256` over the `payments.jsonl` bytes, writes the `raw.imports` row with `ON CONFLICT (source, file_sha256) DO NOTHING`, then streams the jsonl rows into the corresponding `raw.*` table with `ON CONFLICT (source, source_transaction_id) DO NOTHING`. Row-hash conflicts (same natural key, different content) write to `mart.exceptions` with kind `upstream_edit`.
+
+### Manifest JSON schema
+
+```json
+{
+  "$schema": "https://homeai.local/schemas/payment-ingest-manifest-v1.json",
+  "manifest_version": 1,
+  "source": "dojo",
+  "adapter": "api | scrape | csv",
+  "run_id": "01H7Z9T2V8RXNG5JF6QP4D8M3K",
+  "captured_at": "2026-05-14T08:12:33Z",
+  "window": { "from": "2026-05-13", "to": "2026-05-13" },
+  "scope": {
+    "merchant_id": "MA****1234",
+    "terminal_ids": ["T-PUB-01", "T-PUB-02", "T-CAFE-01"],
+    "account_ids": null
+  },
+  "credentials_path": "secret/payments/dojo/api",
+  "payload_filename": "payments.jsonl",
+  "payload_row_count": 247,
+  "payload_sha256": "<filled by raw-ingestor>",
+  "transformations_applied": [
+    "currency_to_gbp_minor_units",
+    "entry_mode_normalised",
+    "timestamp_to_utc"
+  ],
+  "operator": "n8n:RAW-INGEST-001",
+  "notes": null
+}
+```
+
+The `payload_sha256` is left blank by the producing adapter and populated by `raw-ingestor` after it computes the hash itself. The adapter must NOT pre-compute the hash — that would let a compromised adapter forge a hash for content it didn't actually emit.
+
+### Fallback escalation
+
+n8n workflow `INGEST-WATCHDOG` (every 30 min during business hours, hourly out-of-hours) checks every source's expected ingestion cadence. On miss:
+
+1. If primary adapter has not produced a manifest within `freshness_minutes` (4b.4 per-source), trigger the next adapter in the fallback chain.
+2. If all configured adapters have failed, write `mart.exceptions` with kind `ingest_stale`, severity `high`, and fire a Telegram alert before **09:00**: *"<source> last ingest: <age>. Drop a CSV at /home_ai/inbox/<source>/."*
+
+The 09:00 cutoff is deliberate — it gives the system 30 minutes before the morning exception digest at **08:30** to attempt fallback, then if still failing, the digest carries the alert anyway. Operators always know before the trading day starts.
+
+---
+
+## 4b.2 Idempotency and Sanitiser (Section B)
+
+Three layers of duplicate protection. **All three are required**; each catches a class of duplication the others cannot.
+
+### Layer 1 — File-level (`raw.imports`)
+
+`UNIQUE (source, file_sha256)`. Catches: same file re-submitted, same API page re-fetched, same scrape rerun within the dedup window.
+
+The `adapter` column on `raw.imports` records which path delivered the file. A given (source, file_sha256) might legitimately first arrive via API then re-arrive via CSV operator-recovery — the second insert is a no-op but the `first_seen_via` is preserved.
+
+### Layer 2 — Row-level natural key
+
+Every `raw.*` transaction table has `UNIQUE (source, source_transaction_id)`. Catches: same transaction acquired via two different adapters (e.g. via API on Monday morning AND from a CSV the operator drops Monday afternoon to recover from an early-morning API outage). The natural key from the upstream system is the de-dup anchor.
+
+### Layer 3 — Row-level content hash (`row_hash`)
+
+`row_hash` is `sha256(canonicalised_json_of_normalised_columns)` stored alongside the natural key. Conflict semantics on INSERT:
+
+- New row, same `source_transaction_id`, **same `row_hash`** → `ON CONFLICT DO NOTHING`. True duplicate; silent skip.
+- New row, same `source_transaction_id`, **different `row_hash`** → INSERT blocked. A row is written to `mart.exceptions` with kind `upstream_edit`, referencing both the existing row and the proposed-new row's JSON. Surfaced in the 08:30 digest.
+
+This third layer catches: processor reissues a transaction with the same reference but different amount (Clover historically does this for corrections). Silent overwrite would erase audit history; the exception forces a human decision.
+
+### `first_seen_via`
+
+Every `raw.*` transaction table includes `first_seen_via TEXT NOT NULL` (one of `api` / `scrape` / `csv`). Populated on first INSERT and never updated. Lets us answer "where did this row originally come from?" months later when investigating discrepancies.
+
+---
+
+## 4b.3 Schema (Section C — DDL)
+
+All tables below are created in dedicated schemas. Monthly partitioning follows the existing §3.2 precedent (events table). Realm is `work` for all payment data (entity_id=1 / ATR Trading sites). Cross-entity edge cases (e.g. inter-entity settlements) are flagged with `entity_id` on the row but realm stays `work` because the bank rail is operationally a work-realm concern.
+
+```sql
+-- ============================================================
+-- PART 4b — Payment Reconciliation & Cash Surveillance (v5.4)
+-- Run order: schemas → raw → staging → mart.
+-- ============================================================
+
+CREATE SCHEMA IF NOT EXISTS raw;
+CREATE SCHEMA IF NOT EXISTS staging;
+CREATE SCHEMA IF NOT EXISTS mart;
+
+GRANT USAGE ON SCHEMA raw, staging, mart TO homeai_pipeline;
+GRANT USAGE ON SCHEMA raw, staging, mart TO homeai_readonly;
+
+-- ── FILE-LEVEL IDEMPOTENCY ───────────────────────────────────
+CREATE TABLE raw.imports (
+    id              BIGSERIAL PRIMARY KEY,
+    source          TEXT        NOT NULL,
+    adapter         TEXT        NOT NULL CHECK (adapter IN ('api','scrape','csv')),
+    file_sha256     TEXT        NOT NULL,
+    payload_path    TEXT        NOT NULL,
+    manifest_json   JSONB       NOT NULL,
+    captured_at     TIMESTAMPTZ NOT NULL,
+    imported_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    row_count       INTEGER     NOT NULL,
+    operator        TEXT        NOT NULL,
+    realm           TEXT        NOT NULL DEFAULT 'work'
+                                  CHECK (realm IN ('owner','work','family','shared')),
+    UNIQUE (source, file_sha256)
+);
+CREATE INDEX idx_raw_imports_source_captured ON raw.imports (source, captured_at DESC);
+
+-- ── DOJO (card processor — pub + cafe) ───────────────────────
+CREATE TABLE raw.dojo_transactions (
+    id                       BIGSERIAL,
+    source                   TEXT        NOT NULL DEFAULT 'dojo',
+    source_transaction_id    TEXT        NOT NULL,
+    row_hash                 TEXT        NOT NULL,
+    first_seen_via           TEXT        NOT NULL CHECK (first_seen_via IN ('api','scrape','csv')),
+    import_id                BIGINT      NOT NULL REFERENCES raw.imports(id),
+    transaction_date         DATE        NOT NULL,
+    transaction_at_utc       TIMESTAMPTZ NOT NULL,
+    terminal_id              TEXT        NOT NULL,
+    site                     TEXT        NOT NULL,        -- pub | cafe | inn
+    entry_mode               TEXT,                          -- chip | contactless | keyed | vt | swipe
+    amount_minor             BIGINT      NOT NULL,          -- pence
+    gratuity_minor           BIGINT,
+    fee_minor                BIGINT,
+    refund_of                TEXT,                          -- source_transaction_id of original sale
+    outcome                  TEXT        NOT NULL,          -- approved | declined | refund | reversal
+    last4_pan                TEXT,
+    auth_code                TEXT,
+    settlement_batch_id      TEXT,
+    raw_payload              JSONB       NOT NULL,
+    realm                    TEXT        NOT NULL DEFAULT 'work'
+                                          CHECK (realm IN ('owner','work','family','shared')),
+    UNIQUE (source, source_transaction_id)
+) PARTITION BY RANGE (transaction_date);
+-- elevated-risk index for fraud surveillance
+CREATE INDEX idx_dojo_entry_mode_risk ON raw.dojo_transactions (entry_mode, transaction_date DESC)
+    WHERE entry_mode IN ('keyed','vt');
+CREATE INDEX idx_dojo_terminal_date ON raw.dojo_transactions (terminal_id, transaction_date DESC);
+CREATE INDEX idx_dojo_settlement     ON raw.dojo_transactions (settlement_batch_id) WHERE settlement_batch_id IS NOT NULL;
+
+-- ── CLOVER (virtual terminal — phone/email orders) ───────────
+CREATE TABLE raw.clover_transactions (
+    id                       BIGSERIAL,
+    source                   TEXT        NOT NULL DEFAULT 'clover',
+    source_transaction_id    TEXT        NOT NULL,
+    row_hash                 TEXT        NOT NULL,
+    first_seen_via           TEXT        NOT NULL CHECK (first_seen_via IN ('api','scrape','csv')),
+    import_id                BIGINT      NOT NULL REFERENCES raw.imports(id),
+    transaction_date         DATE        NOT NULL,
+    transaction_at_utc       TIMESTAMPTZ NOT NULL,
+    merchant_id              TEXT        NOT NULL,
+    device_id                TEXT,
+    entry_mode               TEXT        NOT NULL,          -- mostly 'vt' for Clover VT
+    amount_minor             BIGINT      NOT NULL,
+    fee_minor                BIGINT,
+    refund_of                TEXT,
+    outcome                  TEXT        NOT NULL,
+    last4_pan                TEXT,
+    auth_code                TEXT,
+    customer_reference       TEXT,
+    settlement_batch_id      TEXT,
+    raw_payload              JSONB       NOT NULL,
+    realm                    TEXT        NOT NULL DEFAULT 'work'
+                                          CHECK (realm IN ('owner','work','family','shared')),
+    UNIQUE (source, source_transaction_id)
+) PARTITION BY RANGE (transaction_date);
+CREATE INDEX idx_clover_entry_mode_risk ON raw.clover_transactions (entry_mode, transaction_date DESC)
+    WHERE entry_mode IN ('keyed','vt');
+
+-- ── TOUCHOFFICE (EPoS — source of POS truth) ─────────────────
+CREATE TABLE raw.touchoffice_orders (
+    id                       BIGSERIAL,
+    source                   TEXT        NOT NULL DEFAULT 'touchoffice',
+    source_transaction_id    TEXT        NOT NULL,          -- Z-report ticket reference
+    row_hash                 TEXT        NOT NULL,
+    first_seen_via           TEXT        NOT NULL CHECK (first_seen_via IN ('api','scrape','csv')),
+    import_id                BIGINT      NOT NULL REFERENCES raw.imports(id),
+    transaction_date         DATE        NOT NULL,
+    closed_at_utc            TIMESTAMPTZ NOT NULL,
+    site                     TEXT        NOT NULL,          -- pub | cafe | inn
+    till_id                  TEXT,
+    operator_id              TEXT        NOT NULL,
+    operator_name            TEXT,
+    department               TEXT,
+    tender_breakdown         JSONB       NOT NULL,          -- {cash: minor, card: minor, voucher: minor, ...}
+    total_gross_minor        BIGINT      NOT NULL,
+    total_net_minor          BIGINT      NOT NULL,
+    voids_minor              BIGINT      NOT NULL DEFAULT 0,
+    refunds_minor            BIGINT      NOT NULL DEFAULT 0,
+    discounts_minor          BIGINT      NOT NULL DEFAULT 0,
+    comps_minor              BIGINT      NOT NULL DEFAULT 0,
+    last4_pan                TEXT,                            -- captured by TouchOffice where supported
+    terminal_ref             TEXT,                            -- POS-side card-terminal reference
+    raw_payload              JSONB       NOT NULL,
+    realm                    TEXT        NOT NULL DEFAULT 'work'
+                                          CHECK (realm IN ('owner','work','family','shared')),
+    UNIQUE (source, source_transaction_id)
+) PARTITION BY RANGE (transaction_date);
+CREATE INDEX idx_to_orders_site_date  ON raw.touchoffice_orders (site, transaction_date DESC);
+CREATE INDEX idx_to_orders_operator   ON raw.touchoffice_orders (operator_id, transaction_date DESC);
+CREATE INDEX idx_to_orders_refund_void ON raw.touchoffice_orders (transaction_date DESC)
+    WHERE refunds_minor > 0 OR voids_minor > 0;
+
+-- ── BANK LINES (NatWest, Amex, credit cards) ─────────────────
+CREATE TABLE raw.bank_lines (
+    id                       BIGSERIAL,
+    source                   TEXT        NOT NULL,           -- natwest | amex | barclays | …
+    source_transaction_id    TEXT        NOT NULL,           -- bank reference where present, else hash
+    row_hash                 TEXT        NOT NULL,
+    first_seen_via           TEXT        NOT NULL CHECK (first_seen_via IN ('api','scrape','csv')),
+    import_id                BIGINT      NOT NULL REFERENCES raw.imports(id),
+    transaction_date         DATE        NOT NULL,
+    posted_at_utc            TIMESTAMPTZ,                     -- bank-side timestamp where given
+    account_ref              TEXT        NOT NULL,            -- sort-acct or card-PAN-last4
+    type_code                TEXT,                            -- BAC | DPC | FP | INT | D/D | S/O | POS | etc
+    description              TEXT        NOT NULL,
+    amount_minor             BIGINT      NOT NULL,            -- signed; negative = outflow
+    balance_after_minor      BIGINT,
+    counterparty_name        TEXT,
+    counterparty_ref         TEXT,
+    raw_payload              JSONB       NOT NULL,
+    realm                    TEXT        NOT NULL DEFAULT 'work'
+                                          CHECK (realm IN ('owner','work','family','shared')),
+    entity_id                INTEGER REFERENCES entities(id),
+    UNIQUE (source, source_transaction_id)
+) PARTITION BY RANGE (transaction_date);
+CREATE INDEX idx_bank_lines_account_date ON raw.bank_lines (account_ref, transaction_date DESC);
+CREATE INDEX idx_bank_lines_entity_date  ON raw.bank_lines (entity_id, transaction_date DESC);
+
+-- ── CATERBOOK (accommodation — incoming card pre-auths/settles)
+CREATE TABLE raw.caterbook_reservations (
+    id                       BIGSERIAL,
+    source                   TEXT        NOT NULL DEFAULT 'caterbook',
+    source_transaction_id    TEXT        NOT NULL,           -- reservation_id + payment_index
+    row_hash                 TEXT        NOT NULL,
+    first_seen_via           TEXT        NOT NULL CHECK (first_seen_via IN ('api','scrape','csv')),
+    import_id                BIGINT      NOT NULL REFERENCES raw.imports(id),
+    reservation_id           TEXT        NOT NULL,
+    arrival_date             DATE        NOT NULL,
+    departure_date           DATE        NOT NULL,
+    booking_date             DATE        NOT NULL,
+    guest_name               TEXT,
+    room_ref                 TEXT,
+    rate_code                TEXT,
+    nights                   INTEGER     NOT NULL,
+    total_minor              BIGINT      NOT NULL,
+    deposit_minor            BIGINT,
+    payment_method           TEXT,                            -- card | bacs | cash | …
+    payment_processor        TEXT,                            -- dojo | clover | …
+    payment_reference        TEXT,                            -- joins back to raw.dojo_transactions/raw.clover_transactions
+    status                   TEXT        NOT NULL,            -- confirmed | cancelled | completed
+    raw_payload              JSONB       NOT NULL,
+    realm                    TEXT        NOT NULL DEFAULT 'work'
+                                          CHECK (realm IN ('owner','work','family','shared')),
+    UNIQUE (source, source_transaction_id)
+) PARTITION BY RANGE (arrival_date);
+
+-- ── STAGING — unified payment shape across all card processors
+CREATE TABLE staging.payments (
+    id                       BIGSERIAL,
+    raw_table                TEXT        NOT NULL,            -- raw.dojo_transactions etc
+    raw_id                   BIGINT      NOT NULL,
+    source                   TEXT        NOT NULL,
+    source_transaction_id    TEXT        NOT NULL,
+    transaction_date         DATE        NOT NULL,
+    transaction_at_utc       TIMESTAMPTZ NOT NULL,
+    site                     TEXT        NOT NULL,
+    terminal_id              TEXT,
+    entry_mode               TEXT,                            -- normalised: chip|contactless|keyed|vt|swipe
+    amount_gross_minor       BIGINT      NOT NULL,
+    fee_minor                BIGINT,
+    amount_net_minor         BIGINT      NOT NULL,            -- gross - fee
+    outcome                  TEXT        NOT NULL,
+    refund_of                TEXT,
+    last4_pan                TEXT,
+    settlement_batch_id      TEXT,
+    is_elevated_risk         BOOLEAN     NOT NULL DEFAULT FALSE,   -- TRUE iff entry_mode IN ('keyed','vt')
+    staged_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    realm                    TEXT        NOT NULL DEFAULT 'work'
+                                          CHECK (realm IN ('owner','work','family','shared')),
+    PRIMARY KEY (id, transaction_date),
+    UNIQUE (source, source_transaction_id, transaction_date)
+) PARTITION BY RANGE (transaction_date);
+CREATE INDEX idx_stg_payments_site_date    ON staging.payments (site, transaction_date DESC);
+CREATE INDEX idx_stg_payments_settle       ON staging.payments (settlement_batch_id) WHERE settlement_batch_id IS NOT NULL;
+CREATE INDEX idx_stg_payments_elevated     ON staging.payments (transaction_date DESC) WHERE is_elevated_risk;
+
+-- ── STAGING — unified bank shape across all accounts
+CREATE TABLE staging.bank_lines (
+    id                       BIGSERIAL,
+    raw_id                   BIGINT      NOT NULL,
+    source                   TEXT        NOT NULL,
+    source_transaction_id    TEXT        NOT NULL,
+    transaction_date         DATE        NOT NULL,
+    account_ref              TEXT        NOT NULL,
+    entity_id                INTEGER REFERENCES entities(id),
+    type_code                TEXT,
+    description              TEXT        NOT NULL,
+    amount_minor             BIGINT      NOT NULL,
+    counterparty_name        TEXT,
+    counterparty_ref         TEXT,
+    is_settlement_candidate  BOOLEAN     NOT NULL DEFAULT FALSE,   -- inflow matching processor descriptors
+    is_fee                   BOOLEAN     NOT NULL DEFAULT FALSE,
+    staged_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    realm                    TEXT        NOT NULL DEFAULT 'work'
+                                          CHECK (realm IN ('owner','work','family','shared')),
+    PRIMARY KEY (id, transaction_date),
+    UNIQUE (source, source_transaction_id, transaction_date)
+) PARTITION BY RANGE (transaction_date);
+CREATE INDEX idx_stg_bank_account_date ON staging.bank_lines (account_ref, transaction_date DESC);
+CREATE INDEX idx_stg_bank_settle_cand  ON staging.bank_lines (transaction_date DESC) WHERE is_settlement_candidate;
+
+-- ── MART — daily totals (the L1 reconciliation surface)
+CREATE TABLE mart.daily_totals (
+    id                       BIGSERIAL,
+    transaction_date         DATE        NOT NULL,
+    site                     TEXT        NOT NULL,
+    tender                   TEXT        NOT NULL,            -- cash | card | voucher | comp | total
+    pos_total_minor          BIGINT,                            -- TouchOffice
+    processor_total_minor    BIGINT,                            -- Dojo/Clover for card; cash declared for cash
+    cash_declared_minor      BIGINT,                            -- from till_reconciliation
+    delta_minor              BIGINT,                            -- pos - processor (card) or pos - declared (cash)
+    tolerance_minor          BIGINT      NOT NULL,
+    status                   TEXT        NOT NULL,             -- ok | minor | mismatch
+    notes                    TEXT,
+    computed_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    realm                    TEXT        NOT NULL DEFAULT 'work'
+                                          CHECK (realm IN ('owner','work','family','shared')),
+    PRIMARY KEY (id, transaction_date),
+    UNIQUE (transaction_date, site, tender)
+) PARTITION BY RANGE (transaction_date);
+
+-- ── MART — per-transaction pair matching (L2)
+CREATE TABLE mart.transaction_matches (
+    id                       BIGSERIAL,
+    transaction_date         DATE        NOT NULL,
+    site                     TEXT        NOT NULL,
+    pos_id                   BIGINT,                            -- raw.touchoffice_orders.id
+    processor_id             BIGINT,                            -- staging.payments.id
+    match_outcome            TEXT        NOT NULL,              -- matched | pos_no_card | card_no_pos | amount_mismatch | phantom_refund
+    delta_minor              BIGINT,
+    minute_offset            INTEGER,                           -- abs(pos_ts − processor_ts) in minutes
+    last4_pan_match          BOOLEAN,
+    terminal_match           BOOLEAN,
+    confidence               NUMERIC(4,3) NOT NULL,
+    reasoning                TEXT,
+    computed_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    realm                    TEXT        NOT NULL DEFAULT 'work'
+                                          CHECK (realm IN ('owner','work','family','shared')),
+    PRIMARY KEY (id, transaction_date)
+) PARTITION BY RANGE (transaction_date);
+CREATE INDEX idx_match_fraud_outcomes
+    ON mart.transaction_matches (transaction_date DESC, match_outcome)
+    WHERE match_outcome IN ('pos_no_card','card_no_pos','phantom_refund');
+
+-- ── MART — expected vs actual settlements (L3)
+CREATE TABLE mart.expected_settlements (
+    id                       BIGSERIAL,
+    settlement_batch_id      TEXT        NOT NULL,
+    processor                TEXT        NOT NULL,              -- dojo | clover
+    batch_date               DATE        NOT NULL,              -- date the batch closed at the processor
+    expected_amount_minor    BIGINT      NOT NULL,              -- sum(net) for the batch
+    expected_fee_minor       BIGINT      NOT NULL,
+    expected_payout_date     DATE        NOT NULL,              -- batch_date + T+1 or T+2 per processor
+    matched_bank_line_id     BIGINT,                            -- staging.bank_lines.id
+    matched_amount_minor     BIGINT,
+    matched_at               TIMESTAMPTZ,
+    delta_minor              BIGINT,
+    status                   TEXT        NOT NULL,              -- settled_clean | settled_short | unsettled_5d
+    realm                    TEXT        NOT NULL DEFAULT 'work'
+                                          CHECK (realm IN ('owner','work','family','shared')),
+    PRIMARY KEY (id, batch_date),
+    UNIQUE (settlement_batch_id, processor)
+) PARTITION BY RANGE (batch_date);
+
+-- ── MART — cash variance per shift per operator (F)
+CREATE TABLE mart.cash_variance (
+    id                       BIGSERIAL,
+    transaction_date         DATE        NOT NULL,
+    site                     TEXT        NOT NULL,
+    shift_start_utc          TIMESTAMPTZ NOT NULL,
+    shift_end_utc            TIMESTAMPTZ NOT NULL,
+    operator_id              TEXT        NOT NULL,
+    operator_name            TEXT,
+    cash_expected_minor      BIGINT      NOT NULL,
+    cash_declared_minor      BIGINT      NOT NULL,
+    variance_minor           BIGINT      NOT NULL,              -- declared - expected; negative = short
+    voids_count              INTEGER     NOT NULL DEFAULT 0,
+    voids_value_minor        BIGINT      NOT NULL DEFAULT 0,
+    refunds_count            INTEGER     NOT NULL DEFAULT 0,
+    refunds_value_minor      BIGINT      NOT NULL DEFAULT 0,
+    open_tabs_count          INTEGER     NOT NULL DEFAULT 0,
+    late_night_share         NUMERIC(4,3),                      -- share of sales after 23:00
+    comp_ratio               NUMERIC(4,3),                      -- comps_value / gross_value
+    computed_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    realm                    TEXT        NOT NULL DEFAULT 'work'
+                                          CHECK (realm IN ('owner','work','family','shared')),
+    PRIMARY KEY (id, transaction_date)
+) PARTITION BY RANGE (transaction_date);
+CREATE INDEX idx_cash_variance_operator ON mart.cash_variance (operator_id, transaction_date DESC);
+
+-- ── MART — exceptions (the only thing the morning digest reads)
+CREATE TABLE mart.exceptions (
+    id                       BIGSERIAL PRIMARY KEY,
+    raised_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    severity                 TEXT        NOT NULL CHECK (severity IN ('low','medium','high','critical')),
+    kind                     TEXT        NOT NULL,
+        -- ingest_stale | upstream_edit | l1_mismatch | l2_pos_no_card | l2_card_no_pos
+        -- | l2_amount_mismatch | l2_phantom_refund | l3_short | l3_unsettled
+        -- | cash_under_pattern | refund_spike | comp_drift | late_night_skew | open_tabs
+    source                   TEXT,
+    site                     TEXT,
+    operator_id              TEXT,
+    transaction_date         DATE,
+    related_ids              JSONB,                              -- pointers back to mart.* / staging.* rows
+    summary                  TEXT        NOT NULL,
+    detail                   JSONB,
+    status                   TEXT        NOT NULL DEFAULT 'open' CHECK (status IN ('open','reviewing','resolved','suppressed')),
+    resolved_by              TEXT,
+    resolved_at              TIMESTAMPTZ,
+    resolution_note          TEXT,
+    realm                    TEXT        NOT NULL DEFAULT 'work'
+                                          CHECK (realm IN ('owner','work','family','shared'))
+);
+CREATE INDEX idx_exceptions_open_severity ON mart.exceptions (severity, raised_at DESC) WHERE status = 'open';
+CREATE INDEX idx_exceptions_kind          ON mart.exceptions (kind, raised_at DESC);
+```
+
+**Partition seeding**: a single n8n workflow `PARTITION-ROLLOVER-001` (cron `25 04 25 * *`, monthly on the 25th at 04:25) creates the next month's partition for every partitioned table in `raw.*`, `staging.*`, and `mart.*`. The same workflow already exists for `public.events` per §3.2; PART 4b extends its target list.
+
+---
+
+## 4b.4 Per-Source Configuration — `services.yaml` (Section D)
+
+Configuration lives at `/home_ai/config/payments/services.yaml`. Schema validated by `scripts/payments/validate-services.py` on every n8n workflow load. No secret material — secrets are in Vault paths cited below.
+
+### Schema
+
+```yaml
+schema_version: 1
+sources:
+  <source_name>:
+    realm: work | family | owner | shared            # always 'work' for payment processors
+    primary_adapter: api | scrape | csv
+    fallback_chain: [<adapter>, <adapter>]           # ordered; CSV is implicitly always last
+    freshness_minutes: <int>                         # max age before ingest-watchdog escalates
+    schedule:
+      api:    "<cron>"                               # n8n cron — omit if not configured
+      scrape: "<cron>"
+      csv:    "watch"                                # CSV is event-driven (file-watch)
+    vault:
+      api:    "secret/payments/<source>/api"         # holds api_key / client_id / client_secret
+      scrape: "secret/payments/<source>/portal"      # holds portal_username / portal_password
+      mailbox_2fa: "secret/payments/<source>/2fa"    # holds gmail_query for 2FA codes (e.g. "from:noreply@dojo.tech newer_than:5m")
+    config:
+      # source-specific. Free-form but validated by source schema.
+    csv_format:
+      identifier_columns: [<col>, <col>, ...]        # used to fingerprint dropped CSVs
+      date_format: "%d %b %Y"
+      currency: GBP
+      amount_column: <col>
+      sign_convention: "negative_is_outflow" | "amount_plus_type_flag"
+```
+
+### Worked examples
+
+```yaml
+schema_version: 1
+sources:
+
+  dojo:
+    realm: work
+    primary_adapter: csv          # API access pending; CSV is current source of truth
+    fallback_chain: [scrape]
+    freshness_minutes: 1440
+    schedule:
+      api:    null
+      scrape: "0 7 * * *"
+      csv:    "watch"
+    vault:
+      api:    "secret/payments/dojo/api"
+      scrape: "secret/payments/dojo/portal"
+      mailbox_2fa: "secret/payments/dojo/2fa"
+    config:
+      merchant_id_vault_key: "merchant_id"
+      terminals:
+        - id: T-PUB-01    ; site: pub  ; description: "Bar 1"
+        - id: T-PUB-02    ; site: pub  ; description: "Bar 2 / restaurant"
+        - id: T-CAFE-01   ; site: cafe ; description: "Sandwich Bar counter"
+    csv_format:
+      identifier_columns: [Transaction ID, MID, Terminal ID]
+      date_format: "%Y-%m-%dT%H:%M:%SZ"
+      amount_column: "Amount (GBP)"
+      sign_convention: amount_plus_type_flag
+
+  clover:
+    realm: work
+    primary_adapter: api
+    fallback_chain: [csv]
+    freshness_minutes: 360
+    schedule:
+      api:    "*/30 * * * *"
+      csv:    "watch"
+    vault:
+      api: "secret/payments/clover/api"
+    config:
+      merchant_id_vault_key: "merchant_id"
+      device_ids: ["VT-PRIMARY"]
+      window_lookback_minutes: 60
+    csv_format:
+      identifier_columns: [Order ID, Device ID]
+      date_format: "%Y-%m-%d %H:%M:%S"
+      amount_column: "Amount"
+      sign_convention: amount_plus_type_flag
+
+  natwest:
+    realm: work
+    primary_adapter: csv          # NatWest OpenBanking out of scope for this module
+    fallback_chain: []
+    freshness_minutes: 4320       # 3 days — most operators upload weekly
+    schedule:
+      csv: "watch"
+    vault:
+      csv: "secret/payments/natwest/identity"   # only the watched-inbox path, no live creds
+    config:
+      accounts:
+        - account_ref: "521047-17065488" ; entity_id: 1 ; account_name: "ATR Trading current"
+        - account_ref: "600001-48747300" ; entity_id: 1 ; account_name: "Tax Reserve (ATR savings)"
+        - account_ref: "521047-17046041" ; entity_id: 2 ; account_name: "AREL Estates current"
+        - account_ref: "600001-36345245" ; entity_id: 3 ; account_name: "Personal current"
+        - account_ref: "600001-49056204" ; entity_id: 4 ; account_name: "Joint Family"
+    csv_format:
+      identifier_columns: [Account Number, Date, Value, Balance, Description]
+      date_format: "%d %b %Y"
+      amount_column: "Value"
+      sign_convention: negative_is_outflow
+
+  amex:
+    realm: work
+    primary_adapter: scrape
+    fallback_chain: [csv]
+    freshness_minutes: 1440
+    schedule:
+      scrape: "0 7 * * *"
+      csv:    "watch"
+    vault:
+      scrape:      "secret/payments/amex/portal"
+      mailbox_2fa: "secret/payments/amex/2fa"
+    config:
+      card_last4: ["####"]
+      portal_url: "https://www.americanexpress.com/uk/account/"
+    csv_format:
+      identifier_columns: [Date, Description, Amount, Reference]
+      date_format: "%d/%m/%Y"
+      amount_column: "Amount"
+      sign_convention: negative_is_outflow
+
+  touchoffice:
+    realm: work
+    primary_adapter: scrape
+    fallback_chain: [csv]
+    freshness_minutes: 240        # POS must be fresh by 04:00 for L1 to run before digest
+    schedule:
+      scrape: "0 3 * * *"
+      csv:    "watch"
+    vault:
+      scrape: "secret/payments/touchoffice/portal"
+    config:
+      sites:
+        - id: pub   ; portal_site_id: "MAL125-PUB"
+        - id: cafe  ; portal_site_id: "MAL125-CAFE"
+        - id: inn   ; portal_site_id: "MAL125-INN"
+    csv_format:
+      identifier_columns: [Site, Date, Z-Report Number, Ticket Number]
+      date_format: "%Y-%m-%d"
+      amount_column: "Gross"
+      sign_convention: amount_plus_type_flag
+```
+
+### Fallback escalation behaviour (per 4b.1)
+
+Read in sequence: `primary_adapter` → each entry in `fallback_chain` → CSV (implicit, always last). The `INGEST-WATCHDOG` n8n workflow checks `freshness_minutes` against `raw.imports.captured_at MAX`. On miss, it queues a one-shot run of the next adapter. If every adapter exhausts and the gap still exceeds `freshness_minutes × 1.5`, an exception of kind `ingest_stale` lands in `mart.exceptions` with severity = `high` and a Telegram alert fires before 09:00 telling the operator to drop a CSV.
+
+---
+
+## 4b.5 Reconciliation Engine — Three Levels (Section E)
+
+The engine is three n8n workflows (`RECON-L1`, `RECON-L2`, `RECON-L3`), each consuming the staging marts and producing mart rows + exception rows. All three are deterministic SQL; no AI in the matching path.
+
+### Level 1 — Daily totals
+
+**Per site per day per tender.** Compares POS (TouchOffice Z-report) against processor (Dojo, Clover) for card tenders, and against cash declared (from `till_reconciliation`) for cash.
+
+| Tender | Source A (POS) | Source B (counter-source) | Tolerance |
+|---|---|---|---|
+| `card` | `raw.touchoffice_orders.tender_breakdown->>'card'` | sum of `staging.payments.amount_gross_minor` per (site, date) | **£0.00** |
+| `cash` | `raw.touchoffice_orders.tender_breakdown->>'cash'` | `public.till_reconciliation.cash_counted` for the matching shift | **£2** default, per-site override in `services.yaml` |
+| `voucher` | `tender_breakdown->>'voucher'` | (none — informational) | n/a |
+
+A `mart.daily_totals` row is written per (date, site, tender) at 04:30 daily (after TouchOffice scrape lands). Status:
+
+- `delta_minor = 0` → `ok`
+- `0 < |delta_minor| ≤ tolerance_minor` → `minor`
+- `|delta_minor| > tolerance_minor` → `mismatch` (also writes `mart.exceptions` kind `l1_mismatch`)
+
+Cash tolerance is per-shift, not per-day; the per-day mart row sums shift-level cash variances. Operators with sustained small-unders get caught in 4b.6.
+
+### Level 2 — Transaction matching
+
+**Each POS card payment matched to its processor sibling** on:
+
+- Amount (£0.00 tolerance)
+- Timestamp within ±5 minutes (POS records ticket-close, processor records authorise — clock skew is small but real)
+- `last4_pan` (where both POS and processor capture it)
+- `terminal_id` (POS captures the terminal reference; processor knows its own terminal)
+
+A match-strength score is computed (1.0 for amount + timestamp; +0.4 for last4; +0.3 for terminal; capped at 1.0). The four outcomes:
+
+| Outcome | Condition | Surveillance signal |
+|---|---|---|
+| `matched` | Score ≥ 0.85 | Clean. Recorded for audit. |
+| `pos_no_card` | POS has card tender row, no processor sibling within window | **Possible cash skim disguised** — operator entered "Card" on the till but pocketed cash. Surfaces as exception kind `l2_pos_no_card`. |
+| `card_no_pos` | Processor authorised a card transaction with no POS ticket within window | **Terminal used outside POS** — e.g. paid for someone's drink off-system. Surfaces as `l2_card_no_pos`. |
+| `amount_mismatch` | Match candidate within window but amount differs by > £0.00 | Likely tip mis-keyed or partial refund. Surfaces as `l2_amount_mismatch`. |
+
+**Phantom refund detection** is a fifth surveillance check: every `outcome='refund'` row in `staging.payments` must point (via `refund_of`) at an existing sale's `source_transaction_id`. Refunds without an original sale → exception kind `l2_phantom_refund`, severity `high`. This is the classic "ghost refund to my own card" fraud pattern.
+
+`mart.transaction_matches` rows are written for every POS card row (matched or not) and every unmatched processor row.
+
+### Level 3 — Settlement matching
+
+**Processor daily batches matched to bank deposits** at T+1 or T+2 (Dojo: T+1 next business day; Clover: T+2). Expected payout = `SUM(amount_net_minor)` for the batch (gross minus fees, fees pulled from the contract rate table in `secret/payments/<source>/rates`).
+
+The match algorithm against `staging.bank_lines`:
+
+1. Look for a credit line on `(processor settlement account)` dated `expected_payout_date ± 1 day` with `amount_minor` within £0.10 of `expected_amount_minor - expected_fee_minor`.
+2. If matched, write `mart.expected_settlements.matched_*` and set `status = settled_clean` if delta ≤ £0.10, else `settled_short` and exception kind `l3_short`.
+3. If unmatched after 5 days, status = `unsettled_5d` and exception kind `l3_unsettled`, severity `high`.
+
+The contract rate table format (in Vault under `secret/payments/<source>/rates`):
+
+```yaml
+rates:
+  - effective_from: "2025-04-01"
+    interchange_pct: 0.30
+    scheme_fee_pct:  0.10
+    processor_pct:   0.50
+    monthly_fixed_minor: 500
+  - effective_from: "2026-01-01"
+    interchange_pct: 0.30
+    scheme_fee_pct:  0.10
+    processor_pct:   0.45
+    monthly_fixed_minor: 500
+```
+
+Re-running L3 after a rate update is idempotent — `mart.expected_settlements.expected_fee_minor` is recomputed if the row is still `unsettled_5d`, otherwise frozen at the snapshot value used at the original match.
+
+---
+
+## 4b.6 Cash Variance & Fraud Surveillance (Section F)
+
+`mart.cash_variance` per shift per operator is populated by `RECON-CASH-VARIANCE` (daily 05:00, after L1). The view `mart.v_operator_surveillance_weekly` rolls forward and surfaces six patterns each Monday morning:
+
+| Pattern | Detection | Exception kind |
+|---|---|---|
+| **Persistent small unders by operator** | ≥3 of last 4 shifts: cash short ≤ £5 per shift, same operator | `cash_under_pattern` |
+| **Voids/refunds clustered at shift changes** | Refund/void count in last 15 min of operator's shift > 3× their per-quarter-hour median | `refund_spike` |
+| **Open card tabs at end-of-day** | TouchOffice `tender_breakdown->>'open_tab'` non-zero in the close-of-day Z-report | `open_tabs` |
+| **Refund spikes by operator** | Operator's refund-count for the week > 2σ above their 12-week rolling mean | `refund_spike` (same kind, but rolled-up) |
+| **Time-of-night variance** | Cash variance share in post-23:00 segment > 70% while pre-23:00 share ≤ 30% | `late_night_skew` |
+| **Comp ratio trending up** | Operator's `comp_ratio` rising for 3 consecutive weeks AND latest > 1.5× site median | `comp_drift` |
+
+All six write `mart.exceptions` rows tagged with `operator_id` so the morning digest can name them.
+
+---
+
+## 4b.7 Alerting (Section G)
+
+**Single Telegram message at 08:30 daily.** Workflow: `RECON-MORNING-DIGEST`. The message summarises **prior-day exceptions only** (those raised between 00:00 yesterday and 06:00 today). Format:
+
+```
+🚨 Yesterday's exceptions — 2026-05-14
+
+L1 mismatches:
+• Pub cash short £12.40 — Tom B (shift 17:00-23:30)
+• Cafe card £0.50 over POS — investigate Sandwich Bar terminal
+
+L2 fraud signals:
+• 2× card_no_pos at T-PUB-02 between 23:42-23:51 (£8.50, £4.20)
+
+L3 settlements:
+• Dojo batch 20260513-PUB unsettled at 5d (expected £1,432.80)
+
+Operator patterns this week:
+• Tom B: 3rd consecutive shift cash short ≤ £5
+
+Open card tabs at close-of-day: 1 (Cafe, £18.40)
+```
+
+Hard requirements:
+
+- **Terse.** No padding. No greeting. No "all systems normal" if nothing fired — message simply doesn't send.
+- **Actionable.** Every line names a site, an operator (where relevant), and a value.
+- **Not skimmable.** The format is designed to be read on a phone in 20 seconds, not glanced at over coffee.
+- **No dashboard substitution.** Metabase / Grafana exist for retrospective analysis but **are not the operational tool**. The Telegram digest is the operational tool.
+
+Severity routing:
+
+- `critical` exceptions: immediate Telegram at the moment they're raised (not waiting for 08:30).
+- `high`: included in 08:30 digest; also re-fires at 14:00 if still `status=open` by then.
+- `medium`: 08:30 digest only.
+- `low`: weekly Monday roll-up (not in daily digest).
+
+---
+
+## 4b.8 Phased Delivery Plan (Section H)
+
+Nine phases. Each has acceptance criteria, the n8n workflow nodes required, and a verification SQL query that proves the phase is working. Status notes per phase reflect existing shipped work as of v5.4 cut.
+
+### Phase 1 — Schema + `raw.imports` + CSV adapter framework
+
+**Status**: fresh build.
+
+**Build**:
+- Migration `V72__payment_recon_schemas.sql` creates `raw`, `staging`, `mart` schemas + every table in 4b.3 + monthly partitions for the current month.
+- n8n workflow `RAW-INGEST-001`: file-watch on `/home_ai/inbox/*/staged/*/`; consumes `manifest.json`, hashes the payload, INSERT into `raw.imports`, dispatches to source-specific raw table.
+- `services.yaml` skeleton + `scripts/payments/validate-services.py`.
+
+**Acceptance**:
+- A hand-built manifest + payments.jsonl with one synthetic row lands in `raw.imports` and `raw.dojo_transactions`.
+- Re-running with the same payload is a no-op (file_sha256 dedup).
+- Re-running with edited payload writes an `upstream_edit` exception.
+
+**Verification SQL**:
+```sql
+SELECT source, adapter, row_count, COUNT(*) AS files
+  FROM raw.imports GROUP BY 1,2,3;
+-- expect: dojo | csv | 1 | 1   after the synthetic seed
+```
+
+**n8n nodes**: `INGEST-INBOX-WATCH` (file trigger), `LOAD-MANIFEST` (Read JSON), `HASH-PAYLOAD` (Crypto), `UPSERT-IMPORT` (Postgres ON CONFLICT), `STREAM-PAYLOAD` (chunked Postgres INSERT), `EMIT-INGEST-OK` (event emit).
+
+### Phase 2 — Bank CSV ingestion (NatWest, credit cards)
+
+**Status**: **legacy pattern shipped** (U58 → `public.bank_transactions`, 9,664 rows). Migrate-to-v5.4-pattern queued. New uploads from Phase 2 onward land in `raw.bank_lines` + `staging.bank_lines`.
+
+**Build**:
+- CSV format adapters in `scripts/payments/adapters/csv/natwest.py`, `.../amex.py`.
+- n8n workflow `BANK-CSV-001` watches `/home_ai/inbox/natwest/`, `/home_ai/inbox/amex/`, fingerprints by `csv_format.identifier_columns`, normalises to the manifest+jsonl shape, hands to `RAW-INGEST-001`.
+- Migration sub-step: a one-shot `scripts/payments/migrate-public-to-raw-bank.py` lifts `public.bank_transactions` into `raw.bank_lines` + `staging.bank_lines` with `first_seen_via='csv'` and a synthetic `raw.imports` row stamped `adapter='csv', operator='u58-migration'`. Idempotency keys preserved.
+
+**Acceptance**:
+- Dropping a fresh NatWest CSV at `/home_ai/inbox/natwest/2026-05-15/...csv` results in `raw.imports` + `raw.bank_lines` rows; no duplicates with existing `public.bank_transactions`.
+- Migration script run once: every row in `public.bank_transactions` has a sibling in `staging.bank_lines` with same amount + date.
+
+**Verification SQL**:
+```sql
+SELECT
+  (SELECT COUNT(*) FROM public.bank_transactions) AS legacy,
+  (SELECT COUNT(*) FROM staging.bank_lines)       AS new_shape;
+-- expect: 9664 | 9664   after migration
+```
+
+**n8n nodes**: `NATWEST-WATCH` (file trigger), `NATWEST-NORMALISE` (Code), `AMEX-WATCH`, `AMEX-NORMALISE`, then handoff to `RAW-INGEST-001`.
+
+### Phase 3 — Clover via API adapter
+
+**Status**: fresh build.
+
+**Build**:
+- `scripts/payments/adapters/api/clover.py` — OAuth2 client-credentials flow, vault path `secret/payments/clover/api`.
+- n8n workflow `CLOVER-API-001`: cron `*/30 * * * *`, pulls last 60 minutes, normalises, hands to `RAW-INGEST-001`.
+- Bootstrap script `scripts/payments/clover-vault-bootstrap.sh` (interactive prompts; sub for AGENTS.md rule #8).
+
+**Acceptance**:
+- A new transaction on the Clover VT appears in `raw.clover_transactions` within 60 minutes.
+- API outage simulation (block egress): `INGEST-WATCHDOG` flips to CSV fallback within `freshness_minutes` + 10.
+
+**Verification SQL**:
+```sql
+SELECT MAX(transaction_at_utc) AS latest, COUNT(*) AS rows_24h
+  FROM raw.clover_transactions
+ WHERE transaction_at_utc > now() - interval '24 hours';
+-- expect: latest within 60 min of now(); rows_24h > 0 on a trading day.
+```
+
+**n8n nodes**: `CLOVER-CRON`, `CLOVER-VAULT-TOKEN` (vault-mcp), `CLOVER-API-FETCH` (HTTP request), `CLOVER-NORMALISE`, `RAW-INGEST-001` handoff.
+
+### Phase 4 — TouchOffice via scrape adapter
+
+**Status**: **legacy pattern shipped** (P5 since U27 → `public.touchoffice_fixed_totals` etc). Migrate-to-v5.4-pattern queued. New scrape runs from Phase 4 onward also write to `raw.touchoffice_orders`.
+
+**Build**:
+- Extend the existing Playwright scraper at `services/playwright/scripts/touchoffice.py` to also export per-ticket detail (not just totaliser sums); produce the manifest + jsonl artifact.
+- n8n workflow `TOUCHOFFICE-SCRAPE-001` replaces the current `u27-touchoffice-daily.sh` cron entry. `services.yaml` schedule moved to n8n.
+
+**Acceptance**:
+- Tomorrow's scrape produces both legacy `public.touchoffice_*` rows AND new `raw.touchoffice_orders` rows.
+- Per-ticket detail visible: `tender_breakdown`, `voids_minor`, `refunds_minor`, `operator_id` populated for every ticket.
+
+**Verification SQL**:
+```sql
+SELECT site, transaction_date, COUNT(*) AS tickets,
+       SUM(total_gross_minor)/100.0 AS gross_gbp
+  FROM raw.touchoffice_orders
+ WHERE transaction_date = current_date - 1
+ GROUP BY 1, 2;
+```
+
+**n8n nodes**: `TOUCHOFFICE-CRON`, `PLAYWRIGHT-LOGIN`, `EXPORT-Z-REPORT`, `PARSE-TICKETS`, `EMIT-MANIFEST`, `RAW-INGEST-001`.
+
+### Phase 5 — Dojo: CSV first, API if access granted, scrape as fallback
+
+**Status**: **legacy pattern shipped** (U54 dojo-master-table → `public.dojo_transactions`, 9,215 rows from CSV). API access pending; scrape unbuilt.
+
+**Build**:
+- CSV adapter: extend U54 importer to emit the manifest + jsonl shape, write to `raw.dojo_transactions`.
+- API adapter (when access granted): `scripts/payments/adapters/api/dojo.py`, n8n `DOJO-API-001`.
+- Scrape adapter: `services/playwright/scripts/dojo-portal.py`, n8n `DOJO-SCRAPE-001`, 2FA from `admin@malthousetintagel.com` via google-fetch.
+
+**Acceptance**:
+- CSV adapter live and writing to `raw.dojo_transactions` for every new CSV drop.
+- When primary fails: `INGEST-WATCHDOG` escalates to scrape adapter; ingest resumes within `freshness_minutes`.
+- A row that arrives via both CSV and API is deduped by `UNIQUE (source, source_transaction_id)`.
+
+**Verification SQL**:
+```sql
+SELECT first_seen_via, COUNT(*) FROM raw.dojo_transactions GROUP BY 1;
+SELECT COUNT(*) AS api_csv_duplicates_blocked
+  FROM raw.imports
+ WHERE source='dojo' AND adapter='csv'
+   AND captured_at > (SELECT MIN(captured_at) FROM raw.imports WHERE source='dojo' AND adapter='api');
+```
+
+**n8n nodes**: `DOJO-CSV-WATCH`, `DOJO-API-CRON`, `DOJO-SCRAPE-CRON`, common normaliser, `RAW-INGEST-001`.
+
+### Phase 6 — Caterbook
+
+**Status**: **legacy pattern shipped** (P6 since U28 → `public.caterbook_*`, 282 bookings / 467 room-nights). Migrate-to-v5.4-pattern queued. Caterbook ingestion path mostly stays in `public.*` because the reservation lifecycle (confirmed → completed → settled) is tracked there; Phase 6 specifically adds the **payment-side** mirror in `raw.caterbook_reservations` so reservations join cleanly to card transactions via `payment_reference`.
+
+**Build**:
+- Extend the existing PDF parser to emit a payment-side artifact alongside the booking-side write.
+- n8n workflow `CATERBOOK-EMAIL-001` already polls Gmail; add the new emit branch.
+
+**Acceptance**:
+- For every confirmed booking, a `raw.caterbook_reservations` row exists with `payment_reference` populated whenever the original PDF carried a card-ref.
+- Joining `raw.caterbook_reservations.payment_reference` to `raw.dojo_transactions.source_transaction_id` resolves to a card payment for every paid-up booking.
+
+**Verification SQL**:
+```sql
+SELECT
+  COUNT(*)                                              AS reservations_with_pmt,
+  COUNT(*) FILTER (WHERE r.payment_reference IS NULL)   AS unpaid_or_unmatched,
+  COUNT(d.id)                                           AS pmt_matched
+FROM raw.caterbook_reservations r
+LEFT JOIN raw.dojo_transactions d
+  ON d.source_transaction_id = r.payment_reference
+WHERE r.status IN ('confirmed','completed')
+  AND r.arrival_date >= current_date - 30;
+```
+
+**n8n nodes**: existing `CATERBOOK-EMAIL-FETCH`, new `CATERBOOK-PAYMENT-EMIT`, `RAW-INGEST-001`.
+
+### Phase 7 — Reconciliation Level 1 (Daily Totals)
+
+**Status**: fresh build.
+
+**Build**:
+- `RECON-L1` n8n workflow: cron `30 04 * * *`. Reads `raw.touchoffice_orders` + `staging.payments` + `public.till_reconciliation`; writes `mart.daily_totals` per (site, date, tender); writes `mart.exceptions` for any `mismatch`.
+- View `mart.v_l1_today` exposes today-so-far comparisons for the dashboard.
+
+**Acceptance**:
+- After yesterday's data lands, `mart.daily_totals` has one row per (site, date, tender) for yesterday.
+- Manual edit: introduce a £5 cash shortage in `till_reconciliation` for one shift → next L1 run produces an `l1_mismatch` exception.
+- Card £0 tolerance: a £0.50 POS-vs-Dojo delta produces a `mismatch` (not `minor`).
+
+**Verification SQL**:
+```sql
+SELECT site, tender, status, COUNT(*)
+  FROM mart.daily_totals
+ WHERE transaction_date = current_date - 1
+ GROUP BY 1, 2, 3 ORDER BY 1, 2;
+```
+
+**n8n nodes**: `L1-CRON`, `L1-TOUCHOFFICE-AGG`, `L1-PROCESSOR-AGG`, `L1-CASH-AGG`, `L1-COMPARE`, `L1-EXCEPTION-EMIT`.
+
+### Phase 8 — Reconciliation Levels 2 + 3
+
+**Status**: fresh build. **Cannot start before Phase 7 + Phase 4 (per-ticket TouchOffice) are stable.**
+
+**Build**:
+- `RECON-L2` n8n workflow: cron `45 04 * * *` (after L1). Window-joins `raw.touchoffice_orders` card-tender tickets to `staging.payments` ±5min, scores matches, writes `mart.transaction_matches` for every POS row and every unmatched processor row; emits exceptions per outcome.
+- `RECON-L3` n8n workflow: cron `0 5 * * *` (after L2). For every closed processor batch, computes expected payout from `secret/payments/<source>/rates`, looks for matching `staging.bank_lines` credit at `batch_date + processor_t`, writes `mart.expected_settlements`; emits exceptions for short or unsettled.
+
+**Acceptance**:
+- Synthetic test: insert one POS card ticket with no processor sibling → next L2 run writes `l2_pos_no_card` exception.
+- Synthetic test: insert one processor row outside POS hours → `l2_card_no_pos`.
+- Synthetic test: insert a refund pointing at a non-existent sale → `l2_phantom_refund`.
+- L3: a Dojo batch on yesterday's date with no matching bank credit at T+1 produces `l3_unsettled` after 5 days (test via date offset).
+
+**Verification SQL**:
+```sql
+-- L2 yesterday breakdown
+SELECT match_outcome, COUNT(*) FROM mart.transaction_matches
+ WHERE transaction_date = current_date - 1 GROUP BY 1;
+
+-- L3 last 7 days settlement status
+SELECT processor, status, COUNT(*) FROM mart.expected_settlements
+ WHERE batch_date >= current_date - 7 GROUP BY 1, 2;
+```
+
+**n8n nodes**: `L2-CRON`, `L2-WINDOW-JOIN`, `L2-SCORE`, `L2-EXCEPTION-EMIT`, `L3-CRON`, `L3-EXPECTED-COMPUTE`, `L3-BANK-MATCH`, `L3-EXCEPTION-EMIT`.
+
+### Phase 9 — Cash variance + Telegram alerting
+
+**Status**: fresh build.
+
+**Build**:
+- `RECON-CASH-VARIANCE` n8n workflow: cron `30 04 * * *` (alongside L1). Reads `raw.touchoffice_orders` + `public.till_reconciliation` joined by shift; writes `mart.cash_variance` per (date, site, operator, shift).
+- View `mart.v_operator_surveillance_weekly` materialises Mondays from the last 12 weeks of `mart.cash_variance`.
+- `RECON-MORNING-DIGEST` n8n workflow: cron `30 08 * * *`. Reads `mart.exceptions WHERE status='open' AND raised_at BETWEEN ... AND ...`; groups by L1/L2/L3/cash patterns; sends a single Telegram per 4b.7 format.
+- Critical-severity immediate path: `EXCEPTION-WATCH` n8n workflow triggered by row insert on `mart.exceptions` where severity='critical'; fires Telegram inline.
+
+**Acceptance**:
+- Run end-to-end: a synthetic shift with £15 cash short by operator 'TomB' three nights in a row → Monday digest includes "TomB: 3rd consecutive shift cash short ≤ £15".
+- Daily digest format matches 4b.7 sample exactly. Empty-day = no message (not "all OK").
+
+**Verification SQL**:
+```sql
+SELECT operator_name, transaction_date, variance_minor/100.0 AS variance_gbp
+  FROM mart.cash_variance
+ WHERE transaction_date >= current_date - 7
+   AND ABS(variance_minor) > 0
+ ORDER BY 2 DESC, 1;
+```
+
+**n8n nodes**: `CASH-VAR-CRON`, `CASH-VAR-COMPUTE`, `CASH-VAR-WRITE`, `DIGEST-CRON`, `DIGEST-COLLECT-EXCEPTIONS`, `DIGEST-FORMAT`, `DIGEST-TELEGRAM-SEND`, `EXCEPTION-WATCH` (Postgres trigger watcher), `CRITICAL-TELEGRAM-SEND`.
+
+---
+
+## 4b.9 Host-Cron Registry & End-of-Life Policy
+
+Reaffirming the rule from 4b.0: **new payment ingestion must use n8n, not host cron**. The host crons below pre-date PART 4b and are grandfathered. Each carries a target-disposition:
+
+| Cron entry | Origin sprint | Disposition |
+|---|---|---|
+| `*/5 * * * * u29-instructions-poll` | U29 | Keep — Gmail-to-bot_instructions, not payment-related. |
+| `*/15 * * * * u29-heartbeat` | U29 → U34 | Keep — system heartbeat, quiet-unless-degraded. |
+| `*/10 * * * * u33-touchoffice-realtime` | U33 | Migrate to n8n in Phase 4. |
+| `0 3 * * * u27-touchoffice-daily` | U27 | **Replace** with n8n `TOUCHOFFICE-SCRAPE-001` in Phase 4. |
+| `0 7 * * * u28-caterbook-daily` | U28 | Migrate to n8n in Phase 6 (alongside Caterbook payment-mirror). |
+| `0 21 * * * u29-daily-digest` | U29 | Keep — separate concern (general daily digest, not payment digest). |
+| `30 23 * * * p7-cashing-up` | U32 | Keep — feeds `till_reconciliation` which Phase 9 reads. |
+| `15 2 * * * u36-dreaming-nightly` | U36 | Keep — meta-analysis, not ingestion. |
+| `30 7 * * * u46-weather-daily` | U46 | Keep — unrelated. |
+| `*/20 * * * * u46-email-task-extractor` | U46 | Keep — unrelated. |
+| `23 * * * * u50-apply-feedback` | U50 | Keep — classifier feedback, not payment. |
+| `25 6,18 * * * u50-stale-ack` | U50 | Keep — alert maintenance. |
+| `*/15 * * * * u54-pipeline-watchdog` | U54 | Keep — ingest-pipeline watchdog (broader than payments). |
+| `45 7 * * * u54-card-recon-writer` | U54 | **Replace** by `RECON-MORNING-DIGEST` in Phase 9. |
+| `0 4 * * 0 u56-realm-scoped-backup` | U56 | Keep — backup, not ingestion. |
+| `0 9 * * * u51-vehicle-alerts` | U51 | Keep — unrelated. |
+
+**End-of-life policy**: any cron tagged "Replace" or "Migrate" in the disposition column must be removed from `crontab` within the same sprint that ships its n8n replacement. A non-migrated stale cron emits an `INGEST-WATCHDOG` exception of kind `cron_drift` after 7 days post the replacement workflow going live.
 
 ---
 
@@ -6328,10 +7375,11 @@ J = "OK" if ABS(I) ≤ 5 AND ABS(I/F*100) ≤ 0.5 else "VARIANCE FLAGGED"
 | v5.0 | Phase 1 three-milestone gate structure. Vault auto-unseal + Authelia + benchmarks deferred to Phase 2 hardening. Vertical slice gate mandatory before all remaining pipelines. |
 | v5.1 | Ralph loop, MarkItDown, vault-mcp, Karpathy wiki compilation, PARA vault, Qdrant reranking. |
 | v5.2 | Disaster recovery scripts (backup-all.sh, bootstrap.sh, restore.sh). Section 7.3. |
-| **v5.3** | **Outcome-Native pipeline pattern added to Section 6.2 construction rules: OutcomeObject schema (status/confidence/reasoning/tier_used), retry/escalation Code node (confidence <0.85 escalates to medium tier before requires_human), Dreaming heuristics file pattern for Master Router context. Phase 2 deliverables: Local Dreaming Workflow (Workflow H, nightly 02:00, audit_log → Haiku → heuristics.md → Master Router). CI Auto-Fix GitHub Actions (SQL tests for init_placeholder + RLS policy count). Note: Outcomes and Dreaming are patterns implemented locally in n8n/Ollama — NOT Anthropic Managed Agents platform features.** |
+| v5.3 | Outcome-Native pipeline pattern added to Section 6.2 construction rules: OutcomeObject schema (status/confidence/reasoning/tier_used), retry/escalation Code node (confidence <0.85 escalates to medium tier before requires_human), Dreaming heuristics file pattern for Master Router context. Phase 2 deliverables: Local Dreaming Workflow (Workflow H, nightly 02:00, audit_log → Haiku → heuristics.md → Master Router). CI Auto-Fix GitHub Actions (SQL tests for init_placeholder + RLS policy count). Note: Outcomes and Dreaming are patterns implemented locally in n8n/Ollama — NOT Anthropic Managed Agents platform features. |
+| **v5.4** | **PART 4b — Payment Reconciliation & Cash Surveillance. Three-adapter ingestion pattern (API / scrape / CSV) per payment source. Three-layer idempotency (file_sha256, source_transaction_id, row_hash). New raw./staging./mart. schema layering for payment data (public.* legacy preserved). Transaction matching at three levels (daily totals, transaction-pair matching, settlement matching) with fraud-signal outcomes (POS-no-card, card-no-POS, phantom refunds). Cash variance + operator surveillance. Single 08:30 Telegram exception digest. 9-phase delivery plan with acceptance criteria + n8n workflow nodes + verification SQL per phase. Host-cron registry. See top-of-file CHANGELOG for surfaced conflicts and resolutions.** |
 
 ---
 
-*End of Master Build Specification v5.3*
+*End of Master Build Specification v5.4*
 *This document supersedes all previous versions.*
 *Single source of truth for the Home AI Administrative Engine build.*
