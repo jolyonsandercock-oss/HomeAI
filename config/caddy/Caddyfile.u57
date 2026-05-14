@@ -63,7 +63,9 @@ http://:80 {
     handle /markitdown {
         redir /markitdown/ permanent
     }
-    handle_path /auth/* {
+    # Don't strip the prefix — Authelia is configured at server.address=…:9091/auth
+    # so it knows about /auth/ and generates SPA paths that include it.
+    handle /auth/* {
         reverse_proxy homeai-authelia:9091
     }
     handle /auth {
@@ -91,7 +93,9 @@ https://jolybox.tailc27dff.ts.net {
     tls /etc/caddy/tls/jolybox.tailc27dff.ts.net.crt /etc/caddy/tls/jolybox.tailc27dff.ts.net.key
 
     # Authelia portal — must be reachable WITHOUT auth so users can log in.
-    handle_path /auth/* {
+    # Don't strip the prefix — Authelia is configured at server.address=…:9091/auth
+    # so it knows about /auth/ and generates SPA paths that include it.
+    handle /auth/* {
         reverse_proxy homeai-authelia:9091
     }
     handle /auth {

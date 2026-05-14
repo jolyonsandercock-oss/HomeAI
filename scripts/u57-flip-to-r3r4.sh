@@ -84,10 +84,37 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 2 — Validate the staged Caddyfile (now that cert files exist)
+# Step 2a — Bring the tls bind mount into the live Caddy container.
+#
+# The compose change adding `./config/caddy/tls:/etc/caddy/tls:ro` was made
+# in the prep commit, but until the container is recreated the mount isn't
+# visible — and `caddy validate` against the new Caddyfile fails the
+# "loading certificates" check.
+#
+# Recreate Caddy with the (still-old) Caddyfile so the mount lands cleanly.
+# IP-based routes briefly cycle (~1s).
 # -----------------------------------------------------------------------------
 
-say "step 2: validate Caddyfile.u57 (cert now present)"
+if docker exec homeai-caddy ls /etc/caddy/tls/ >/dev/null 2>&1; then
+    say "step 2a: tls mount already visible inside homeai-caddy — skip recreate"
+else
+    say "step 2a: recreating homeai-caddy to pick up the tls volume mount"
+    cd "${HOMEAI}"
+    docker compose up -d --no-deps caddy 2>&1 | tail -2
+    for i in 1 2 3 4 5; do
+        docker exec homeai-caddy ls /etc/caddy/tls/ >/dev/null 2>&1 && break
+        sleep 1
+    done
+    docker exec homeai-caddy ls /etc/caddy/tls/ >/dev/null 2>&1 \
+        || die "tls mount still not visible after recreate"
+    say "        mount in place: $(docker exec homeai-caddy ls /etc/caddy/tls/ | tr '\n' ' ')"
+fi
+
+# -----------------------------------------------------------------------------
+# Step 2b — Validate the staged Caddyfile (cert files now visible)
+# -----------------------------------------------------------------------------
+
+say "step 2b: validate Caddyfile.u57"
 docker cp "${CADDYFILE_NEW}" homeai-caddy:/etc/caddy/Caddyfile.u57 >/dev/null
 docker exec homeai-caddy caddy validate --config /etc/caddy/Caddyfile.u57 2>&1 | tail -3 \
   | grep -q "Valid configuration" || die "Caddyfile.u57 validation failed"
@@ -114,12 +141,18 @@ say "        live configs promoted"
 # Step 4 — Recreate Caddy + Authelia (compose has new tls bind mount)
 # -----------------------------------------------------------------------------
 
-say "step 4: recreate caddy + authelia (volume mount changed → up -d)"
+say "step 4: force-recreate caddy + authelia so they pick up new configs"
 cd "${HOMEAI}"
-docker compose up -d --no-deps caddy authelia 2>&1 | tail -3
+# Force-recreate: a bind-mount file change alone doesn't reload Caddy (or
+# Authelia) — compose sees the container spec is unchanged and leaves it
+# running with stale config in memory.
+docker compose up -d --no-deps --force-recreate caddy authelia 2>&1 | tail -3
 
-# Give them a moment to come up
-sleep 3
+# Give them a moment to come up + bind 443
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    docker exec homeai-caddy wget -qO- http://localhost/healthz 2>/dev/null | grep -q "ok" && break
+    sleep 1
+done
 
 # -----------------------------------------------------------------------------
 # Step 5 — Smoke: FQDN + TLS + Authelia portal reachable

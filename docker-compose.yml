@@ -198,6 +198,7 @@ services:
       - caddy_config:/config
     ports:
       - "100.104.82.53:80:80"
+      - "100.104.82.53:443:443"
       - "100.104.82.53:5678:5678"
       - "100.104.82.53:3000:3000"
       - "100.104.82.53:8080:8080"
@@ -269,7 +270,7 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: "utility"
       # U52 R2 realm enforcement. 0 = dormant (every request runs as OWNER);
       # flip to 1 once Authelia (R3) is wired and sets the X-Realm header.
-      REALM_ENFORCE: "0"
+      REALM_ENFORCE: "1"
     deploy:
       resources:
         reservations:
@@ -447,7 +448,7 @@ services:
       # R2 realm gate (U52). Present for parity with build-dashboard. Bot is
       # realm-aware regardless because sender_realm is fetched from the
       # server-trusted bot_sender_whitelist, not an HTTP header.
-      REALM_ENFORCE: "0"
+      REALM_ENFORCE: "1"
     restart: unless-stopped
 
 volumes:
