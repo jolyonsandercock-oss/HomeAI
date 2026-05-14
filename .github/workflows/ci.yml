@@ -1,0 +1,131 @@
+# Home AI CI — lint, entropy scan, migration ordering.
+#
+# Stays self-contained (no docker/live DB) so it can run on GitHub's free
+# runners. The "real" RLS suite + integration tests need the live host and
+# stay as bash scripts the user runs manually.
+#
+# Triggers: push to main, pull_request to main.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint shell + Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax (bash -n)
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r f; do
+            if ! bash -n "$f" 2>/dev/null; then
+              echo "::error file=$f::bash syntax error"
+              fail=1
+            fi
+          done < <(find scripts .claude/scripts -name '*.sh' 2>/dev/null)
+          exit $fail
+
+      - name: Python syntax (py_compile)
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r f; do
+            if ! python3 -m py_compile "$f" 2>/dev/null; then
+              echo "::error file=$f::python syntax error"
+              fail=1
+            fi
+          done < <(find scripts services -name '*.py' 2>/dev/null)
+          exit $fail
+
+  entropy-scan:
+    name: Entropy scan (no secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Forbidden literal patterns
+        # Catches: BEGIN PRIVATE KEY / api_key="..." / password="..." with a
+        # long literal, vault tokens prefixed hvs., raw bearer tokens.
+        run: |
+          set -e
+          fail=0
+          patterns=(
+            '-----BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----'
+            '\bhvs\.[A-Za-z0-9]{20,}'
+            'api[_-]?key["\x27]?\s*[:=]\s*["\x27][A-Za-z0-9+/=_-]{30,}'
+            'password["\x27]?\s*[:=]\s*["\x27][A-Za-z0-9+/=!@#$%^&*-]{16,}'
+            'token["\x27]?\s*[:=]\s*["\x27][A-Za-z0-9+/=_-]{30,}'
+          )
+          for p in "${patterns[@]}"; do
+            hits=$(git ls-files | xargs grep -nE "$p" 2>/dev/null \
+                   | grep -vE '\.github/workflows/ci\.yml|placeholder|<vault:|REPLACE_VIA|EXAMPLE|noreply|TODO' \
+                   || true)
+            if [[ -n "$hits" ]]; then
+              echo "::error::entropy match for pattern '$p':"
+              echo "$hits" | head -5
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: High-entropy hex strings outside known config
+        # Forbid raw 64-char hex blobs in YAML/JSON/SQL — those are the shape of
+        # bootstrap-written hex secrets that have bitten us before.
+        run: |
+          set -e
+          hits=$(git ls-files '*.yml' '*.yaml' '*.json' '*.sql' \
+                  | xargs grep -nE '[A-Fa-f0-9]{64,}' 2>/dev/null \
+                  | grep -vE '\.github/workflows/ci\.yml|migrations/V[0-9]+__.+\.sql:.*--|sha256|fingerprint|payload_signature|trace_id|gen_random' \
+                  || true)
+          if [[ -n "$hits" ]]; then
+            echo "::error::high-entropy hex string found in committed config:"
+            echo "$hits" | head -5
+            exit 1
+          fi
+
+  migration-order:
+    name: Migration sequence is contiguous
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: V<N> ordering check
+        run: |
+          set -e
+          # Pull the integer prefix from each V<N>__name.sql, sort. Gaps are
+          # reported as warnings (some renumberings during U33–U47 left
+          # historical holes — they're tracked in STATE.md, not a CI block).
+          # New gaps introduced AFTER V70 are an error.
+          KNOWN_GAPS="16 49"  # space-separated list of allowlisted missing V<N>
+          nums=$(ls postgres/migrations/V*.sql 2>/dev/null \
+                  | sed -E 's|.*/V([0-9]+)([a-z]?)__.*|\1|' \
+                  | sort -u -n)
+          last=0
+          fail=0
+          for n in $nums; do
+            if [[ $last -ne 0 && $n -gt $((last + 1)) ]]; then
+              for gap in $(seq $((last + 1)) $((n - 1))); do
+                if [[ " $KNOWN_GAPS " == *" $gap "* ]]; then
+                  echo "::warning::known gap at V${gap}"
+                else
+                  echo "::error::new migration gap at V${gap} (between V${last} and V${n})"
+                  fail=1
+                fi
+              done
+            fi
+            last=$n
+          done
+          if [[ $fail -eq 0 ]]; then
+            echo "OK — migrations through V${last} (known gaps: ${KNOWN_GAPS})"
+          fi
+          exit $fail
