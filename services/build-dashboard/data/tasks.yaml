@@ -21,26 +21,33 @@ hands_off:
       (some write to ai_usage, dreaming_runs, vendor_invoice_inbox).
     estimate: 90 min
 
-needs_user:
+needs_user: []
+
+# Future bucket — external-dependency items deliberately parked until core
+# build is complete. None of these block daily ops; they're enhancement
+# rails (compliance, accountancy integration, property comparables) that
+# we'll thread in once the core reconciliation + analytics surface is
+# stable. Don't surface these as red on the dashboard.
+future:
   - id: xero-oauth
-    title: P3 Xero OAuth — PARKED 3rd attempt 2026-05-14, awaiting Xero support
-    detail: Web app, redirect URI matches, full scope set returned invalid_scope, offline_access alone got a Xero-side 500 on the consent page. Email to api@xero.com from U29 still unanswered. Stop retrying — wait for Xero. Re-run scripts/u29-xero-bootstrap.py once they reply.
+    title: P3 Xero OAuth (parked — external blocker, Xero unresponsive)
+    detail: 3rd attempt 2026-05-14 — full scope returned invalid_scope, offline_access alone returned a Xero-side 500. Email to api@xero.com from U29 still unanswered. Re-run scripts/u29-xero-bootstrap.py once they reply.
     estimate: 30 min once Xero responds
 
   - id: companies-house-key
-    title: Companies House API key — deferred 2026-05-14
-    detail: Free public-data API; Jo signs up at https://developer.company-information.service.gov.uk/ and pastes key into scripts/u51-companies-house-creds.sh. Deferred during U51 auth session — no daily-driver impact.
-    estimate: 5 min Jo + 0 min wiring (script already built)
+    title: Companies House public data API (free, awaits signup)
+    detail: Jo signs up at https://developer.company-information.service.gov.uk/, pastes key into scripts/u51-companies-house-creds.sh, then UPDATE entities SET companies_house_number for ARTL + AREL. Weekly cron is already installed.
+    estimate: 5 min Jo + 0 min wiring
 
   - id: hmrc-vat-sandbox
-    title: HMRC MTD VAT sandbox enrolment — deferred 2026-05-14
-    detail: Sandbox client_id/secret from developer.service.hmrc.gov.uk. Bootstrap script not yet written (~30 min build) because deferred without action. Production MTD enrolment is a weeks-long HMRC process — definitely not in scope this quarter.
+    title: HMRC MTD VAT sandbox enrolment
+    detail: Sandbox client_id/secret from developer.service.hmrc.gov.uk. Bootstrap script not yet written (~30 min build). Production MTD enrolment is a weeks-long HMRC process — out of scope until that's worth doing.
     estimate: 5 min Jo signup + 30 min build
 
-  - id: r3-tailscale-cert-fqdn
-    title: Tailscale cert FQDN for Authelia forward_auth (R3 blocker)
-    detail: Authelia is up and reachable at /auth/ but forward_auth on protected routes needs a tailscale-cert FQDN before cookies will follow. Unblocks R3 Auth → R4 App route split → REALM_ENFORCE=1 flip on build-dashboard. See [[feedback_authelia_cookie_domain]].
-    estimate: 30 min Jo at the box
+  - id: land-registry-property-data
+    title: Land Registry data ingestion (price-paid + comparables)
+    detail: U41 shipped scripts/u41-land-registry-sync.sh + v_property_comparable_summary. Awaits Jo to INSERT property rows with postcodes + purchase data. Monthly cron at 1st 04:00 picks it up.
+    estimate: 5 min Jo data dictation
 
 # Recently done — kept here as a short audit trail so the dashboard's
 # "hands_off" widget doesn't keep re-surfacing them. Drop entries

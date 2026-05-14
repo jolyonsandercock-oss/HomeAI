@@ -47,6 +47,16 @@ __pycache__/
 .DS_Store
 *.swp
 
+# Personal/business data — bank statements, invoice PDFs, attachment dumps.
+# These contain account numbers + transaction detail and MUST NOT leave the
+# host via the GitHub off-host-backup repo.
+/data/natwest-inbox/
+/data/invoice-pdfs/
+/data/unknown-attachments/
+/data/realm-scoped/
+# Schema-only artifacts in /data are OK (e.g. realm-shadow-baseline.json
+# tracked above — that's row counts, no row content).
+
 # Build artefacts
 node_modules/
 /logs/
