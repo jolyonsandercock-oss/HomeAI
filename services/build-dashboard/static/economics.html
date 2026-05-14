@@ -119,12 +119,19 @@ function econ() {
           { title: 'Total rev',     field: 'total_revenue',      formatter: 'money', hozAlign: 'right', headerFilter: false },
           { title: 'Hours',         field: 'labour_hours',       hozAlign: 'right', headerFilter: false },
           { title: 'Labour £',      field: 'labour_cost_est',    formatter: 'money', hozAlign: 'right', headerFilter: false },
+          { title: 'Pub £',         field: 'labour_cost_pub',    formatter: 'money', hozAlign: 'right', headerFilter: false },
+          { title: 'Cafe £',        field: 'labour_cost_cafe',   formatter: 'money', hozAlign: 'right', headerFilter: false },
+          { title: 'Inn £',         field: 'labour_cost_inn',    formatter: 'money', hozAlign: 'right', headerFilter: false },
           { title: 'Labour %',      field: 'labour_pct',
             formatter: (cell) => {
               const v = cell.getValue(); if (v == null) return '<span class="text-slate-500">—</span>';
               const light = (v < 30) ? 'tl-green' : (v <= 32 ? 'tl-amber' : 'tl-red');
               return `<span class="tl-dot ${light}"></span>${v}%`;
             }, hozAlign: 'right', headerFilter: false },
+          { title: 'Pub L%',        field: 'pub_labour_pct',     hozAlign: 'right', headerFilter: false,
+            formatter: (c) => c.getValue() == null ? '—' : c.getValue() + '%' },
+          { title: 'Cafe L%',       field: 'cafe_labour_pct',    hozAlign: 'right', headerFilter: false,
+            formatter: (c) => c.getValue() == null ? '—' : c.getValue() + '%' },
           { title: 'SPLH £',        field: 'splh',               formatter: 'money', hozAlign: 'right', headerFilter: false },
           { title: 'Covers',        field: 'total_covers',       hozAlign: 'right', headerFilter: false },
           { title: 'In-house',      field: 'in_house_count',     hozAlign: 'right', headerFilter: false },

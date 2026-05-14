@@ -1,11 +1,45 @@
 # Home AI — Live State Snapshot (for external review)
 
-*Generated 2026-05-12, R2 status appended 2026-05-14. Designed to be
-ingested by another LLM (Gemini, GPT, etc.) for a second-opinion review
-of what's live, what's planned, and where the design has shifted from
-the original spec.*
+*Generated 2026-05-12, R2 status appended 2026-05-14, R5 + U50 closeout
+appended 2026-05-14 (U53). Designed to be ingested by another LLM
+(Gemini, GPT, etc.) for a second-opinion review of what's live, what's
+planned, and where the design has shifted from the original spec.*
 
-## 0. Most recent change (2026-05-14)
+## 0. Most recent change (2026-05-14 — U53)
+
+**Realm R5 (ingest tagging) + R4 immutability + U50 closeout shipped.**
+
+- `services/google-fetch/main.py` now carries `_MAILBOX_REALM` (info /
+  admin / stay → work; jo / pounana → family; bot → owner) and stamps
+  `realm` explicitly on every `events` INSERT (both `email.received`
+  and `document.received`). `pipeline_version` bumped to
+  `gmail_poller_py:1.3`. KeyError-by-design if an unknown account
+  ships — fail loud rather than silent owner-tag.
+- V67 adds `home_ai.realm_override(table, id, new_realm, reason)`
+  SECURITY DEFINER chokepoint + BEFORE UPDATE immutability triggers
+  on emails / email_attachments / events / documents /
+  vendor_invoice_inbox / vendor_invoice_lines / bank_transactions.
+  Direct UPDATE of `realm` raises `realm_immutable_without_override`;
+  override path requires `app.current_realm='owner'` and inserts an
+  `audit_log` row.
+- One-shot backfill: 795 historical events (624 email.received + 171
+  document.received) re-tagged from owner → work/family per the
+  mailbox map, via a single transactional bulk-UPDATE with the
+  override flag raised. Single summary audit_log row written.
+- `scripts/u53-r5-realm-backfill.sh --audit-only` returns 0 mismatches
+  across emails / events / vendor_invoice_inbox.
+
+**U50 Settle the Books — closed.** All five tracks shipped between
+2026-05-13 and 2026-05-14; never formally booked off until U53.
+Per-site labour UI (Tabulator columns: Pub £, Cafe £, Inn £, Pub L%,
+Cafe L%) is the last UI piece, shipped today; backend (V60 +
+v_daily_unit_economics rewrite) was already live.
+
+**Realm work outstanding**: R3 Auth (blocked on tailscale-cert FQDN
+[[feedback_authelia_cookie_domain]]), R4 full route split (pending
+R3), R6 Bot/AI call-site scope (queued U54), R7 backup (queued U55).
+
+## 0.1 R1 + R2 (shipped earlier 2026-05-14 — U52)
 
 **Realm-split R1 + R2 shipped (U52).** Three-realm access model
 (OWNER / WORK / FAMILY) now enforced at the database layer:

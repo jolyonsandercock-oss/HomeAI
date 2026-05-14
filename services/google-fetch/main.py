@@ -51,6 +51,20 @@ DEFAULT_SCOPES = [
 # {account_name: (access_token, expires_at_epoch)}
 _TOKEN_CACHE: dict[str, tuple[str, float]] = {}
 
+# ─── R5 mailbox → realm map (SPEC §2.5) ─────────────────────────
+# Source of truth for which realm an ingested email/document belongs to.
+# Keyed by `account` (the column in gmail_credentials, also stamped on
+# every emails/events row). Any new mailbox must be added here before
+# google-fetch will poll it — KeyError below is deliberate.
+_MAILBOX_REALM: dict[str, str] = {
+    "info":    "work",
+    "admin":   "work",
+    "stay":    "work",
+    "jo":      "family",
+    "pounana": "family",
+    "bot":     "owner",
+}
+
 # ─── DB helpers ─────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -565,9 +579,15 @@ async def poll_and_emit(newer_than: str = Query("1d"), max_per_account: int = Qu
                         else:
                             received_at = h.get("date")
 
+                        # R5: realm derived from mailbox-of-receipt. KeyError
+                        # by design if a new account ships without a mapping
+                        # — better a loud poll failure than silent owner-tag.
+                        realm = _MAILBOX_REALM[name]
+
                         event_payload = {
                             "gmail_message_id": mid,
                             "account": name,
+                            "realm": realm,
                             "from_address": from_address,
                             "from_name": from_name,
                             "subject": h.get("subject", ""),
@@ -596,10 +616,10 @@ async def poll_and_emit(newer_than: str = Query("1d"), max_per_account: int = Qu
                                 await conn.execute(
                                     """INSERT INTO events
                                          (event_type, source, entity_id, payload, payload_signature,
-                                          idempotency_key, pipeline_version)
+                                          idempotency_key, pipeline_version, realm)
                                        VALUES ('email.received', 'gmail', NULL, $1::jsonb, $2,
-                                               $3, 'gmail_poller_py:1.1')""",
-                                    json.dumps(event_payload), signature, idem_key,
+                                               $3, 'gmail_poller_py:1.3', $4)""",
+                                    json.dumps(event_payload), signature, idem_key, realm,
                                 )
                                 inserted += 1
                             else:
@@ -609,10 +629,15 @@ async def poll_and_emit(newer_than: str = Query("1d"), max_per_account: int = Qu
                             # Runs REGARDLESS of whether email.received was newly claimed,
                             # so this also backfills attachment events for emails that
                             # were polled before U43.
-                            for att in attachments:
+                            # U47d: Gmail rotates `attachment_id` on every fetch (verified
+                            # 71 distinct ids for the same file in one hour), so it cannot
+                            # be used as an idempotency key. Use (mid, part_index, size)
+                            # instead — stable across re-polls.
+                            for idx, att in enumerate(attachments):
                                 doc_payload = {
                                     "gmail_message_id": mid,
                                     "account": name,
+                                    "realm": realm,
                                     "filename": att["filename"],
                                     "mime_type": att["mime_type"],
                                     "attachment_id": att["attachment_id"],
@@ -620,9 +645,7 @@ async def poll_and_emit(newer_than: str = Query("1d"), max_per_account: int = Qu
                                 }
                                 doc_canon = json.dumps(doc_payload, sort_keys=True, separators=(",", ":"))
                                 doc_sig   = _hmac.new(hmac_key, doc_canon.encode(), hashlib.sha256).hexdigest()
-                                # Idempotency key includes attachment_id (multi-attachment safe).
-                                # Truncated to keep it short — attachment_ids are typically 300+ chars.
-                                doc_idem  = f"doc_{mid}_{att['attachment_id'][:24]}"
+                                doc_idem  = f"doc_{mid}_p{idx}_{att['size']}"
                                 doc_claimed = await conn.fetchval(
                                     "SELECT claim_idempotency_key($1, 'gmail-poller-py')",
                                     doc_idem,
@@ -631,10 +654,10 @@ async def poll_and_emit(newer_than: str = Query("1d"), max_per_account: int = Qu
                                     await conn.execute(
                                         """INSERT INTO events
                                              (event_type, source, entity_id, payload, payload_signature,
-                                              idempotency_key, pipeline_version)
+                                              idempotency_key, pipeline_version, realm)
                                            VALUES ('document.received', 'gmail', NULL, $1::jsonb, $2,
-                                                   $3, 'gmail_poller_py:1.1')""",
-                                        json.dumps(doc_payload), doc_sig, doc_idem,
+                                                   $3, 'gmail_poller_py:1.3', $4)""",
+                                        json.dumps(doc_payload), doc_sig, doc_idem, realm,
                                     )
                     except Exception as e:
                         logger.exception("message %s/%s failed: %s", name, mid, e)
