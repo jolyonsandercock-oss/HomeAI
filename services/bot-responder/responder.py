@@ -223,12 +223,13 @@ async def main():
         question   = (row["raw_text"] or "").strip() or (row["raw_subject"] or "").strip()
         subject_in = row["raw_subject"] or ""
 
-        # Whitelist gate
+        # Whitelist gate — fetch caller's realm at the same time so the slug
+        # filter (R2) and any downstream RLS-scoped reads can be realm-aware.
         async with conn.transaction():
             await conn.execute("SET LOCAL app.current_entity = '3'")
-            wl = await conn.fetchval(
-                "SELECT 1 FROM bot_sender_whitelist WHERE LOWER(email)=$1 AND active", sender)
-        if not wl:
+            sender_realm = await conn.fetchval(
+                "SELECT realm FROM bot_sender_whitelist WHERE LOWER(email)=$1 AND active", sender)
+        if sender_realm is None:
             await log_rejection(conn, asked_by=sender or "unknown", channel="email",
                                 raw_question=question, reason="other",
                                 detail="sender not whitelisted")
@@ -237,14 +238,16 @@ async def main():
             print(f"rejected bi#{bi_id} (non-whitelisted: {sender})")
             return
 
-        # Load whitelist slugs as tools
+        # Load whitelist slugs as tools — realm-gated. OWNER sees all; WORK
+        # and FAMILY callers only see slugs in their realm or 'shared'.
         slugs = await conn.fetch("""
           SELECT id, slug, display_name, description, intent_examples,
                  sql_template, param_schema, result_format
             FROM query_whitelist
            WHERE active=true AND approved_at IS NOT NULL
+             AND ($1 = 'owner' OR realm = $1 OR realm = 'shared')
            ORDER BY id
-        """)
+        """, sender_realm)
         slugs_by_name = {r["slug"]: r for r in slugs}
         tools = [slug_to_tool(r) for r in slugs]
 

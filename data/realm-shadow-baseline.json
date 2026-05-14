@@ -1,0 +1,26 @@
+{
+  "captured_at": "2026-05-14T15:06:24+01:00",
+  "mode": "pre-V65-baseline",
+  "counts": {
+    "emails": 473,
+    "events": 1504,
+    "vendor_invoice_inbox": 194,
+    "workforce_shifts": 1486,
+    "workforce_departments": 5,
+    "bank_transactions": 0,
+    "child_events": 112,
+    "rent_payments": 0,
+    "properties": 0,
+    "tenancies": 0,
+    "weather_daily": 401,
+    "email_tasks": 31,
+    "guest_reviews": 0,
+    "bot_feedback": 133,
+    "caterbook_email_reports": 143,
+    "caterbook_observations": 1013,
+    "caterbook_daily_snapshots": 143,
+    "ops_thresholds": 3,
+    "product_canonical": 68,
+    "audit_log": 7486
+  }
+}

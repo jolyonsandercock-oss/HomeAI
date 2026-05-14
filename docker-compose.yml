@@ -266,6 +266,9 @@ services:
       MONTHLY_BUDGET_GBP: "15.0"
       NVIDIA_VISIBLE_DEVICES: "all"
       NVIDIA_DRIVER_CAPABILITIES: "utility"
+      # U52 R2 realm enforcement. 0 = dormant (every request runs as OWNER);
+      # flip to 1 once Authelia (R3) is wired and sets the X-Realm header.
+      REALM_ENFORCE: "0"
     deploy:
       resources:
         reservations:

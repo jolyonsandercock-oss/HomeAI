@@ -20,12 +20,27 @@ items:
   #   cron live. Schema at V28.
 
   - severity: medium
-    title: P3 Xero Sync — PARKED awaiting Xero support
+    title: Realm R3 (Auth) — blocked on tailscale-cert FQDN before forward_auth
     detail: >
-      OAuth bootstrap script + scopes verified correct against Xero docs.
-      Authorize endpoint rejects requests even with minimal scope (offline_access
-      only) on a fresh app, in incognito mode. errorId logged in URL. Sent to
-      api@xero.com for log lookup. Re-run scripts/u29-xero-bootstrap.py once
+      U52 shipped R1 + R2 (realm column on 93 tables, RLS realm_isolation on
+      87) and wired REALM_ENFORCE on build-dashboard (default 0, dormant).
+      Flipping REALM_ENFORCE to 1 requires Authelia + Caddy to inject an
+      X-Realm header, which requires forward_auth, which requires a
+      tailscale-cert FQDN — needs Jo at the box. Until then every request
+      runs as OWNER realm (transitional pass-through). See [[realm-split-architecture]].
+    unblocks: REALM_ENFORCE=1, per-user dashboard scoping, future WORK/FAMILY logins
+    estimate: 30 min once FQDN cert is in place
+
+  - severity: medium
+    title: P3 Xero Sync — PARKED (3rd attempt 2026-05-14) awaiting Xero support
+    detail: >
+      Third attempt 2026-05-14. First request with full scope list returned
+      'invalid_scope'. Reduced to offline_access only — that scope was
+      accepted, but Xero's consent-render page then served a generic 500
+      with no visible errorId. Suggests Xero-side consent UI failure rather
+      than scope or config. App is Web app, redirect URI matches
+      http://localhost:8976/callback. Email to api@xero.com from U29 still
+      unanswered. Re-run scripts/u29-xero-bootstrap.py with full scopes once
       Xero replies. Until unblocked, P2 invoice matching cannot complete.
     unblocks: P2 invoice → Xero match, P3 Pipeline 3, payment reconciliation
     estimate: 30 min once Xero replies + 30 min wiring

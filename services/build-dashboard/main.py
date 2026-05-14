@@ -83,15 +83,29 @@ async def pool() -> asyncpg.Pool:
         _pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=4)
     return _pool
 
+# Realm enforcement (R2) — see U52 sprint plan.
+# REALM_ENFORCE=0 (default): every request runs as OWNER realm. Behaviour is
+# identical to pre-V65: realm_isolation policy's owner branch passes every row.
+# REALM_ENFORCE=1: middleware reads X-Realm header (set by Authelia + Caddy
+# once R3 lands) and rejects requests missing/with invalid realm. Until R3,
+# leave at 0.
+from contextvars import ContextVar
+_current_realm: ContextVar[str] = ContextVar("current_realm", default="owner")
+REALM_ENFORCE = os.environ.get("REALM_ENFORCE", "0") == "1"
+
 async def db_one(sql: str, *args):
     p = await pool()
     async with p.acquire() as c:
-        return await c.fetchrow(sql, *args)
+        async with c.transaction():
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+            return await c.fetchrow(sql, *args)
 
 async def db_all(sql: str, *args):
     p = await pool()
     async with p.acquire() as c:
-        return await c.fetch(sql, *args)
+        async with c.transaction():
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+            return await c.fetch(sql, *args)
 
 # ─── Helpers ────────────────────────────────────────────────────
 async def http_json(url: str, timeout: float = 4.0) -> Any:
@@ -463,6 +477,25 @@ async def compute_recent_activity(limit: int = 30) -> list[dict]:
 # ─── App ────────────────────────────────────────────────────────
 app = FastAPI(title="Home AI Build Dashboard", version="2.0")
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+
+# Realm middleware: set _current_realm contextvar from X-Realm header when
+# REALM_ENFORCE=1, otherwise pin to 'owner'. Health and static paths are
+# exempt so liveness checks don't 401 when REALM_ENFORCE=1 without a header.
+_REALM_EXEMPT_PREFIXES = ("/api/healthz", "/static")
+
+@app.middleware("http")
+async def realm_middleware(request, call_next):
+    if not REALM_ENFORCE or any(request.url.path.startswith(p) for p in _REALM_EXEMPT_PREFIXES):
+        _current_realm.set("owner")
+        return await call_next(request)
+
+    realm = (request.headers.get("X-Realm") or "").strip()
+    if realm not in ("owner", "work", "family"):
+        return JSONResponse(
+            {"error": "missing or invalid X-Realm header"}, status_code=401
+        )
+    _current_realm.set(realm)
+    return await call_next(request)
 
 @app.get("/")
 async def root():
@@ -1155,6 +1188,11 @@ async def mobile_page():
     return FileResponse(str(STATIC / "m.html"))
 
 
+@app.get("/vehicles")
+async def vehicles_page():
+    return FileResponse(str(STATIC / "vehicles.html"))
+
+
 @app.get("/api/m/mobile")
 async def api_m_mobile():
     """Compact roll-up for the phone landing page."""
@@ -1697,6 +1735,34 @@ async def api_kpi_sparklines(days: int = 14):
         "cafe":     [_f(r["sandwich_net_sales"]) for r in rows],
         "accom":    [_f(r["accom_revenue"])      for r in rows],
     }
+
+
+@app.get("/api/vehicles")
+async def api_vehicles():
+    """U51 T5 — vehicles + 30-day expiry alerts."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        rows = await c.fetch("""
+          SELECT id, registration, make_model, year_built, v5c_doc_ref,
+                 mot_due, insurance_renewal, road_tax_due,
+                 service_due_date, service_due_miles, current_miles,
+                 entity_id, notes
+            FROM vehicles ORDER BY registration
+        """)
+        alerts = await c.fetch("""
+          SELECT vehicle_id, registration, make_model, kind, due, days_until
+            FROM v_vehicle_alerts
+        """)
+
+    def _row(r):
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"): out[k] = v.isoformat()
+            else: out[k] = v
+        return out
+
+    return {"rows": [_row(r) for r in rows], "alerts": [_row(a) for a in alerts]}
 
 
 @app.get("/api/economics/overview")

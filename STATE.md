@@ -1,8 +1,40 @@
 # Home AI — Live State Snapshot (for external review)
 
-*Generated 2026-05-12. Designed to be ingested by another LLM (Gemini,
-GPT, etc.) for a second-opinion review of what's live, what's planned,
-and where the design has shifted from the original spec.*
+*Generated 2026-05-12, R2 status appended 2026-05-14. Designed to be
+ingested by another LLM (Gemini, GPT, etc.) for a second-opinion review
+of what's live, what's planned, and where the design has shifted from
+the original spec.*
+
+## 0. Most recent change (2026-05-14)
+
+**Realm-split R1 + R2 shipped (U52).** Three-realm access model
+(OWNER / WORK / FAMILY) now enforced at the database layer:
+
+- 93 home_ai domain tables carry a `realm` column (V64/V64a).
+- 87 of those (all non-partition tables) carry a `realm_isolation` RLS
+  policy (V65 + V65b). On the 43 tables that already had an entity-level
+  policy, realm_isolation is RESTRICTIVE so it AND-composes with the
+  existing entity filter. On the other 44, it is PERMISSIVE and is the
+  sole filter.
+- `home_ai.set_realm(text)` chokepoint function validates & sets
+  `app.current_realm` per-transaction.
+- A transitional NULL/empty-GUC branch returns TRUE for every row so
+  pre-V65 behaviour is preserved until services explicitly opt in.
+- `query_whitelist.realm` reseeded; `bot-responder` filters slugs by
+  caller's realm at load time.
+- `REALM_ENFORCE` env on build-dashboard. Default `0` (dormant — every
+  request runs as OWNER). Flip to `1` only after R3 Auth lands and
+  Authelia + Caddy set the `X-Realm` header.
+- Shadow test (`/home_ai/scripts/u52-realm-shadow-test.sh`) verifies
+  enforcement across 20 tables × 3 realms — `--baseline` / `--check
+  transitional` / `--check enforced` all green at sprint exit.
+- `v_realm_audit_violations` view: 0 violations across events,
+  invoices, vendor_invoice_inbox, bank_transactions, documents (emails
+  excluded — realm derived from mailbox-of-receipt by spec).
+
+**Realm work outstanding**: R3 Auth (blocked on tailscale-cert FQDN
+[[feedback_authelia_cookie_domain]]), R5 Ingest tagging (next sprint),
+R6 Bot/AI scope (queued), R7 Backup (queued).
 
 ## 1. Business context
 
