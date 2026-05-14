@@ -1193,6 +1193,62 @@ async def vehicles_page():
     return FileResponse(str(STATIC / "vehicles.html"))
 
 
+@app.get("/dojo")
+async def dojo_page():
+    return FileResponse(str(STATIC / "dojo.html"))
+
+
+@app.get("/api/dojo/daily")
+async def api_dojo_daily(days: int = 90):
+    """Per-site Dojo daily totals from v_dojo_daily. WORK realm only —
+    OWNER also sees these via the realm policy."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = '1'")
+        rows = await c.fetch("""
+          SELECT date, site, sales_count, refund_count, declined_count,
+                 gross_sales, refunds, tips, cashback,
+                 dojo_charges, fee_vat, net_to_bank
+            FROM v_dojo_daily
+           WHERE date >= CURRENT_DATE - ($1::int)
+           ORDER BY date DESC, site
+        """, days)
+        totals = await c.fetchrow("""
+          SELECT
+            COUNT(*) FILTER (WHERE transaction_type='Sale'
+                               AND transaction_outcome='Authorised')           AS sales_count,
+            COUNT(*) FILTER (WHERE transaction_type='Refund'
+                               AND transaction_outcome='Authorised')           AS refund_count,
+            COALESCE(SUM(transaction_amount) FILTER (WHERE transaction_type='Sale'
+                                  AND transaction_outcome='Authorised'),0)     AS gross_sales,
+            COALESCE(SUM(transaction_amount) FILTER (WHERE transaction_type='Refund'
+                                  AND transaction_outcome='Authorised'),0)     AS refunds,
+            COALESCE(SUM(gratuity_amount) FILTER (WHERE transaction_type='Sale'
+                                  AND transaction_outcome='Authorised'),0)     AS tips,
+            COALESCE(SUM(total_transaction_charge),0)                          AS dojo_charges,
+            COALESCE(SUM(fee_vat),0)                                           AS fee_vat,
+            MAX(imported_at)::text                                             AS last_import,
+            MIN(transaction_date)::text                                        AS earliest,
+            MAX(transaction_date)::text                                        AS latest
+            FROM dojo_transactions
+           WHERE transaction_date >= CURRENT_DATE - ($1::int)
+        """, days)
+
+    def _row(r):
+        out = {}
+        for k, v in dict(r).items():
+            if hasattr(v, "isoformat"): out[k] = v.isoformat()
+            elif hasattr(v, "to_eng_string"): out[k] = str(v)
+            else: out[k] = v
+        return out
+
+    return {
+        "window_days": days,
+        "totals":      _row(totals),
+        "rows":        [_row(r) for r in rows],
+    }
+
+
 @app.get("/api/m/mobile")
 async def api_m_mobile():
     """Compact roll-up for the phone landing page."""
