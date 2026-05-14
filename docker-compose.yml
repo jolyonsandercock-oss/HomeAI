@@ -443,6 +443,10 @@ services:
       VAULT_ADDR: "http://vault:8200"
       VAULT_TOKEN: "${VAULT_TOKEN}"
       PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
+      # R2 realm gate (U52). Present for parity with build-dashboard. Bot is
+      # realm-aware regardless because sender_realm is fetched from the
+      # server-trusted bot_sender_whitelist, not an HTTP header.
+      REALM_ENFORCE: "0"
     restart: unless-stopped
 
 volumes:

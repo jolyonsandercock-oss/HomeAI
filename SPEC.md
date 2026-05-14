@@ -521,6 +521,66 @@ SET LOCAL app.current_entity = '{{entityId}}';
 -- Then run the actual query
 ```
 
+> **Note (2026-05-14):** entity-based RLS is layered with realm-based RLS — see §2.5. R1 (V64) added a `realm` column to every home_ai domain table. R2 (V65 RESTRICTIVE on entity-policied tables + V65b PERMISSIVE on the rest, V66 query_whitelist.realm, V66b audit views) shipped with the `home_ai.set_realm()` chokepoint and a transitional NULL/empty `app.current_realm` branch that keeps pre-V65 behaviour until services opt in.
+
+## 2.5 Realm Model — Access Split (locked 2026-05-14)
+
+Home AI splits all data and routes into **three identity realms** plus one **shared** sentinel for lookup tables. This is a load-bearing invariant: every table, route, identity, and ingest source must declare a realm before ship.
+
+**Realms:**
+
+| Realm | Identity (Google login) | Sees |
+|---|---|---|
+| **OWNER** | `jolyon.sandercock@gmail.com` (Jo) | Everything (superset). |
+| **WORK** | `info@malthousetintagel.com`, future pub-manager logins | Entity 1 only (Atlantic Road Trading Ltd — pub + cafe + ice-cream). |
+| **FAMILY** | Future family-member logins | Entities 2 (AREL), 3 (Personal), 4 (Family). |
+
+`jolyboxbot@gmail.com` is the bot's outbox — never a login realm. `stay@` / `admin@…` are read-only mailbox sources that the system harvests from; they do not grant any realm by themselves.
+
+**Realm column values** (on every home_ai domain table, V64):
+- `owner` — OWNER realm only (platform-internal: `audit_log`, `dreaming_*`, `system_state`, `bot_instructions`, `ai_usage`, `query_*`, `static_context`, `dead_letter`, `dead_letter_archive`, `google_api_calls`, `reconciliation_flags`, `vat_returns_log`, `model_inventory_log`, `telegram_*`, `security_audit_log`, `bot_feedback`, `bot_sender_whitelist`).
+- `work` — WORK + OWNER (pub/cafe operational: `touchoffice_*`, `caterbook_*`, `workforce_*`, `epos_*`, `accommodation_*`, `staff*`, `till_reconciliation`, `manager_notes`, `guest_reviews`, `review_drafts`, `holiday_*`, `training_records`, `supplier_invoice_history`, `cafe_vendor_prompt_state`, `vendor_category_rules`).
+- `family` — FAMILY + OWNER (entities 2/3/4: `properties`, `property_compliance`, `property_market_log`, `tenancies`, `rent_payments`, `child_events`, `children`, `medical_history`, `vehicles`, `garmin_*`).
+- `shared` — visible to all realms (lookup/reference: `entities`, `weather_daily`, `weather_forecast`, `ops_constants`, `ops_thresholds`, `product_aliases`, `product_canonical`).
+
+**Cross-realm tables** (realm derived per row at insert):
+- `emails`, `email_attachments`, `email_tasks` — realm derived from `account` (the source mailbox):
+  - `info` / `admin` → `work`
+  - `jo` / `pounana` → `family`
+  - `bot` → `owner`
+- `events` (+ partitions), `documents`, `document_versions`, `invoices`, `vendor_invoice_inbox`, `vendor_invoice_lines`, `due_date_extractions`, `invoice_feedback`, `bank_accounts`, `bank_transactions`, `cashflow_forecast`, `companies_house_alerts` — realm derived from `entity_id` (1→work; 2/3/4→family; NULL→owner).
+- `companies_house_log` — realm derived from JOIN `entities.companies_house_number`.
+
+**Five enforcement layers** (defence in depth):
+
+1. **Auth** — Authelia + Caddy `forward_auth`. Identity → realm cookie/claim. `/work/*` requires WORK or OWNER; `/family/*` requires FAMILY or OWNER; root `/` is OWNER-only by default.
+2. **App** — build-dashboard + bot-responder read realm from the auth header on every request and set `app.current_realm` GUC before any query. No cross-realm joins.
+3. **Database** — RLS. R2 policy (V65/V65b): `CASE WHEN app.current_realm='owner' THEN TRUE WHEN app.current_realm IN ('work','family') THEN realm = app.current_realm OR realm = 'shared' WHEN app.current_realm IS NULL OR '' THEN TRUE  -- transitional ELSE FALSE END`. RESTRICTIVE on the 43 entity-policied tables (AND-composes with `entity_isolation`); PERMISSIVE on the 44 realm-bearing tables with no prior policy.
+4. **Ingest** — mailbox-of-receipt determines realm at row creation, and is immutable without an OWNER-credentialled override. `emails.account` and `vendor_invoice_inbox.account` are the canonical source mailbox.
+5. **AI / Bot** — bot-responder and classifier enforce realm on outbound queries. `query_whitelist.realm` (added in R2 / V66, reseeded; bot-responder filters slugs by caller's realm at load) blocks cross-realm reads at the whitelist, not at RLS, for a clean reject. R6 extends this to Haiku/Sonnet call-site scoping.
+
+**Phasing (R1..R7):**
+
+| Phase | Status | Scope |
+|---|---|---|
+| R1 — Label | SHIPPED 2026-05-14 (V64 / V64a) | `realm` column on every home_ai domain table; cross-realm tables populated per-row; `v_realm_audit` view. |
+| R2 — RLS | SHIPPED 2026-05-14 (V65 / V65b / V66 / V66b) | `home_ai.set_realm()` chokepoint; RESTRICTIVE realm_isolation on 43 entity-policied tables; PERMISSIVE realm_isolation on 44 others; `query_whitelist.realm` + bot slug-load filter; `v_realm_audit_violations` (0) + `v_realm_policy_coverage`. Transitional NULL/empty branch keeps pre-V65 behaviour until services opt in. |
+| R3 — Auth | Blocked on tailscale-cert FQDN | Finish Authelia forward_auth; identity→realm claim. Once shipped, flip `REALM_ENFORCE=1` on build-dashboard. |
+| R4 — App | PARTIAL SHIPPED 2026-05-14 (dormant) | build-dashboard + bot-responder middleware reads `X-Realm` header when `REALM_ENFORCE=1`; default `0` (pins to OWNER). `db_one`/`db_all` wrap every query in a transaction that calls `home_ai.set_realm()`. `/work/` and `/family/` route split still pending R3. |
+| R5 — Ingest | Pending (U53) | google-fetch tags realm at fetch by mailbox-of-receipt; `vendor_invoice_inbox.realm` made immutable-without-owner-override (V67). |
+| R6 — Bot/AI | Pending (U54) | Haiku/Sonnet call-site scoping by caller's realm. R2 already shipped the query_whitelist column and slug-load filter. |
+| R7 — Backup | Pending (U55) | Realm-scoped pg_dump path for selective restore. |
+
+**Cross-realm edge cases:**
+
+- **Misdirected invoice** (Estates bill cc'd to info@) — initial realm = WORK by mailbox rule. Classifier raises a `realm_reclassification_requested` row; only OWNER approves. **Never auto-reclassifies.**
+- **Shared utility** (pub electric covers flat above) — keep `site='shared'`, realm stays WORK; redistribution is an accounting journal, not a realm move.
+- **Companies House** — split ARTL vs AREL by entity_id mapping.
+- **Bot prompt context** — Haiku/Sonnet call sites must scope their SQL to the caller's realm, not the data's realm.
+- **Backups** — Restic continues to back the whole DB; add `pg_dump --table` realm-scoped export for selective restore.
+
+**Lint enforcement:** the V64 verification DO block fails the migration if any non-exempt `public.*` base table lacks a `realm` column. A separate `r1-migration-lint.sh` (T5) wraps this check for use as a pre-deploy gate. The framework-exempt list (n8n / Open WebUI / model-evaluator framework tables) is hard-coded in both places.
+
 ## 2.4 Prompt Injection Protection
 
 All external content (email bodies, invoice text, document extracts) must be sanitised before passing to any AI model.

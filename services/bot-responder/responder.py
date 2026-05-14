@@ -146,7 +146,7 @@ def validate_params(schema_raw, supplied):
 
 NAMED_PARAM_RE = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)")
 
-async def run_slug(ro_conn, slug_row, bound):
+async def run_slug(ro_conn, slug_row, bound, caller_realm):
     """Bind :param style placeholders to asyncpg's $1/$2 and execute."""
     sql = slug_row["sql_template"]
     seen = []
@@ -160,6 +160,7 @@ async def run_slug(ro_conn, slug_row, bound):
     # Read-only safety: wrap in a read-only transaction
     async with ro_conn.transaction(readonly=True):
         await ro_conn.execute("SET LOCAL app.current_entity = '3'")
+        await ro_conn.execute("SELECT home_ai.set_realm($1)", caller_realm)
         rows = await ro_conn.fetch(sql_pg, *args)
     return [dict(r) for r in rows]
 
@@ -335,7 +336,7 @@ async def main():
                     })
                     continue
                 try:
-                    rows = await run_slug(ro_conn, slug_row, bound_or_reason)
+                    rows = await run_slug(ro_conn, slug_row, bound_or_reason, sender_realm)
                 except Exception as e:
                     last_reason, last_detail = "runtime_error", str(e)[:300]
                     tool_results.append({
