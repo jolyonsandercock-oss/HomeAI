@@ -13,6 +13,7 @@ YAML data files live in ./data/ and are re-read on each request.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import subprocess
@@ -1819,6 +1820,82 @@ async def api_vehicles():
         return out
 
     return {"rows": [_row(r) for r in rows], "alerts": [_row(a) for a in alerts]}
+
+
+# ─── U54 D — Manager notes + till-reconciliation resolve ─────────
+from fastapi import Body
+
+@app.post("/api/manager-notes")
+async def api_manager_notes_create(payload: dict = Body(...)):
+    """U54 D: post a manager note for a date (any author can write).
+    Body: {note_date: 'YYYY-MM-DD', body: '...', author?: '...', tags?: [...]}"""
+    note_date_str = (payload.get("note_date") or "").strip()
+    body = (payload.get("body") or "").strip()
+    author = (payload.get("author") or "web-/m").strip()
+    tags = payload.get("tags") or []
+    if not note_date_str or not body:
+        return JSONResponse({"error": "note_date and body required"}, status_code=400)
+    try:
+        note_date = datetime.strptime(note_date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return JSONResponse({"error": "note_date must be YYYY-MM-DD"}, status_code=400)
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await c.execute("SELECT home_ai.set_realm('work')")
+            await c.execute("SET LOCAL app.current_entity = '1'")
+            row = await c.fetchrow("""
+              INSERT INTO manager_notes (entity_id, note_date, body, author, tags)
+              VALUES (1, $1, $2, $3, $4::jsonb)
+              RETURNING id, note_date, body, author, created_at
+            """, note_date, body, author, json.dumps(tags))
+    return {"id": row["id"], "note_date": row["note_date"].isoformat(),
+            "body": row["body"], "author": row["author"],
+            "created_at": row["created_at"].isoformat()}
+
+
+@app.get("/api/manager-notes")
+async def api_manager_notes_list(days: int = 14):
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = '1'")
+        rows = await c.fetch("""
+          SELECT id, note_date, body, author, created_at
+            FROM manager_notes
+           WHERE note_date >= CURRENT_DATE - ($1::int)
+           ORDER BY note_date DESC, created_at DESC
+           LIMIT 30
+        """, days)
+    return {"rows": [{"id": r["id"],
+                       "note_date": r["note_date"].isoformat(),
+                       "body": r["body"],
+                       "author": r["author"],
+                       "created_at": r["created_at"].isoformat()} for r in rows]}
+
+
+@app.post("/api/till-recon/{recon_id}/resolve")
+async def api_till_recon_resolve(recon_id: int, payload: dict = Body(default={})):
+    """U54 D: mark a flagged till_reconciliation row as resolved with a note."""
+    note = (payload.get("note") or "").strip()
+    if not note:
+        return JSONResponse({"error": "note required"}, status_code=400)
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await c.execute("SELECT home_ai.set_realm('work')")
+            await c.execute("SET LOCAL app.current_entity = '1'")
+            row = await c.fetchrow("""
+              UPDATE till_reconciliation
+                 SET status='resolved',
+                     staff_notes = COALESCE(staff_notes || E'\\n', '') ||
+                                   '[' || to_char(now(), 'YYYY-MM-DD HH24:MI') || '] ' || $2
+               WHERE id = $1 AND status='flagged'
+               RETURNING id, recon_date, status
+            """, recon_id, note)
+    if row is None:
+        return JSONResponse({"error": "not found or already resolved"}, status_code=404)
+    return {"id": row["id"], "recon_date": row["recon_date"].isoformat(),
+            "status": row["status"]}
 
 
 @app.get("/api/economics/overview")

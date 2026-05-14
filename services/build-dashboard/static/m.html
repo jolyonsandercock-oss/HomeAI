@@ -78,7 +78,35 @@
   <div class="text-xs text-slate-400" x-text="invoicesTotal ? '£' + Number(invoicesTotal).toLocaleString() + ' seen' : ''"></div>
 </a>
 
-<!-- 5. System pulse -->
+<!-- 5. Manager note (inline write — U54 D) -->
+<div class="card">
+  <div class="label">Manager note</div>
+  <div class="flex items-center gap-2 mt-1">
+    <input type="date" x-model="noteDate"
+           class="bg-slate-800 border border-slate-700 rounded text-sm p-1 mono" />
+  </div>
+  <textarea x-model="noteBody" rows="2" placeholder="What happened today?"
+            class="w-full mt-2 bg-slate-800 border border-slate-700 rounded text-sm p-2"></textarea>
+  <div class="flex justify-between items-center mt-2">
+    <span class="text-xs text-slate-500" x-text="noteStatus"></span>
+    <button @click="postNote()" :disabled="!noteBody.trim()"
+            class="bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-700 disabled:text-slate-500 text-white text-xs px-3 py-1 rounded">
+      Save
+    </button>
+  </div>
+  <template x-if="recentNotes.length > 0">
+    <div class="mt-3 text-xs space-y-1 max-h-32 overflow-y-auto">
+      <template x-for="n in recentNotes" :key="n.id">
+        <div class="row">
+          <span class="mono text-slate-500" x-text="n.note_date"></span>
+          <span class="flex-1 mx-2 text-slate-300 truncate" x-text="n.body"></span>
+        </div>
+      </template>
+    </div>
+  </template>
+</div>
+
+<!-- 6. System pulse -->
 <div class="card">
   <div class="label">System pulse</div>
   <div class="space-y-1 text-sm mt-1">
@@ -104,9 +132,41 @@ function m() {
     ages: { to: '—', cb: '—', wf: '—' },
     alerts: 0, pendingInstructions: 0,
     lastRefresh: '',
+    noteDate: new Date().toISOString().slice(0,10),
+    noteBody: '',
+    noteStatus: '',
+    recentNotes: [],
     async boot() {
       await this.refresh();
+      await this.loadNotes();
       setInterval(() => this.refresh(), 60000);
+    },
+    async loadNotes() {
+      try {
+        const r = await (await fetch('/api/manager-notes?days=14')).json();
+        this.recentNotes = r.rows || [];
+      } catch {}
+    },
+    async postNote() {
+      this.noteStatus = 'saving…';
+      try {
+        const r = await fetch('/api/manager-notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ note_date: this.noteDate, body: this.noteBody.trim() })
+        });
+        if (r.ok) {
+          this.noteBody = '';
+          this.noteStatus = '✓ saved';
+          await this.loadNotes();
+          setTimeout(() => this.noteStatus = '', 2500);
+        } else {
+          const e = await r.json();
+          this.noteStatus = '✗ ' + (e.error || 'failed');
+        }
+      } catch (e) {
+        this.noteStatus = '✗ network';
+      }
     },
     async refresh() {
       try {
