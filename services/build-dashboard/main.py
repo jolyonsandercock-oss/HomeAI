@@ -2796,12 +2796,109 @@ async def api_documents_ingest_from_paperless(payload: dict = Body(...)):
                          ocr_text[:5000],
                          doc_id)
 
+            # U80 — auto-parse Principality mortgage statements + populate
+            # mortgage_statement_periods. Triggers on category='mortgage_statement'
+            # OR when OCR has the Principality statement signature.
+            mortgage_periods = []
+            mortgage_unknown_refs = []
+            looks_mortgage = (
+                category == 'mortgage_statement' or
+                ('PRINCIPALITY' in ocr_text.upper() and 'LOAN ACCOUNT' in ocr_text.upper())
+            )
+            if looks_mortgage:
+                for stmt in _parse_principality_statements(ocr_text):
+                    m_id = await c.fetchval(
+                        "SELECT id FROM mortgage_accounts WHERE account_ref = $1",
+                        stmt['loan_ref'])
+                    if not m_id:
+                        mortgage_unknown_refs.append(stmt['loan_ref'])
+                        continue
+                    await c.execute("""
+                        INSERT INTO mortgage_statement_periods
+                            (mortgage_account_id, document_id, page_in_letter,
+                             period_start, period_end,
+                             balance_opening, balance_closing, realm)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, 'work')
+                        ON CONFLICT (mortgage_account_id, period_start) DO NOTHING
+                    """, m_id, doc_id, stmt['page'], stmt['period_start'],
+                         stmt['period_end'], stmt['balance_opening'],
+                         stmt['balance_closing'])
+                    # If this is the latest statement we've seen for an active
+                    # loan, roll its current_balance forward.
+                    # NB: cast on the IS NOT NULL clause so asyncpg can infer
+                    # the parameter type (AmbiguousParameterError otherwise).
+                    if stmt['balance_closing'] is not None:
+                        await c.execute("""
+                            UPDATE mortgage_accounts
+                               SET current_balance = $1,
+                                   balance_as_of   = $2
+                             WHERE id = $3
+                               AND closed_date IS NULL
+                               AND (balance_as_of IS NULL OR balance_as_of < $2)
+                        """, stmt['balance_closing'], stmt['period_end'], m_id)
+                    mortgage_periods.append({
+                        'loan_ref':  stmt['loan_ref'],
+                        'period':    stmt['period_end'].isoformat(),
+                        'balance':   float(stmt['balance_closing']) if stmt['balance_closing'] is not None else None,
+                    })
+
     return {
         "ok": True, "id": doc_id, "duplicate": False,
         "vendor_invoice_inbox_id": invoice_id,
         "linked_table": linked_table, "linked_id": linked_id, "linked_by": linked_by,
         "ocr_chars": len(ocr_text),
+        "mortgage_periods_inserted": mortgage_periods,
+        "mortgage_unknown_refs":     mortgage_unknown_refs,
     }
+
+
+def _parse_principality_statements(ocr_text: str) -> list[dict]:
+    """U80: extract every loan-period section from a Principality statement
+    OCR text. Each section starts with the canonical anchor:
+
+        Loan <ref> Statement Period: <DD/MM/YYYY> to <DD/MM/YYYY> Page Number : <N>
+
+    Returns one dict per match with loan_ref / period_start / period_end /
+    page / balance_opening / balance_closing. Balances are pulled from the
+    'Balance Brought Forward' and 'Balance Carried Forward' lines within
+    the next ~2000 chars of the section.
+    """
+    import re
+    from datetime import date
+    out = []
+    anchor = re.compile(
+        r'[Ll]oan\s+([0-9]{4,}[-/0-9]*)\s+'
+        r'[Ss]tatement\s+[Pp]eriod[:\s]+'
+        r'(\d{1,2}/\d{1,2}/\d{4})\s+to\s+(\d{1,2}/\d{1,2}/\d{4})\s+'
+        r'[Pp]age\s+[Nn]umber\s*:?\s*(\d+)',
+        re.I)
+    money_re = re.compile(r'([\d,]+\.\d{2})')
+
+    def _uk_date(s: str):
+        d, m, y = s.split('/')
+        return date(int(y), int(m), int(d))
+    def _money(s: str):
+        return float(s.replace(',', ''))
+
+    for hit in anchor.finditer(ocr_text):
+        section = ocr_text[hit.end(): hit.end() + 2000]
+        bopen = bclose = None
+        bo = re.search(r'Balance\s+Brought\s+Forward[\s|]+' + money_re.pattern, section, re.I)
+        if bo: bopen = _money(bo.group(1))
+        bc = re.search(r'Balance\s+Carried\s+Forward[\s|]+' + money_re.pattern, section, re.I)
+        if bc: bclose = _money(bc.group(1))
+        try:
+            out.append({
+                'loan_ref':        hit.group(1).strip(),
+                'period_start':    _uk_date(hit.group(2)),
+                'period_end':      _uk_date(hit.group(3)),
+                'page':            int(hit.group(4)),
+                'balance_opening': bopen,
+                'balance_closing': bclose,
+            })
+        except (ValueError, TypeError):
+            continue
+    return out
 
 
 async def _columns_of(conn, table: str) -> set[str]:
