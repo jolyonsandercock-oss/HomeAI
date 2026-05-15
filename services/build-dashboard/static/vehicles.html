@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vehicles — Home AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link href="https://unpkg.com/tabulator-tables@5.5.4/dist/css/tabulator.min.css" rel="stylesheet">
+<link href="/static/css/tables.css" rel="stylesheet">
+<script src="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"></script>
+<script src="/static/js/homeai-table.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .pill-red    { background: rgba(244,63,94,0.25);  color: #fca5b4; padding: 2px 8px; border-radius: 9999px; }
+  .pill-amber  { background: rgba(245,158,11,0.25); color: #fcd34d; padding: 2px 8px; border-radius: 9999px; }
+  .pill-green  { background: rgba(16,185,129,0.20); color: #6ee7b7; padding: 2px 8px; border-radius: 9999px; }
+</style>
+</head>
+<body class="text-slate-100">
+<div x-data="vehiclesApp()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+
+<header class="flex flex-wrap items-center justify-between gap-3">
+  <div>
+    <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Vehicles</h1>
+    <p class="text-sm text-slate-400">MOT · insurance · road tax · service due. 14-day alerts go to Telegram.</p>
+  </div>
+  <a href="/" class="text-xs text-slate-400 hover:text-slate-200">← Mission Control</a>
+</header>
+
+<section class="glass rounded-xl p-3 md:p-4" x-show="data.alerts.length > 0">
+  <h2 class="text-lg font-medium mb-2 px-1">Upcoming (next 30 days)</h2>
+  <div id="alerts-table"></div>
+</section>
+
+<section class="glass rounded-xl p-3 md:p-4">
+  <h2 class="text-lg font-medium mb-2 px-1">Fleet</h2>
+  <p class="text-xs text-slate-400 mb-2 px-1">Update via <code>bash /home_ai/scripts/u51-vehicle-intake.sh</code> at the terminal.</p>
+  <div id="vehicles-table"></div>
+</section>
+
+</div>
+
+<script>
+function vehiclesApp() {
+  return {
+    data: { rows: [], alerts: [] },
+    async boot() {
+      const r = await fetch('/dashboard/api/vehicles');
+      this.data = await r.json();
+      this.render();
+    },
+    render() {
+      homeai_table('#vehicles-table', this.data.rows, {
+        layout: 'fitDataStretch',
+        columns: [
+          { title: 'Reg',          field: 'registration', formatter: 'mono', width: 110 },
+          { title: 'Make/Model',   field: 'make_model' },
+          { title: 'Year',         field: 'year_built', hozAlign: 'right', width: 80 },
+          { title: 'MOT due',      field: 'mot_due',    formatter: dueFmt },
+          { title: 'Insurance',    field: 'insurance_renewal', formatter: dueFmt },
+          { title: 'Road tax',     field: 'road_tax_due', formatter: dueFmt },
+          { title: 'Service',      field: 'service_due_date', formatter: dueFmt },
+          { title: 'Miles',        field: 'current_miles', hozAlign: 'right', width: 100 },
+          { title: 'V5C',          field: 'v5c_doc_ref',  formatter: 'mono' },
+          { title: 'Notes',        field: 'notes', widthGrow: 2 },
+        ],
+      });
+      if (this.data.alerts.length) {
+        homeai_table('#alerts-table', this.data.alerts, {
+          layout: 'fitDataStretch',
+          columns: [
+            { title: 'Reg',     field: 'registration', formatter: 'mono', width: 110 },
+            { title: 'Vehicle', field: 'make_model' },
+            { title: 'Kind',    field: 'kind' },
+            { title: 'Due',     field: 'due', formatter: 'date' },
+            { title: 'Days',    field: 'days_until', hozAlign: 'right',
+              formatter: c => {
+                const v = c.getValue();
+                if (v < 0)  return `<span class="pill-red">overdue ${Math.abs(v)}d</span>`;
+                if (v <= 7) return `<span class="pill-red">${v}d</span>`;
+                if (v <= 14)return `<span class="pill-amber">${v}d</span>`;
+                return `<span class="pill-green">${v}d</span>`;
+              } },
+          ],
+        });
+      }
+    },
+  };
+}
+function dueFmt(cell) {
+  const v = cell.getValue();
+  if (!v) return '<span class="text-slate-500">—</span>';
+  const due = new Date(v + 'T00:00:00Z');
+  const days = Math.round((due - Date.now()) / 86400000);
+  let cls = 'text-slate-200';
+  if (days < 0)       cls = 'pill-red';
+  else if (days <= 14)cls = 'pill-amber';
+  else if (days <= 30)cls = 'pill-green';
+  return cls.startsWith('pill') ? `<span class="${cls}">${v}</span>` : `<span class="${cls}">${v}</span>`;
+}
+</script>
+</body>
+</html>

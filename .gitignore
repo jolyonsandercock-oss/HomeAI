@@ -54,6 +54,18 @@ __pycache__/
 /data/invoice-pdfs/
 /data/unknown-attachments/
 /data/realm-scoped/
+/data/credit-card-inbox/
+/data/paperless-consume/
+
+# Tailscale cert + key — minted at the box, regenerable; key MUST NOT leave host.
+/config/caddy/tls/
+
+# Dated backup files from in-place config promotions (U57 flip script etc).
+*.bak-20[0-9][0-9]-*
+
+# Document storage / Paperless data
+/storage/documents/
+/storage/paperless/
 # Schema-only artifacts in /data are OK (e.g. realm-shadow-baseline.json
 # tracked above — that's row counts, no row content).
 
