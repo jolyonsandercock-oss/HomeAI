@@ -1,15 +1,17 @@
 # STATUS
 
-_generated: 2026-05-15T20:42:54+01:00_
+_generated: 2026-05-15T22:02:17+01:00_
 _by: scripts/u89-regen-status.sh_
 
 ## Current branch
 
-`u73-hd-samba-paperless` at `a1efedd`
+`u73-hd-samba-paperless` at `ace3102`
 
 ## Recent commits (last 20)
 
 ```
+ace3102 U91: tidy — sprint renames + parallel-session catchup + day's decisions
+4bb5b13 U90: in-person packet — consolidated sudo + external checklist + verify script
 a1efedd U89: tidy — auto-doc generation + untracked sweep + STATUS regen + entropy-hook tightening
 1b7f8e7 U88: fix-and-forget — 4 tracks done (T1 retire + T2 disable + T6 cron + T7 TODOs)
 0e63b3f U87: secure — RLS coverage + Vault rotation calendar + entropy hook + sprint-number guard
@@ -28,15 +30,13 @@ ac00424 U73b: Brother ADS-2800W compat — SMB1/NTLMv1 + bind to lo+LAN only
 d51c4fa U73: 6TB HD ext4 + Samba scans share → Paperless consume
 382bd1c U72: OI agents + missing-data hunters + ATR Trading onboarding
 4bd8ff6 U71: phase-9 finish — till form, critical NOTIFY, recipes, pipeline-role runway
-e50101d U70: paper-invoice OCR backbone (Paperless webhook + adapter pattern)
-027c30e U69: Phase 9 — cash variance + morning digest + /recon dashboard
 ```
 
 ## Open work signals
 
 - Pending bot_instructions: 0
 - Open CRITICAL exceptions: 0
-- Working-tree state: 25 files modified/untracked
+- Working-tree state: 1 files modified/untracked
 
 ## Audit log recent entries
 
