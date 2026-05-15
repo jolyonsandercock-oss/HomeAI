@@ -1,15 +1,19 @@
 # STATUS
 
-_generated: 2026-05-15T22:02:17+01:00_
+_generated: 2026-05-15T22:23:46+01:00_
 _by: scripts/u89-regen-status.sh_
 
 ## Current branch
 
-`u73-hd-samba-paperless` at `ace3102`
+`u73-hd-samba-paperless` at `488f2ec`
 
 ## Recent commits (last 20)
 
 ```
+488f2ec U92 final: Qwen bench rerun + stretch-lock recommendations
+892ccb1 U92 progress: U89 deferred items + 400d backfill + percentages audit + cash-recon flow review
+3728d21 U92 plan: overnight ops finesse (email/invoice 400d + Qwen bench + pct audit + cash-recon flow + recommendations)
+c3d4205 U91: STATUS.md regen post-tidy
 ace3102 U91: tidy — sprint renames + parallel-session catchup + day's decisions
 4bb5b13 U90: in-person packet — consolidated sudo + external checklist + verify script
 a1efedd U89: tidy — auto-doc generation + untracked sweep + STATUS regen + entropy-hook tightening
@@ -26,10 +30,6 @@ c70f905 U78: Clover batch ingest + account_property_map + scan auto-routing
 d79440e U75: tightening pass — invoice triage UI, smoke test, hunter unique idx
 bc5b8d2 U74: mortgages on /finance + property seed from chat
 af6ac8c fix: _link_to_entity properties query → postcode (not postcode_full)
-ac00424 U73b: Brother ADS-2800W compat — SMB1/NTLMv1 + bind to lo+LAN only
-d51c4fa U73: 6TB HD ext4 + Samba scans share → Paperless consume
-382bd1c U72: OI agents + missing-data hunters + ATR Trading onboarding
-4bd8ff6 U71: phase-9 finish — till form, critical NOTIFY, recipes, pipeline-role runway
 ```
 
 ## Open work signals
@@ -53,6 +53,8 @@ d51c4fa U73: 6TB HD ext4 + Samba scans share → Paperless consume
 - `U88-fix-and-forget.md` — U88 — Fix and forget: clear the known-broken pile
 - `U89-tidy-doc-discipline.md` — U89 — Tidy: auto-doc, untracked sweep, process discipline
 - `U90-in-person-packet.md` — U90 — In-person packet: prepare Jo's next physical session
+- `U92-overnight-ops-finesse.md` — U92 — Overnight ops finesse (operations / stability / data integrity / UX)
 - `U90-in-person-packet.md` — U90 — In-person packet: prepare Jo's next physical session
+- `U92-overnight-ops-finesse.md` — U92 — Overnight ops finesse (operations / stability / data integrity / UX)
 
 _Re-run: `scripts/u89-regen-status.sh`_
