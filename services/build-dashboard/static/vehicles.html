@@ -37,8 +37,14 @@
 
 <section class="glass rounded-xl p-3 md:p-4">
   <h2 class="text-lg font-medium mb-2 px-1">Fleet</h2>
-  <p class="text-xs text-slate-400 mb-2 px-1">Update via <code>bash /home_ai/scripts/u51-vehicle-intake.sh</code> at the terminal.</p>
+  <p class="text-xs text-slate-400 mb-2 px-1">Update via <code>bash /home_ai/scripts/u51-vehicle-intake.sh</code> at the terminal. Upload bills/MOT certs at <a href="/documents" class="text-blue-300 hover:text-blue-200">/documents</a> — plates are auto-detected.</p>
   <div id="vehicles-table"></div>
+</section>
+
+<section class="glass rounded-xl p-3 md:p-4" x-show="(data.docs||[]).length > 0">
+  <h2 class="text-lg font-medium mb-2 px-1">Linked documents</h2>
+  <p class="text-xs text-slate-400 mb-2 px-1">Files uploaded to <code>/documents</code> with a matching reg plate land here automatically.</p>
+  <div id="docs-table"></div>
 </section>
 
 </div>
@@ -46,9 +52,9 @@
 <script>
 function vehiclesApp() {
   return {
-    data: { rows: [], alerts: [] },
+    data: { rows: [], alerts: [], docs: [] },
     async boot() {
-      const r = await fetch('/dashboard/api/vehicles');
+      const r = await fetch('/api/vehicles');
       this.data = await r.json();
       this.render();
     },
@@ -65,9 +71,40 @@ function vehiclesApp() {
           { title: 'Service',      field: 'service_due_date', formatter: dueFmt },
           { title: 'Miles',        field: 'current_miles', hozAlign: 'right', width: 100 },
           { title: 'V5C',          field: 'v5c_doc_ref',  formatter: 'mono' },
+          { title: '📄 Docs',      field: 'doc_count', hozAlign: 'center', width: 80,
+            formatter: (cell) => {
+              const n = Number(cell.getValue() || 0);
+              if (!n) return '<span class="text-slate-500">—</span>';
+              return `<span class="pill-green">${n}</span>`;
+            } },
           { title: 'Notes',        field: 'notes', widthGrow: 2 },
         ],
       });
+      if ((this.data.docs || []).length) {
+        // Build a quick reg-lookup map so we can show "Mercedes 500SL (50AHJ)"
+        const regByVehicle = {};
+        (this.data.rows || []).forEach(v => { regByVehicle[v.id] = v; });
+        homeai_table('#docs-table', this.data.docs, {
+          layout: 'fitDataStretch',
+          columns: [
+            { title: 'Vehicle', field: 'linked_id', width: 200,
+              formatter: (c) => {
+                const v = regByVehicle[c.getValue()];
+                if (!v) return `vehicle #${c.getValue()}`;
+                return `<span class="mono">${v.registration}</span> · ${v.make_model || ''}`;
+              } },
+            { title: 'Added',   field: 'created_at', width: 150,
+              formatter: c => (c.getValue() || '').slice(0,16).replace('T',' ') },
+            { title: 'Title',   field: 'title', widthGrow: 2,
+              formatter: c => `<a href="/api/documents/${c.getRow().getData().id}/file" target="_blank" class="text-blue-300 hover:text-blue-200">${c.getValue() || ''}</a>` },
+            { title: 'Category',field: 'category', width: 140 },
+            { title: 'OCR',     field: 'ocr_chars', width: 80, hozAlign: 'right',
+              formatter: c => (c.getValue() || 0) + ' ch' },
+            { title: 'How',     field: 'linked_by', width: 140 },
+          ],
+          placeholder: 'No documents linked to vehicles yet.',
+        });
+      }
       if (this.data.alerts.length) {
         homeai_table('#alerts-table', this.data.alerts, {
           layout: 'fitDataStretch',

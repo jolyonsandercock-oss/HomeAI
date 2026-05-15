@@ -344,6 +344,49 @@ edits. UI is the safest path.
 
 ---
 
+## 2026-05-15 — `vendor_invoice_inbox.category_canonical` is a STORED generated column (can't INSERT)
+
+**Symptom:** First u78-ingest-utility.py run errored with
+`ERROR: cannot insert a non-DEFAULT value into column "category_canonical"`
+on the `INSERT INTO vendor_invoice_inbox`.
+
+**Root cause:** `category_canonical` is `GENERATED ALWAYS AS
+vendor_category_canonical(vendor_category) STORED` (added in V42).
+Generated columns reject explicit values in INSERT/UPDATE.
+
+**Fix:** dropped `category_canonical` from the column list in the
+ingester's INSERT statement — Postgres derives it automatically from
+`vendor_category`.
+
+**Related:** see `feedback_pg_generated_cols_in_triggers.md` for the
+*read* side of generated-column gotchas (NULL in BEFORE-trigger NEW).
+The *write* side: don't put them in the column list at all.
+
+---
+
+## 2026-05-15 — psql `SET` command pollutes captured stdout under `-tA`
+
+**Symptom:** `u78-ingest-utility.py`'s `lookup_mapping()` parsed `SET\n3`
+as the first column of the result row → `ValueError: invalid literal for
+int() with base 10: 'SET\n3'`.
+
+**Root cause:** Even under `-tA` (tuples-only, unaligned), psql prints
+the command tag `SET` to stdout when a `SET` statement runs. Same for
+`BEGIN`/`COMMIT`. When the wrapper script prepends `SET LOCAL
+app.current_entity = 'X'; SELECT …` and captures stdout, the `SET` line
+appears before the SELECT result.
+
+**Fix:** add `-q` (quiet mode) → `psql -tAq …` AND filter stray
+`SET`/`BEGIN`/`COMMIT` lines defensively before parsing. Belt and braces.
+
+**Bonus:** `SET LOCAL` outside an explicit transaction block emits
+`WARNING: SET LOCAL can only be used in transaction blocks` and has no
+effect — wrap in `BEGIN;…COMMIT;` if you actually need transactional
+scope. (For postgres-superuser scripts this rarely matters since
+superuser bypasses RLS anyway.)
+
+---
+
 ## 2026-05-08 — n8n Postgres node drops RETURNING rows on multi-statement (BLOCKED)
 
 **Symptom:** Master Router's `Claim Batch` node receives `{"success": true}`

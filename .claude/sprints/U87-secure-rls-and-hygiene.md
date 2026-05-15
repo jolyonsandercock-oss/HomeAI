@@ -1,10 +1,10 @@
-# U80 — Secure: RLS coverage + Vault hygiene + entropy guard
+# U87 — Secure: RLS coverage + Vault hygiene + entropy guard
 
-**Prereqs**: U79 audits landed in `audits/2026-05-16-*.md`.
+**Prereqs**: U86 audits landed in `audits/2026-05-16-*.md`.
 
 **Realm**: cross-cutting (RLS audit covers all realms; Vault rotation calendar is owner-only).
 
-**Remote-doable**: ~85%. Vault auto-unseal + Authelia FQDN + image updates remain Jo-in-person and roll up to U83.
+**Remote-doable**: ~85%. Vault auto-unseal + Authelia FQDN + image updates remain Jo-in-person and roll up to U90.
 
 **Why this sprint exists**: every cron script in `/home_ai/scripts/` runs as `postgres` superuser and silently bypasses RLS — discovered in U78 when the seed-row INSERT succeeded despite `SET LOCAL` being a no-op. We need an honest map of which scripts genuinely need superuser vs which should be `homeai_pipeline`, plus a pre-commit hook for the entropy scan (currently a memory-only convention).
 
@@ -82,7 +82,7 @@
 - Lesson from `feedback_check_sprint_number_first.md` (this session).
 
 **Acceptance**:
-- Script returns `U84` when run now (max = U83 from this batch + buffer of 1).
+- Script returns `U89` when run now (max = U90 from this batch + buffer of 1).
 
 ---
 
@@ -96,26 +96,26 @@
 - Output expected: 51 + N new tests. Existing pre-existing-fail unchanged.
 
 **Acceptance**:
-- `selftest.sh` runs; new tests pass or skip cleanly. Failures linked to U81 follow-ons.
+- `selftest.sh` runs; new tests pass or skip cleanly. Failures linked to U88 follow-ons.
 
 ---
 
 ### T8 — Commit (~5 min)
 
 **Build**:
-- Stage audits + scripts + hooks. Single commit `U80: secure — RLS coverage + role migration + rotation calendar + entropy hook`.
+- Stage audits + scripts + hooks. Single commit `U87: secure — RLS coverage + role migration + rotation calendar + entropy hook`.
 
 **Acceptance**:
 - Working tree clean. Audit/INDEX.md updated.
 
 ## What this sprint does NOT do
 
-- Does **not** run Vault auto-unseal bootstrap (Jo-in-person, U83).
-- Does **not** force-enable RLS on superuser (`ALTER TABLE … FORCE ROW LEVEL SECURITY`) — risky overnight, parked for review post-U80.
+- Does **not** run Vault auto-unseal bootstrap (Jo-in-person, U90).
+- Does **not** force-enable RLS on superuser (`ALTER TABLE … FORCE ROW LEVEL SECURITY`) — risky overnight, parked for review post-U87.
 - Does **not** rotate any Vault paths (only audits ages, queues rotations).
-- Does **not** wire Authelia forward_auth (needs Tailscale cert FQDN, U83).
+- Does **not** wire Authelia forward_auth (needs Tailscale cert FQDN, U90).
 
 ## Follow-on sprints
 
-- **U81 — Fix and forget**: takes T2's `should-be-pipeline` bucket items that needed deeper refactor.
-- **U83 — In-person packet**: queues image refresh, Vault auto-unseal, Authelia FQDN.
+- **U88 — Fix and forget**: takes T2's `should-be-pipeline` bucket items that needed deeper refactor.
+- **U90 — In-person packet**: queues image refresh, Vault auto-unseal, Authelia FQDN.

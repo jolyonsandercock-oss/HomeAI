@@ -27,13 +27,17 @@ PSQL=(docker exec -i homeai-postgres psql -U postgres -d homeai -X -q -A -t)
 
 q() { "${PSQL[@]}" -c "$1" 2>/dev/null | tr -d '[:space:]'; }
 
-# Suppression: bail if a same-source alert went out in the last 30 min.
+# Suppression: bail if a same-source alert went out in the last 2 hours.
+# (Was 30 min + severity='critical' — but notify-telegram.sh logs as 'info'
+# so the severity filter never matched and the watchdog fired every cron
+# tick. Widened to 2h and dropped the severity filter — same outage on
+# repeat doesn't re-page until 2h elapsed.)
 recent_alert=$(q "SELECT COUNT(*) FROM telegram_outbox
                    WHERE source='${SOURCE}'
-                     AND severity='critical'
-                     AND sent_at > now() - interval '30 minutes';")
+                     AND sent_at > now() - interval '2 hours'
+                     AND suppressed=false;")
 if [[ "${recent_alert:-0}" -gt 0 ]]; then
-    echo "Suppressed: same-source critical sent within 30 min."
+    echo "Suppressed: same-source alert sent within 2h."
     exit 0
 fi
 

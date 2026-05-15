@@ -1,6 +1,6 @@
-# U81 — Fix and forget: clear the known-broken pile
+# U88 — Fix and forget: clear the known-broken pile
 
-**Prereqs**: U79 dead-letter triage available at `audits/2026-05-16-dead-letter-triage.md`.
+**Prereqs**: U86 dead-letter triage available at `audits/2026-05-16-dead-letter-triage.md`.
 
 **Realm**: `work` primarily (n8n workflows + cron jobs in entity 1 territory).
 
@@ -56,17 +56,17 @@
 
 **Build**:
 - This session wrote `scripts/u73-ocr-watcher.{sh,service}` + `scripts/u73-install-ocr.sh` — they vanished from the working tree (likely a manual reset). Restore from this conversation's git history if possible; otherwise recreate from `decisions/2026-05-15-u78-clover-batches-and-account-map.md`'s description.
-- Install: `sudo bash scripts/u73-install-ocr.sh` (deferred to U83 for the sudo step; this track just lays down the files).
+- Install: `sudo bash scripts/u73-install-ocr.sh` (deferred to U90 for the sudo step; this track just lays down the files).
 
 **Acceptance**:
-- Three files exist on disk, are syntactically valid, pass `shellcheck`. Install step queued for U83.
+- Three files exist on disk, are syntactically valid, pass `shellcheck`. Install step queued for U90.
 
 ---
 
 ### T5 — Replay safe dead letters (~45 min)
 
 **Build**:
-- Read U79 T5's `dead-letter-triage.md`. For every bucket flagged `retry_safety=idempotent`, replay the event payload via the appropriate pipeline (each pipeline already idempotency-keyed).
+- Read U86 T5's `dead-letter-triage.md`. For every bucket flagged `retry_safety=idempotent`, replay the event payload via the appropriate pipeline (each pipeline already idempotency-keyed).
 - Log every replay to `audits/2026-05-16-dead-letter-replay.log` with before/after status.
 - Do NOT replay buckets flagged `destructive` or `unknown` — leave for human review.
 
@@ -101,19 +101,19 @@
 ### T8 — Commit (~5 min)
 
 **Build**:
-- One commit per fixed item is allowed (small commits are fine for this sprint). Reference the U81 sprint in each.
+- One commit per fixed item is allowed (small commits are fine for this sprint). Reference the U88 sprint in each.
 
 **Acceptance**:
-- Working tree clean. Each fix is its own commit OR one rollup commit `U81: fix-and-forget …`.
+- Working tree clean. Each fix is its own commit OR one rollup commit `U88: fix-and-forget …`.
 
 ## What this sprint does NOT do
 
 - Does **not** add any new functionality. Strictly fixes/removes.
 - Does **not** redesign the dreaming pipeline; just disables the broken n8n version.
-- Does **not** install the OCR watcher service (sudo deferred to U83).
+- Does **not** install the OCR watcher service (sudo deferred to U90).
 - Does **not** replay destructive-bucket dead letters.
 
 ## Follow-on sprints
 
-- **U82 — Tidy**: doc-gen will surface anything U81 missed.
-- **U83 — In-person packet**: ships the OCR watcher install (sudo).
+- **U89 — Tidy**: doc-gen will surface anything U88 missed.
+- **U90 — In-person packet**: ships the OCR watcher install (sudo).

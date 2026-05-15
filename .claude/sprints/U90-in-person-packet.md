@@ -1,6 +1,6 @@
-# U83 — In-person packet: prepare Jo's next physical session
+# U90 — In-person packet: prepare Jo's next physical session
 
-**Prereqs**: U79 + U80 + U81 + U82 audits + doc outputs available in `/home_ai/audits/` and `/home_ai/docs/`.
+**Prereqs**: U86 + U87 + U88 + U89 audits + doc outputs available in `/home_ai/audits/` and `/home_ai/docs/`.
 
 **Realm**: `owner` — the packet itself is for Jo. Touches all realms read-only.
 
@@ -15,10 +15,10 @@
 ### T1 — Consolidate sudo-required items (~20 min)
 
 **Build**:
-- Pull from U79–U82 + STATUS.md `Pending — Jo's input` section. Identify items that need sudo at the box.
+- Pull from U86–U89 + STATUS.md `Pending — Jo's input` section. Identify items that need sudo at the box.
 - Known starters:
   - `sudo bash /home_ai/scripts/u35-vault-autounseal-bootstrap.sh` (long-outstanding)
-  - `sudo bash /home_ai/scripts/u73-install-ocr.sh` (restored in U81 T4)
+  - `sudo bash /home_ai/scripts/u73-install-ocr.sh` (restored in U88 T4)
   - Image updates: Vault 1.15.6 → latest, alertmanager v0.27.0 → latest, postgres-exporter v0.15.0 → latest. Per-image rollback path included.
   - Authelia full forward_auth: requires `tailscale cert <FQDN>` first, then Caddy config update.
 - For each: command, expected output, time estimate, rollback.
@@ -31,7 +31,7 @@
 ### T2 — Consolidate external-action items (~15 min)
 
 **Build**:
-- NatWest CSV pull for accounts identified in U79 T1 as under-imported (#15 zero rows, #3 sparse). Per-account: login URL, statement window (last 6 months minimum), import command (`u59-credit-card-csv-import.sh` pattern or equivalent for current accounts).
+- NatWest CSV pull for accounts identified in U86 T1 as under-imported (#15 zero rows, #3 sparse). Per-account: login URL, statement window (last 6 months minimum), import command (`u59-credit-card-csv-import.sh` pattern or equivalent for current accounts).
 - Loan 284512-03 follow-up (U76 follow-on): what to ask Principality (current balance / payment history / which property secures it).
 - Xero support chase (P3, parked).
 - Companies House numbers for entities 1+2 (if not already done in some unseen sprint).
@@ -88,7 +88,7 @@
 ### T6 — Commit (~5 min)
 
 **Build**:
-- Single commit `U83: in-person packet (sudo + external action checklist + verify script)`.
+- Single commit `U90: in-person packet (sudo + external action checklist + verify script)`.
 - Update `audits/INDEX.md`.
 
 **Acceptance**:
@@ -97,10 +97,10 @@
 ## What this sprint does NOT do
 
 - Does **not** execute any sudo or external action — those are the packet's job, run by Jo at the box.
-- Does **not** open new follow-ups; only consolidates existing ones from U79–U82.
+- Does **not** open new follow-ups; only consolidates existing ones from U86–U89.
 - Does **not** ship application changes — pure orchestration.
 
 ## Follow-on sprints
 
-- **Post-packet**: Jo runs `audits/2026-05-16-jo-checklist.md`. On completion, fires `/retro` to regenerate STATUS.md (now automated per U82 T5).
-- Next functional sprint (the original U79 Clover-bank reconciliation) becomes unblocked by T2's NatWest CSV import.
+- **Post-packet**: Jo runs `audits/2026-05-16-jo-checklist.md`. On completion, fires `/retro` to regenerate STATUS.md (now automated per U89 T5).
+- Next functional sprint (the original U86 Clover-bank reconciliation) becomes unblocked by T2's NatWest CSV import.

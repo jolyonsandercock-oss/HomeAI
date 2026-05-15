@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reconciliation — Home AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link href="https://unpkg.com/tabulator-tables@5.5.4/dist/css/tabulator.min.css" rel="stylesheet">
+<link href="/static/css/tables.css" rel="stylesheet">
+<script src="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .muted { color: #94a3b8; }
+  .neg { color: #fb7185; }
+  .pos { color: #34d399; }
+  .pill-ok      { background: rgba(16,185,129,0.18); color: #6ee7b7; padding: 1px 8px; border-radius: 9999px; font-size: 0.72rem; }
+  .pill-bad     { background: rgba(244,63,94,0.20); color: #fca5a5; padding: 1px 8px; border-radius: 9999px; font-size: 0.72rem; }
+  .pill-warn    { background: rgba(245,158,11,0.20); color: #fcd34d; padding: 1px 8px; border-radius: 9999px; font-size: 0.72rem; }
+  .tab-btn { padding: 0.45rem 0.95rem; border-radius: 0.5rem; font-size: 0.85rem; }
+  .tab-btn:hover { background: rgba(148,163,184,0.10); }
+  .tab-btn.active { background: rgba(59,130,246,0.18); color: #93c5fd; border: 1px solid rgba(59,130,246,0.35); }
+  .answer-card { border-left: 3px solid #60a5fa; }
+  mark { background: rgba(250,204,21,0.4); color: #fef9c3; padding: 0 2px; border-radius: 2px; }
+  .btn-primary { background: rgb(59,130,246); color: white; padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; }
+  .btn-primary:hover { background: rgb(37,99,235); }
+  .btn-primary:disabled { background: rgba(59,130,246,0.4); cursor: not-allowed; }
+  .quick { padding: 3px 9px; font-size: 11px; border-radius: 5px;
+    background: rgba(30,41,59,0.6); border: 1px solid rgba(148,163,184,0.25); }
+  .quick:hover { background: rgba(59,130,246,0.18); border-color: rgba(59,130,246,0.45); }
+</style>
+</head>
+<body class="text-slate-100">
+
+<div x-data="reconPage()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-5">
+
+  <header class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Reconciliation</h1>
+      <p class="text-sm muted">Open exceptions, ask Sonnet to drill in, add new rules to teach the system.</p>
+    </div>
+    <a href="/" class="text-xs muted hover:text-slate-200">← Mission Control</a>
+  </header>
+
+  <!-- KPI strip -->
+  <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="glass rounded-xl p-4">
+      <div class="text-xs uppercase muted">Recon flags</div>
+      <div class="text-3xl font-medium mono" :class="data.flags?.length ? 'neg' : 'pos'"
+           x-text="(data.flags || []).length"></div>
+      <div class="text-xs muted">open</div>
+    </div>
+    <div class="glass rounded-xl p-4">
+      <div class="text-xs uppercase muted">Card vs EPoS</div>
+      <div class="text-3xl font-medium mono neg" x-text="(data.card_recon || []).length"></div>
+      <div class="text-xs muted">mismatched days (latest 30)</div>
+    </div>
+    <div class="glass rounded-xl p-4">
+      <div class="text-xs uppercase muted">Till variance</div>
+      <div class="text-3xl font-medium mono" :class="data.till?.length ? 'neg' : 'pos'"
+           x-text="(data.till || []).length"></div>
+      <div class="text-xs muted">flagged cashing-up rows</div>
+    </div>
+    <div class="glass rounded-xl p-4">
+      <div class="text-xs uppercase muted">Active rules</div>
+      <div class="text-3xl font-medium mono" x-text="(data.rules || []).length"></div>
+      <div class="text-xs muted">in bank_transaction_rules</div>
+    </div>
+  </section>
+
+  <!-- Ask box -->
+  <section class="glass rounded-xl p-4 space-y-3">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h2 class="text-lg font-medium">Drill into the exceptions</h2>
+      <div class="flex flex-wrap gap-1">
+        <button class="quick" @click="askPreset('Why is the pub card take from Dojo £1,623 lower than TouchOffice for 14 May?')">why is 14 May off?</button>
+        <button class="quick" @click="askPreset('Show me all card_dojo_vs_touchoffice flags in the last 14 days with the delta values')">recent card mismatches</button>
+        <button class="quick" @click="askPreset('Which bank transactions in the last 30 days are uncategorised and what would you tag them?')">uncategorised txns</button>
+        <button class="quick" @click="askPreset('Show me till_reconciliation rows with variance over £5 in the last 60 days')">till variances</button>
+      </div>
+    </div>
+    <form @submit.prevent="ask()" class="flex gap-2">
+      <input x-model="question" type="text" autocomplete="off"
+             placeholder='Ask anything about the exceptions — e.g. "list every day where pub Dojo &lt; TouchOffice by &gt; £100"'
+             class="flex-1 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+      <button type="submit" class="btn-primary"
+              :disabled="asking" x-text="asking ? 'Asking…' : 'Ask'"></button>
+    </form>
+    <template x-if="answer">
+      <div class="answer-card bg-slate-900/50 rounded p-3 space-y-2">
+        <div class="text-sm whitespace-pre-wrap" x-text="answer.narrative"></div>
+        <div class="text-xs muted">
+          <template x-for="t in answer.tool_results || []" :key="(t.slug||'') + (t.sql||'')">
+            <span class="mr-3">→ <code x-text="t.slug || 'tool'"></code>
+              <span x-show="t.n_rows != null" x-text="' (' + t.n_rows + ' rows)'"></span>
+            </span>
+          </template>
+        </div>
+        <div id="ask-result-table" x-show="(answer.tool_results || []).some(t => (t.rows||[]).length)"></div>
+      </div>
+    </template>
+  </section>
+
+  <!-- Tabs -->
+  <section class="glass rounded-xl p-4">
+    <div class="flex flex-wrap gap-2 border-b border-slate-700/50 pb-3 mb-3">
+      <template x-for="t in tabs" :key="t.key">
+        <button class="tab-btn" :class="active === t.key ? 'active' : ''"
+                @click="setTab(t.key)" x-text="t.label + ' (' + t.count() + ')'"></button>
+      </template>
+    </div>
+    <div :id="'tab-table'"></div>
+  </section>
+
+  <!-- New rule -->
+  <section class="glass rounded-xl p-4 space-y-3">
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-medium">Add a categorisation rule</h2>
+      <span class="text-xs muted">writes to <code>bank_transaction_rules</code> — applied on the next u58-bank-tx-categorise run</span>
+    </div>
+    <form @submit.prevent="createRule()" class="grid grid-cols-1 md:grid-cols-3 gap-2">
+      <input x-model="rule.name" placeholder="rule name (e.g. 'British Gas DD')"
+             class="bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm">
+      <input x-model="rule.description_re" placeholder="description regex (POSIX)"
+             class="mono bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm md:col-span-2">
+      <select x-model="rule.category" class="bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm">
+        <option value="">— category —</option>
+        <template x-for="c in categories" :key="c">
+          <option :value="c" x-text="c"></option>
+        </template>
+      </select>
+      <input x-model="rule.type_in" placeholder="type_in (comma list, e.g. D/D,S/O)"
+             class="mono bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm">
+      <div class="flex gap-2">
+        <select x-model="rule.amount_op" class="bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm">
+          <option value="">amount —</option>
+          <option value="<">&lt;</option>
+          <option value=">">&gt;</option>
+          <option value="<=">&le;</option>
+          <option value=">=">&ge;</option>
+          <option value="=">=</option>
+        </select>
+        <input x-model.number="rule.amount_value" type="number" step="0.01" placeholder="value"
+               class="flex-1 mono bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm">
+      </div>
+      <input x-model.number="rule.priority" type="number" min="1" max="999" placeholder="priority (lower = first)"
+             class="bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm">
+      <input x-model.number="rule.confidence" type="number" min="0" max="1" step="0.01" placeholder="confidence 0..1"
+             class="bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm">
+      <input x-model="rule.notes" placeholder="notes (why this rule exists)"
+             class="md:col-span-1 bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm">
+      <div class="md:col-span-3 flex justify-end gap-2">
+        <button class="btn-primary" :disabled="!rule.name || !rule.category || savingRule"
+                x-text="savingRule ? 'Saving…' : 'Add rule'"></button>
+      </div>
+    </form>
+  </section>
+
+</div>
+
+<script>
+function reconPage() {
+  return {
+    data: { flags: [], till: [], card_recon: [], rules: [] },
+    active: 'flags',
+    question: '',
+    asking: false,
+    answer: null,
+    answerTable: null,
+    rule: { name: '', description_re: '', category: '', type_in: '',
+            amount_op: '', amount_value: null, priority: 50, confidence: 0.9,
+            notes: '' },
+    savingRule: false,
+    categories: ['card_settlement','cash_deposit','customer_payment','vendor_payment',
+                 'payroll','tax_payment','bank_fee','interest_charged','interest_credit',
+                 'inter_entity_transfer','direct_debit','loan_repayment',
+                 'rent_received','rent_paid','transfer_uncategorised','refund','other'],
+
+    get tabs() {
+      const self = this;
+      return [
+        { key:'flags',      label:'Open flags',     count: () => (self.data.flags||[]).length },
+        { key:'card_recon', label:'Card vs EPoS',   count: () => (self.data.card_recon||[]).length },
+        { key:'till',       label:'Till variance',  count: () => (self.data.till||[]).length },
+        { key:'rules',      label:'Active rules',   count: () => (self.data.rules||[]).length },
+      ];
+    },
+
+    async boot() {
+      await this.load();
+      this.renderTab();
+    },
+
+    async load() {
+      const r = await fetch('/api/reconciliation/exceptions');
+      this.data = await r.json();
+    },
+
+    setTab(k) { this.active = k; this.renderTab(); },
+
+    renderTab() {
+      const rows = this.data[this.active] || [];
+      const target = '#tab-table';
+      const cfg = { layout: 'fitDataStretch', height: '50vh',
+                    pagination: true, paginationSize: 50,
+                    placeholder: 'No rows.' };
+      if (this.active === 'flags') {
+        cfg.columns = [
+          { title:'Date',   field:'created_at', width:150,
+            formatter: c => (c.getValue()||'').slice(0,16).replace('T',' ') },
+          { title:'Type',   field:'flag_type', width:200,
+            formatter: c => `<span class="pill-warn">${c.getValue()||''}</span>` },
+          { title:'Description', field:'description', widthGrow:3 },
+          { title:'Realm',  field:'realm', width:80 },
+          { title:'',       field:'id', width:90,
+            formatter: c => `<button onclick="event.stopPropagation(); window._resolveFlag(${c.getValue()})" style="background:rgba(16,185,129,0.18);border:1px solid rgba(16,185,129,0.4);color:#86efac;padding:3px 8px;border-radius:5px;cursor:pointer;font-size:11px;">✓ resolve</button>` },
+        ];
+      } else if (this.active === 'card_recon') {
+        cfg.columns = [
+          { title:'Date', field:'date', width:120,
+            formatter: c => (c.getValue()||'').slice(0,10) },
+          { title:'Site', field:'site', width:90 },
+          { title:'TouchOffice (card)', field:'touchoffice_card', hozAlign:'right', width:160,
+            formatter: c => '£' + Number(c.getValue()||0).toFixed(2) },
+          { title:'Dojo gross', field:'dojo_gross', hozAlign:'right', width:140,
+            formatter: c => '£' + Number(c.getValue()||0).toFixed(2) },
+          { title:'Delta', field:'delta', hozAlign:'right', width:130,
+            formatter: c => {
+              const v = Number(c.getValue()||0);
+              const cls = Math.abs(v) > 100 ? 'neg' : 'muted';
+              return `<span class="mono ${cls}">£${v.toFixed(2)}</span>`;
+            } },
+          { title:'Status', field:'status', width:150,
+            formatter: c => `<span class="pill-bad">${c.getValue()||''}</span>` },
+        ];
+      } else if (this.active === 'till') {
+        cfg.columns = [
+          { title:'Date',    field:'recon_date', width:120 },
+          { title:'Session', field:'session', width:120 },
+          { title:'Card',    field:'card_total', hozAlign:'right', width:120,
+            formatter: c => '£' + Number(c.getValue()||0).toFixed(2) },
+          { title:'Cash counted', field:'cash_counted', hozAlign:'right', width:130,
+            formatter: c => '£' + Number(c.getValue()||0).toFixed(2) },
+          { title:'Expected', field:'expected_cash', hozAlign:'right', width:130,
+            formatter: c => '£' + Number(c.getValue()||0).toFixed(2) },
+          { title:'Variance', field:'variance', hozAlign:'right', width:120,
+            formatter: c => {
+              const v = Number(c.getValue()||0);
+              const cls = Math.abs(v) > 5 ? 'neg' : 'muted';
+              return `<span class="mono ${cls}">£${v.toFixed(2)}</span>`;
+            } },
+          { title:'%',  field:'variance_pct', hozAlign:'right', width:90,
+            formatter: c => Number(c.getValue()||0).toFixed(2) + '%' },
+          { title:'Status', field:'status', width:120,
+            formatter: c => `<span class="pill-warn">${c.getValue()||''}</span>` },
+        ];
+      } else if (this.active === 'rules') {
+        cfg.columns = [
+          { title:'Pri',  field:'priority', hozAlign:'right', width:60 },
+          { title:'Name', field:'name', widthGrow:2 },
+          { title:'Description re', field:'description_re', formatter: c => `<code>${c.getValue() || ''}</code>`, widthGrow:3 },
+          { title:'Type in', field:'type_in', width:140,
+            formatter: c => (c.getValue() || []).join(', ') },
+          { title:'Amount', field:'amount_op',
+            formatter: c => {
+              const r = c.getRow().getData();
+              if (!r.amount_op) return '';
+              return `${r.amount_op} ${r.amount_value}`;
+            }, width:90 },
+          { title:'Category', field:'category', width:160,
+            formatter: c => `<span class="pill-ok">${c.getValue() || ''}</span>` },
+          { title:'Conf', field:'confidence', hozAlign:'right', width:70,
+            formatter: c => Number(c.getValue()||0).toFixed(2) },
+          { title:'Realm', field:'realm', width:80 },
+        ];
+      }
+      new Tabulator(target, { data: rows, ...cfg });
+    },
+
+    async ask() {
+      if (!this.question.trim()) return;
+      this.asking = true; this.answer = null;
+      try {
+        // Hint Sonnet that this is recon-focused
+        const r = await fetch('/api/bot/ask', {
+          method:'POST',
+          headers:{'content-type':'application/json'},
+          body: JSON.stringify({
+            question:
+              '[Reconciliation context: focus on bank_transactions, ' +
+              'reconciliation_flags, till_reconciliation, v_card_reconciliation, ' +
+              'dojo_transactions, touchoffice_fixed_totals]\n\n' +
+              this.question,
+            channel: 'reconciliation',
+          }),
+        });
+        this.answer = await r.json();
+        await this.$nextTick();
+        const allRows = (this.answer.tool_results || [])
+          .flatMap(t => t.rows || []);
+        if (allRows.length) {
+          const el = document.getElementById('ask-result-table');
+          if (el) {
+            el.innerHTML = '';
+            const cols = Object.keys(allRows[0] || {}).map(k => ({
+              title: k.replace(/_/g, ' '),
+              field: k,
+              formatter: (c) => {
+                const v = c.getValue();
+                if (v == null) return '';
+                if (typeof v === 'number') return v.toLocaleString(undefined,
+                  /amount|gross|delta|net|variance|total|balance|interest|fee|cost/i.test(k)
+                    ? {minimumFractionDigits:2, maximumFractionDigits:2}
+                    : {});
+                return String(v);
+              },
+            }));
+            new Tabulator(el, { data: allRows, columns: cols,
+                                 layout:'fitDataStretch', height:'300px',
+                                 pagination:true, paginationSize:25 });
+          }
+        }
+      } catch (e) {
+        this.answer = { narrative: 'Error: ' + (e.message||e) };
+      } finally {
+        this.asking = false;
+      }
+    },
+
+    askPreset(q) { this.question = q; this.ask(); },
+
+    async resolveFlag(id) {
+      const note = prompt('Resolution note (will be appended to the flag):', '') || '';
+      if (note === null) return;
+      const r = await fetch(`/api/reconciliation/flags/${id}/resolve`, {
+        method:'POST',
+        headers:{'content-type':'application/json'},
+        body: JSON.stringify({note}),
+      });
+      const j = await r.json();
+      if (j.ok) { await this.load(); this.renderTab(); }
+      else alert('Resolve failed: ' + (j.error || 'unknown'));
+    },
+
+    async createRule() {
+      if (!this.rule.name || !this.rule.category) return;
+      this.savingRule = true;
+      try {
+        const r = await fetch('/api/reconciliation/rules', {
+          method:'POST',
+          headers:{'content-type':'application/json'},
+          body: JSON.stringify(this.rule),
+        });
+        const j = await r.json();
+        if (j.ok) {
+          alert(`Rule added (id ${j.id}). Run /home_ai/scripts/u58-bank-tx-categorise.sh to apply.`);
+          this.rule = { name:'', description_re:'', category:'', type_in:'',
+                        amount_op:'', amount_value:null, priority:50, confidence:0.9, notes:'' };
+          await this.load();
+          if (this.active === 'rules') this.renderTab();
+        } else {
+          alert('Rule create failed: ' + (j.error || 'unknown'));
+        }
+      } finally {
+        this.savingRule = false;
+      }
+    },
+  };
+}
+window._resolveFlag = (id) => {
+  const root = document.querySelector('[x-data="reconPage()"]');
+  const stack = root && root._x_dataStack;
+  if (stack && stack[0]) stack[0].resolveFlag(id);
+};
+</script>
+</body>
+</html>

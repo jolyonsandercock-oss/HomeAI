@@ -1,4 +1,4 @@
-# U79 — Audit: data integrity sweep
+# U86 — Audit: data integrity sweep
 
 **Prereqs**: U78 shipped. No schema changes in this sprint.
 
@@ -6,7 +6,7 @@
 
 **Remote-doable**: 100% — pure SQL + filesystem reporting, no Vault/Docker/n8n changes.
 
-**Why this sprint exists**: STATUS.md was 2 days stale at start of session, the Clover bank-settlement reconciliation hit a bank-data void mid-sprint, and `clover_batches`-ingest exposed OCR quality variance across the same scan. We need an honest map of what data is correct vs missing vs drifted before any further building. Outputs feed U80 (security tightening) and U83 (in-person packet).
+**Why this sprint exists**: STATUS.md was 2 days stale at start of session, the Clover bank-settlement reconciliation hit a bank-data void mid-sprint, and `clover_batches`-ingest exposed OCR quality variance across the same scan. We need an honest map of what data is correct vs missing vs drifted before any further building. Outputs feed U87 (security tightening) and U90 (in-person packet).
 
 **Overnight-autonomous**: yes — read-only audits, all writes go to `/home_ai/audits/`. Idempotent (re-runs overwrite the dated report).
 
@@ -64,10 +64,10 @@
 
 **Build**:
 - Script `scripts/u79-audit-dead-letters.sh`. Bucket `events WHERE status='dead_letter'` (or wherever the project parks them — confirm path) by `error_class` / `error_message`. For each bucket: count, oldest, newest, retry_safety classification (idempotent re-emit possible? destructive? unknown?).
-- Output: `audits/2026-05-16-dead-letter-triage.md` with a retry-action queue at the bottom (which buckets U81 can safely replay).
+- Output: `audits/2026-05-16-dead-letter-triage.md` with a retry-action queue at the bottom (which buckets U88 can safely replay).
 
 **Acceptance**:
-- Triage file groups every dead-letter by error bucket. U81's "fix and forget" sprint will act on it.
+- Triage file groups every dead-letter by error bucket. U88's "fix and forget" sprint will act on it.
 
 ---
 
@@ -87,18 +87,18 @@
 **Build**:
 - Stage `audits/2026-05-16-*.md` + the 6 audit scripts.
 - Append a one-line entry per audit to `audits/INDEX.md` (created if missing).
-- Commit message: `U79: data-integrity audit (bank coverage / FK orphans / idempotency / schema drift / dead-letters / hunters)`.
+- Commit message: `U86: data-integrity audit (bank coverage / FK orphans / idempotency / schema drift / dead-letters / hunters)`.
 
 **Acceptance**:
 - Single commit lands. `audits/INDEX.md` lists this sprint's outputs with timestamps.
 
 ## What this sprint does NOT do
 
-- Does **not** repair any drift, fix orphans, or import missing bank data. Those are scoped to U80, U81, and U83 (in-person).
+- Does **not** repair any drift, fix orphans, or import missing bank data. Those are scoped to U87, U88, and U90 (in-person).
 - Does **not** rotate secrets, change RLS, or restart containers.
 - Does **not** create new tables. Read-only sprint.
 
 ## Follow-on sprints
 
-- **U80 — Secure**: acts on T1 (gap list informs U83 in-person packet), T2 (orphans get either repaired or constraint-tightened), T4 (drift reconciled into a V97 catch-up migration if needed).
-- **U81 — Fix and forget**: acts on T5 dead-letter triage.
+- **U87 — Secure**: acts on T1 (gap list informs U90 in-person packet), T2 (orphans get either repaired or constraint-tightened), T4 (drift reconciled into a V97 catch-up migration if needed).
+- **U88 — Fix and forget**: acts on T5 dead-letter triage.

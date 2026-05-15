@@ -1,6 +1,6 @@
-# U82 — Tidy: auto-doc, untracked sweep, process discipline
+# U89 — Tidy: auto-doc, untracked sweep, process discipline
 
-**Prereqs**: U79 (audits/INDEX exists) + U80 (entropy hook installed). U81 cleanup not strictly required but useful.
+**Prereqs**: U86 (audits/INDEX exists) + U87 (entropy hook installed). U88 cleanup not strictly required but useful.
 
 **Realm**: cross-cutting (documentation maps the whole system).
 
@@ -43,7 +43,7 @@
 ### T3 — Cron doc generator (~30 min)
 
 **Build**:
-- Script `scripts/u82-gen-cron-doc.sh`. Read `crontab -l`. For each entry, extract the script path and pull its leading docstring/comment. Emit `docs/cron.md` as a table: schedule | script | purpose (from docstring) | last-runs-status (from U81 T6).
+- Script `scripts/u82-gen-cron-doc.sh`. Read `crontab -l`. For each entry, extract the script path and pull its leading docstring/comment. Emit `docs/cron.md` as a table: schedule | script | purpose (from docstring) | last-runs-status (from U88 T6).
 - Flag scripts on cron that don't exist on disk (orphan entries) and scripts on disk that match `u\d+-` but aren't on cron (orphan scripts — surface to T6).
 
 **Acceptance**:
@@ -74,7 +74,7 @@
 - Add invocation to the `/retro` skill (so STATUS.md regen is automatic at session end).
 
 **Acceptance**:
-- STATUS.md regenerated; matches reality at end of U82.
+- STATUS.md regenerated; matches reality at end of U89.
 
 ---
 
@@ -119,7 +119,7 @@
 ### T9 — Commit (~5 min)
 
 **Build**:
-- Single commit `U82: tidy — auto-doc generation + untracked sweep + STATUS regen`.
+- Single commit `U89: tidy — auto-doc generation + untracked sweep + STATUS regen`.
 - Update `audits/INDEX.md`.
 
 **Acceptance**:
@@ -133,5 +133,5 @@
 
 ## Follow-on sprints
 
-- **U83 — In-person packet**: uses T1–T4 doc outputs to populate the human-readable checklist.
-- Nightly doc regen becomes a cron job once U82's generators are proven.
+- **U90 — In-person packet**: uses T1–T4 doc outputs to populate the human-readable checklist.
+- Nightly doc regen becomes a cron job once U89's generators are proven.
