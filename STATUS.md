@@ -1,15 +1,19 @@
 # STATUS
 
-_generated: 2026-05-15T22:23:46+01:00_
+_generated: 2026-05-15T22:47:34+01:00_
 _by: scripts/u89-regen-status.sh_
 
 ## Current branch
 
-`u73-hd-samba-paperless` at `488f2ec`
+`u73-hd-samba-paperless` at `cbed534`
 
 ## Recent commits (last 20)
 
 ```
+cbed534 U94 T1: hotel-email.com bookings harvester + V100 schema
+b5639d1 U94 plan: booking harvest + surface (36-mo horizon, 9 tracks)
+1fca2a7 U93 T0: corrections from boxbot bi#59 + bi#60
+313248f STATUS regen after U92
 488f2ec U92 final: Qwen bench rerun + stretch-lock recommendations
 892ccb1 U92 progress: U89 deferred items + 400d backfill + percentages audit + cash-recon flow review
 3728d21 U92 plan: overnight ops finesse (email/invoice 400d + Qwen bench + pct audit + cash-recon flow + recommendations)
@@ -26,15 +30,11 @@ b1c2beb U80: auto-parse mortgage statements in ingest-from-paperless webhook
 3bb3598 U78: forensic rebuild of mortgage_accounts from OCR data
 c70f905 U78: Clover batch ingest + account_property_map + scan auto-routing
 999c4bc U77: capital position + net worth on /finance
-476decb fix(u33-data-lane-router): mark row 'rejected' on gmail HTTP 4xx
-d79440e U75: tightening pass — invoice triage UI, smoke test, hunter unique idx
-bc5b8d2 U74: mortgages on /finance + property seed from chat
-af6ac8c fix: _link_to_entity properties query → postcode (not postcode_full)
 ```
 
 ## Open work signals
 
-- Pending bot_instructions: 0
+- Pending bot_instructions: 1
 - Open CRITICAL exceptions: 0
 - Working-tree state: 1 files modified/untracked
 
@@ -54,7 +54,9 @@ af6ac8c fix: _link_to_entity properties query → postcode (not postcode_full)
 - `U89-tidy-doc-discipline.md` — U89 — Tidy: auto-doc, untracked sweep, process discipline
 - `U90-in-person-packet.md` — U90 — In-person packet: prepare Jo's next physical session
 - `U92-overnight-ops-finesse.md` — U92 — Overnight ops finesse (operations / stability / data integrity / UX)
+- `U94-booking-harvest-and-surfacing.md` — U94 — Booking harvest, surface + thread linking (36-month horizon)
 - `U90-in-person-packet.md` — U90 — In-person packet: prepare Jo's next physical session
 - `U92-overnight-ops-finesse.md` — U92 — Overnight ops finesse (operations / stability / data integrity / UX)
+- `U94-booking-harvest-and-surfacing.md` — U94 — Booking harvest, surface + thread linking (36-month horizon)
 
 _Re-run: `scripts/u89-regen-status.sh`_
