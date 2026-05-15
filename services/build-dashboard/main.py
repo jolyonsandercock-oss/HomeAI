@@ -18,7 +18,7 @@ import os
 import re
 import subprocess
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from pathlib import Path
 from typing import Any
 
@@ -1222,6 +1222,109 @@ async def mobile_page():
 @app.get("/vehicles")
 async def vehicles_page():
     return FileResponse(str(STATIC / "vehicles.html"))
+
+
+@app.get("/agents-ops")
+async def agents_ops_page():
+    return FileResponse(str(STATIC / "agents-ops.html"))
+
+
+@app.get("/api/agents/services")
+async def api_agents_services():
+    """U72 T3 — health overview of long-running services backed by DB state.
+    No docker socket access; signals come from row recency + open queues."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SELECT home_ai.set_realm('work')")
+        await c.execute("SET LOCAL app.current_entity = 'all'")
+
+        # bot-responder — last bot_feedback + pending instructions
+        bot_last_reply = await c.fetchval(
+            "SELECT max(created_at) FROM bot_feedback")
+        bot_pending = await c.fetchval(
+            "SELECT count(*) FROM bot_instructions WHERE status='pending'")
+
+        # invoice pipeline
+        latest_vii = await c.fetchval(
+            "SELECT max(received_at) FROM vendor_invoice_inbox")
+        vii_pending = await c.fetchval(
+            "SELECT count(*) FROM vendor_invoice_inbox WHERE status='new'")
+
+        # paperless ingest activity (last 24h via documents.created_at)
+        paperless_last = await c.fetchval(
+            "SELECT max(created_at) FROM documents WHERE paperless_id IS NOT NULL")
+        paperless_24h = await c.fetchval(
+            "SELECT count(*) FROM documents WHERE paperless_id IS NOT NULL "
+            "AND created_at > now() - interval '24 hours'")
+
+        # touchoffice
+        to_last_scrape = await c.fetchval("SELECT max(scraped_at) FROM touchoffice_scrapes")
+
+        # dojo settlements
+        dojo_last_date = await c.fetchval(
+            "SELECT max(transaction_date) FROM staging.payments WHERE source='dojo'")
+
+        # critical-listener proxy: open critical exceptions count
+        open_critical = await c.fetchval(
+            "SELECT count(*) FROM mart.exceptions "
+            "WHERE severity='critical' AND status='open'")
+
+        # till reconciliation freshness
+        latest_till = await c.fetchval("SELECT max(recon_date) FROM till_reconciliation")
+
+    def _age(dt):
+        if dt is None:
+            return None
+        if isinstance(dt, date) and not isinstance(dt, datetime):
+            days = (date.today() - dt).days
+            return f"{days}d" if days >= 0 else f"in {-days}d"
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        secs = int((datetime.now(timezone.utc) - dt).total_seconds())
+        if secs < 60:    return f"{secs}s"
+        if secs < 3600:  return f"{secs//60}m"
+        if secs < 86400: return f"{secs//3600}h"
+        return f"{secs//86400}d"
+
+    return {
+        "services": [
+            {"name": "bot-responder",
+             "last_action_at": bot_last_reply.isoformat() if bot_last_reply else None,
+             "last_action_age": _age(bot_last_reply),
+             "queue":   bot_pending or 0,
+             "queue_label": "pending instructions"},
+            {"name": "invoice-pipeline",
+             "last_action_at": latest_vii.isoformat() if latest_vii else None,
+             "last_action_age": _age(latest_vii),
+             "queue":   vii_pending or 0,
+             "queue_label": "unprocessed invoices"},
+            {"name": "paperless-ingest",
+             "last_action_at": paperless_last.isoformat() if paperless_last else None,
+             "last_action_age": _age(paperless_last),
+             "queue":   paperless_24h or 0,
+             "queue_label": "docs in last 24h"},
+            {"name": "touchoffice-scraper",
+             "last_action_at": to_last_scrape.isoformat() if to_last_scrape else None,
+             "last_action_age": _age(to_last_scrape),
+             "queue":   None,
+             "queue_label": ""},
+            {"name": "dojo-staging",
+             "last_action_at": dojo_last_date.isoformat() if dojo_last_date else None,
+             "last_action_age": _age(dojo_last_date),
+             "queue":   None,
+             "queue_label": ""},
+            {"name": "critical-listener",
+             "last_action_at": None,  # we don't log fires to DB yet
+             "last_action_age": None,
+             "queue":   open_critical or 0,
+             "queue_label": "open critical exceptions"},
+            {"name": "till-reconciliation",
+             "last_action_at": latest_till.isoformat() if latest_till else None,
+             "last_action_age": _age(latest_till),
+             "queue":   None,
+             "queue_label": ""},
+        ],
+    }
 
 
 @app.get("/dojo")

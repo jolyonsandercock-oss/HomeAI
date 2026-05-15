@@ -36,6 +36,7 @@ SCHEMA_URL = "https://homeai.local/schemas/payment-ingest-manifest-v1.json"
 ACCOUNT_ENTITY = {
     "521047-17065488": 1,
     "600001-48747300": 1,
+    "521047-48885517": 1,  # U72 T4 — ATR Trading second current (Dojo settlement landing)
     "521047-17046041": 2,
     "600001-36345245": 3,
     "600001-49011170": 3,

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agents Ops — Home AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  body { background: #0f172a; color: #e2e8f0; font-family: ui-sans-serif, system-ui; }
+  .tile { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px; }
+  .mono { font-variant-numeric: tabular-nums; }
+  .red   { color: #f87171; }
+  .amber { color: #fbbf24; }
+  .green { color: #34d399; }
+  .grey  { color: #94a3b8; }
+</style>
+</head>
+<body>
+<div x-data="ops()" x-init="boot()" class="max-w-5xl mx-auto p-4 space-y-4">
+
+<div class="flex items-center justify-between">
+  <h1 class="text-2xl font-semibold">Agents · ops</h1>
+  <div class="text-xs text-slate-400">
+    <a class="text-emerald-400 hover:underline" href="/">Home</a> ·
+    <a class="text-emerald-400 hover:underline" href="/reconciliation">Recon</a> ·
+    <a class="text-emerald-400 hover:underline" href="/economics">Economics</a> ·
+    refreshes 60s
+  </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+  <template x-for="s in services" :key="s.name">
+    <div class="tile">
+      <div class="flex justify-between items-start">
+        <div class="text-lg font-medium" x-text="s.name"></div>
+        <div :class="ageClass(s.last_action_age)" class="mono text-sm"
+             x-text="s.last_action_age != null ? 'last: ' + s.last_action_age : 'no recent action'"></div>
+      </div>
+      <template x-if="s.queue !== null">
+        <div class="mt-2 text-sm">
+          <span class="mono text-2xl" :class="queueClass(s)" x-text="s.queue"></span>
+          <span class="text-slate-400" x-text="' ' + s.queue_label"></span>
+        </div>
+      </template>
+      <template x-if="s.queue === null && s.last_action_at">
+        <div class="mt-2 text-xs text-slate-500 mono" x-text="s.last_action_at.replace('T',' ').slice(0,19)"></div>
+      </template>
+    </div>
+  </template>
+</div>
+
+</div>
+
+<script>
+function ops() {
+  return {
+    services: [],
+    async boot() { await this.refresh(); setInterval(() => this.refresh(), 60000); },
+    async refresh() {
+      try {
+        const r = await (await fetch('/api/agents/services')).json();
+        this.services = r.services || [];
+      } catch (e) { this.services = []; }
+    },
+    ageClass(age) {
+      if (!age) return 'grey';
+      if (age.endsWith('d')) return parseInt(age) >= 2 ? 'red' : 'amber';
+      if (age.endsWith('h')) return parseInt(age) >= 12 ? 'amber' : 'green';
+      return 'green';
+    },
+    queueClass(s) {
+      if (s.queue === 0) return 'green';
+      if (s.name === 'critical-listener' && s.queue > 0) return 'red';
+      if (s.queue > 10) return 'amber';
+      return '';
+    },
+  };
+}
+</script>
+</body>
+</html>
