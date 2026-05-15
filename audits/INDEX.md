@@ -48,3 +48,16 @@ Generated outputs from the U86 audit sprint (and successors). Files are dated
 | T5 Dead-letter replay | NO-OP | U86 audit showed 0 buckets. Nothing to replay. |
 | T6 Cron exit-code audit | DONE | `2026-05-15-cron-health.md`. 43 cron scripts mapped; new scripts logged "no log yet" (waiting for next scheduled run). |
 | T7 TODO/FIXME sweep | DONE | `2026-05-15-todo-sweep.md`. 7 markers found; 6 false positives (my own search pattern), 1 in `restore.sh` is mktemp template — functionally zero real TODOs. |
+
+## 2026-05-15 — U89 tidy (auto-doc + untracked sweep + STATUS regen)
+
+| Track | Output | Result |
+|---|---|---|
+| T1 schema doc | `docs/schema.md` | 315 tables documented (7537 lines, partition children omitted) |
+| T2 view dep graph | — | DEFERRED (mermaid graph generation complex; deferred to a follow-up) |
+| T3 cron doc | `docs/cron.md` | All 43 cron entries with schedule/purpose + orphan list |
+| T4 migration index | `docs/migrations.md` | All 96 migrations indexed |
+| T5 STATUS regen | `STATUS.md` | Live: branch, last 20 commits, open work signals |
+| T6 untracked file sweep | `audits/2026-05-15-untracked-files.md` | All untracked paths classified |
+| T7 memory hygiene | — | DEFERRED — manual review needed for cross-references |
+| T8 AGENTS.md drift | — | DEFERRED — manual review |
