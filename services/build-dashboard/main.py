@@ -4710,7 +4710,8 @@ async def _load_finance_slugs(conn) -> list[dict]:
            AND slug IN ('interest_paid_window','fees_paid_window','account_balances',
                         'owings_summary','monthly_finance_costs','top_vendors_window',
                         'transfers_recent','spend_by_category_window','credit_card_status',
-                        'recent_finance_events','finance_kpis','top_purchases_window')
+                        'recent_finance_events','finance_kpis','top_purchases_window',
+                        'mortgages_summary')
          ORDER BY slug
     """)
     out = []
