@@ -76,6 +76,37 @@
     </div>
   </section>
 
+  <!-- ────────────── Capital position (U77) ────────────── -->
+  <section class="grid grid-cols-2 md:grid-cols-5 gap-3">
+    <div class="glass rounded-xl p-4 ring-1 ring-emerald-500/30">
+      <div class="text-xs uppercase tracking-wide muted">Net worth</div>
+      <div class="text-2xl font-medium mono num" :class="netWorth.net_worth < 0 ? 'neg' : 'pos'"
+           x-text="fmtMoney(netWorth.net_worth)"></div>
+      <div class="text-xs muted">property + cash − all borrowing</div>
+    </div>
+    <div class="glass rounded-xl p-4">
+      <div class="text-xs uppercase tracking-wide muted">Property value</div>
+      <div class="text-2xl font-medium mono num pos" x-text="fmtMoney(netWorth.property_value)"></div>
+      <div class="text-xs muted">5 freeholds at current value</div>
+    </div>
+    <div class="glass rounded-xl p-4">
+      <div class="text-xs uppercase tracking-wide muted">Net cash</div>
+      <div class="text-2xl font-medium mono num" :class="netWorth.net_cash < 0 ? 'neg' : 'pos'"
+           x-text="fmtMoney(netWorth.net_cash)"></div>
+      <div class="text-xs muted">all bank balances (excl. cards)</div>
+    </div>
+    <div class="glass rounded-xl p-4">
+      <div class="text-xs uppercase tracking-wide muted">Secured debt</div>
+      <div class="text-2xl font-medium mono num neg" x-text="fmtMoney(netWorth.secured_borrowing)"></div>
+      <div class="text-xs muted">live mortgages</div>
+    </div>
+    <div class="glass rounded-xl p-4">
+      <div class="text-xs uppercase tracking-wide muted">Unsecured debt</div>
+      <div class="text-2xl font-medium mono num neg" x-text="fmtMoney(netWorth.unsecured_borrowing)"></div>
+      <div class="text-xs muted">credit cards</div>
+    </div>
+  </section>
+
   <!-- ────────────── Ask box ────────────── -->
   <section class="glass rounded-xl p-4 space-y-3">
     <div class="flex flex-wrap items-center justify-between gap-3">
@@ -154,6 +185,7 @@
 function financeBoard() {
   return {
     kpis: {},
+    netWorth: {},
     question: "",
     asking: false,
     answer: null,
@@ -176,7 +208,8 @@ function financeBoard() {
       { key:"spend",          label:"Spend by cat",    slug:"spend_by_category_window", hint:"Outflow grouped by category over a window." },
       { key:"vendors",        label:"Top vendors",     slug:"top_vendors_window",        hint:"Biggest suppliers by total billed in the last 12 months." },
       { key:"cards",          label:"Credit cards",    slug:"credit_card_status",        hint:"Latest statement per card." },
-      { key:"mortgages",      label:"Mortgages",       slug:"mortgages_summary",         hint:"Active mortgages with lender, balance, monthly payment, properties secured, and scanned statements on file." },
+      { key:"capital",        label:"Capital",         slug:"capital_summary",           hint:"Properties + current valuation + mortgage exposure + equity per property." },
+      { key:"mortgages",      label:"Mortgages",       slug:"mortgages_all",             hint:"Every mortgage account. Closed mortgages appear greyed out." },
       { key:"recent",         label:"Recent events",   slug:"recent_finance_events",     hint:"Last 50 finance events from bank, invoices, and dojo." },
     ],
 
@@ -188,6 +221,11 @@ function financeBoard() {
     async loadKPIs() {
       const r = await fetch("/api/finance/kpis");
       this.kpis = await r.json();
+      // U77: net worth panel from v_net_worth_summary.
+      try {
+        const nw = await fetch("/api/finance/slug/net_worth_summary").then(r => r.json());
+        this.netWorth = (nw.rows && nw.rows[0]) || {};
+      } catch { this.netWorth = {}; }
     },
 
     activeTab() { return this.tabs.find(t => t.key === this.active) || {}; },
@@ -278,6 +316,14 @@ function financeBoard() {
         height: scope === "answer" ? "300px" : "520px",
         pagination: true, paginationSize: 25,
         placeholder: "no rows",
+        // U77: grey out rows where active === false (e.g. closed mortgages).
+        rowFormatter: function(row) {
+          const d = row.getData();
+          if (d.active === false || d.closed_date) {
+            row.getElement().style.opacity = "0.45";
+            row.getElement().style.fontStyle = "italic";
+          }
+        },
       });
     },
   };

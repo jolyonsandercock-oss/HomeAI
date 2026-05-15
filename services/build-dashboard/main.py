@@ -4765,7 +4765,8 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         'owings_summary','monthly_finance_costs','top_vendors_window',
                         'transfers_recent','spend_by_category_window','credit_card_status',
                         'recent_finance_events','finance_kpis','top_purchases_window',
-                        'mortgages_summary')
+                        'mortgages_summary','mortgages_all','capital_summary',
+                        'net_worth_summary')
          ORDER BY slug
     """)
     out = []
