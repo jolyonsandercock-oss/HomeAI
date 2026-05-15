@@ -463,6 +463,23 @@ services:
       REALM_ENFORCE: "1"
     restart: unless-stopped
 
+  # ── U71 T2 — critical-listener ─────────────────────────────────────────
+  # LISTENs on the `telegram_immediate` channel; forwards mart.exceptions
+  # rows with severity='critical' to Telegram in <30s. Quiet for non-
+  # critical severities — those get rolled up by the morning digest.
+  critical-listener:
+    build: ./services/critical-listener
+    container_name: homeai-critical-listener
+    networks: [ai-internal, ai-egress]
+    depends_on:
+      postgres: {condition: service_healthy}
+      vault:    {condition: service_started}
+    environment:
+      VAULT_ADDR:   "http://vault:8200"
+      VAULT_TOKEN:  "${VAULT_TOKEN}"
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
+    restart: unless-stopped
+
   # ── U62 T3 — Paperless-ngx ─────────────────────────────────────────────
   # Phase-3 scanner intake. Brother ADS-2800W SMB-drops PDFs into
   # ./storage/paperless/consume on the host; the container OCRs and serves

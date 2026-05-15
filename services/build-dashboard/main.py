@@ -3324,6 +3324,87 @@ async def api_manager_notes_list(days: int = 14):
                        "created_at": r["created_at"].isoformat()} for r in rows]}
 
 
+@app.post("/api/till-recon")
+async def api_till_recon_create(payload: dict = Body(...)):
+    """U71 T1: record a till-reconciliation row from /m.
+    Body: {site, recon_date, session, z_reading, card_total, cash_counted,
+           float_returned, staff_notes}. site ∈ {pub,cafe,other}."""
+    site = (payload.get("site") or "pub").strip().lower()
+    if site not in ("pub", "cafe", "other"):
+        return JSONResponse({"error": "site must be pub|cafe|other"}, status_code=400)
+    recon_date_str = (payload.get("recon_date") or "").strip()
+    if not recon_date_str:
+        return JSONResponse({"error": "recon_date required"}, status_code=400)
+    try:
+        recon_date = datetime.strptime(recon_date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return JSONResponse({"error": "recon_date must be YYYY-MM-DD"}, status_code=400)
+    session = (payload.get("session") or "day").strip().lower() or "day"
+
+    def _num(k):
+        v = payload.get(k)
+        if v in (None, ""):
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    z_reading     = _num("z_reading")
+    card_total    = _num("card_total")
+    cash_counted  = _num("cash_counted")
+    float_returned= _num("float_returned")
+    expected_cash = _num("expected_cash")
+    staff_notes   = (payload.get("staff_notes") or "").strip() or None
+
+    # Variance computed only when we have both expected and counted.
+    variance = None
+    variance_pct = None
+    status = 'ok'
+    if cash_counted is not None and expected_cash is not None:
+        variance = round(cash_counted - expected_cash, 2)
+        if expected_cash:
+            variance_pct = round(variance / expected_cash * 100.0, 3)
+        if abs(variance) > 5:
+            status = 'flagged'
+
+    idem = f"manual:{site}:{recon_date_str}:{session}"
+
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await c.execute("SELECT home_ai.set_realm('work')")
+            await c.execute("SET LOCAL app.current_entity = '1'")
+            row = await c.fetchrow("""
+                INSERT INTO till_reconciliation
+                    (idempotency_key, recon_date, session, site,
+                     z_reading, card_total, cash_counted, float_returned,
+                     expected_cash, variance, variance_pct, status, staff_notes,
+                     entity_id, realm)
+                VALUES ($1, $2, $3, $4,
+                        $5, $6, $7, $8,
+                        $9, $10, $11, $12, $13,
+                        1, 'work')
+                ON CONFLICT (idempotency_key) DO UPDATE
+                   SET z_reading     = EXCLUDED.z_reading,
+                       card_total    = EXCLUDED.card_total,
+                       cash_counted  = EXCLUDED.cash_counted,
+                       float_returned= EXCLUDED.float_returned,
+                       expected_cash = EXCLUDED.expected_cash,
+                       variance      = EXCLUDED.variance,
+                       variance_pct  = EXCLUDED.variance_pct,
+                       status        = EXCLUDED.status,
+                       staff_notes   = EXCLUDED.staff_notes
+                RETURNING id, recon_date, site, session, variance, status
+            """, idem, recon_date, session, site,
+                 z_reading, card_total, cash_counted, float_returned,
+                 expected_cash, variance, variance_pct, status, staff_notes)
+    return {"id": row["id"], "recon_date": row["recon_date"].isoformat(),
+            "site": row["site"], "session": row["session"],
+            "variance": float(row["variance"]) if row["variance"] is not None else None,
+            "status": row["status"]}
+
+
 @app.post("/api/till-recon/{recon_id}/resolve")
 async def api_till_recon_resolve(recon_id: int, payload: dict = Body(default={})):
     """U54 D: mark a flagged till_reconciliation row as resolved with a note."""

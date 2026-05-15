@@ -78,7 +78,48 @@
   <div class="text-xs text-slate-400" x-text="invoicesTotal ? '£' + Number(invoicesTotal).toLocaleString() + ' seen' : ''"></div>
 </a>
 
-<!-- 5. Manager note (inline write — U54 D) -->
+<!-- 5. Till cashing-up (U71 T1) -->
+<div class="card">
+  <div class="label">Cashing-up</div>
+  <div class="flex gap-2 mt-1">
+    <select x-model="till.site" class="bg-slate-800 border border-slate-700 rounded text-sm p-1">
+      <option value="pub">pub</option>
+      <option value="cafe">cafe</option>
+      <option value="other">other</option>
+    </select>
+    <input type="date" x-model="till.recon_date"
+           class="bg-slate-800 border border-slate-700 rounded text-sm p-1 mono" />
+    <select x-model="till.session" class="bg-slate-800 border border-slate-700 rounded text-sm p-1">
+      <option value="day">day</option>
+      <option value="night">night</option>
+    </select>
+  </div>
+  <div class="grid grid-cols-2 gap-2 mt-2 text-sm">
+    <label class="text-xs text-slate-400">Z reading
+      <input type="number" step="0.01" x-model="till.z_reading"
+             class="w-full mt-0.5 bg-slate-800 border border-slate-700 rounded p-1 mono" /></label>
+    <label class="text-xs text-slate-400">Card total
+      <input type="number" step="0.01" x-model="till.card_total"
+             class="w-full mt-0.5 bg-slate-800 border border-slate-700 rounded p-1 mono" /></label>
+    <label class="text-xs text-slate-400">Cash counted
+      <input type="number" step="0.01" x-model="till.cash_counted"
+             class="w-full mt-0.5 bg-slate-800 border border-slate-700 rounded p-1 mono" /></label>
+    <label class="text-xs text-slate-400">Float kept
+      <input type="number" step="0.01" x-model="till.float_returned"
+             class="w-full mt-0.5 bg-slate-800 border border-slate-700 rounded p-1 mono" /></label>
+  </div>
+  <input type="text" x-model="till.staff_notes" placeholder="notes (optional)"
+         class="w-full mt-2 bg-slate-800 border border-slate-700 rounded text-sm p-1" />
+  <div class="flex justify-between items-center mt-2">
+    <span class="text-xs" :class="till.status?.startsWith('✗') ? 'text-rose-300' : till.status?.startsWith('✓') ? 'text-emerald-300' : 'text-slate-500'" x-text="till.status"></span>
+    <button @click="postTill()" :disabled="!till.z_reading && !till.cash_counted"
+            class="bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-700 disabled:text-slate-500 text-white text-xs px-3 py-1 rounded">
+      Save
+    </button>
+  </div>
+</div>
+
+<!-- 6. Manager note (inline write — U54 D) -->
 <div class="card">
   <div class="label">Manager note</div>
   <div class="flex items-center gap-2 mt-1">
@@ -136,6 +177,9 @@ function m() {
     noteBody: '',
     noteStatus: '',
     recentNotes: [],
+    till: { site: 'pub', recon_date: new Date().toISOString().slice(0,10),
+             session: 'day', z_reading: '', card_total: '',
+             cash_counted: '', float_returned: '', staff_notes: '', status: '' },
     async boot() {
       await this.refresh();
       await this.loadNotes();
@@ -146,6 +190,33 @@ function m() {
         const r = await (await fetch('/api/manager-notes?days=14')).json();
         this.recentNotes = r.rows || [];
       } catch {}
+    },
+    async postTill() {
+      this.till.status = 'saving…';
+      try {
+        const body = { ...this.till };
+        delete body.status;
+        const r = await fetch('/api/till-recon', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (r.ok) {
+          const j = await r.json();
+          this.till.status = j.variance != null
+            ? `✓ saved · variance £${j.variance.toFixed(2)}${j.status === 'flagged' ? ' (flagged)' : ''}`
+            : '✓ saved';
+          setTimeout(() => { this.till.status = ''; }, 4000);
+          this.till.z_reading = ''; this.till.card_total = '';
+          this.till.cash_counted = ''; this.till.float_returned = '';
+          this.till.staff_notes = '';
+        } else {
+          const e = await r.json();
+          this.till.status = '✗ ' + (e.error || 'failed');
+        }
+      } catch (e) {
+        this.till.status = '✗ network';
+      }
     },
     async postNote() {
       this.noteStatus = 'saving…';
