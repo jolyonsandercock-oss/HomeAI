@@ -1669,8 +1669,10 @@ async def api_research_ask(body: dict = Body(...)):
         return JSONResponse({"error": "missing 'question'"}, status_code=400)
     sources = body.get("sources") or ["email", "invoice_line", "document"]
     top_k   = int(body.get("top_k") or 12)
-    # 60/40 cosine/FTS by default; override via body.fts_weight in [0,1].
-    fts_weight = float(body.get("fts_weight") or 0.4)
+    # Default 70/30 FTS/cosine — keeps current FTS-led behaviour while
+    # adding a small dense-recall boost. Lower the weight when a better
+    # embedding model is wired (see U65 T3 commit note).
+    fts_weight = float(body.get("fts_weight") or 0.7)
     fts_weight = max(0.0, min(1.0, fts_weight))
 
     anth = await _vault_read("anthropic")
