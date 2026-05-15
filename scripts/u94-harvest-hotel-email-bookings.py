@@ -8,7 +8,7 @@ Usage: docker exec homeai-bot-responder python3 /tmp/u94-harvester.py [days_back
        days_back defaults to 1100 (~36 months).
 """
 from __future__ import annotations
-import os, sys, re, json, base64, asyncio, urllib.request, urllib.parse
+import os, sys, re, json, html, base64, asyncio, urllib.request, urllib.parse
 from datetime import datetime, timezone
 
 import asyncpg
@@ -37,13 +37,15 @@ def message_body_text(msg: dict) -> str:
             return base64.urlsafe_b64decode(b + pad).decode('utf-8', errors='replace')
         if mime.startswith('text/html') and body.get('data'):
             b = body['data']; pad = '=' * (-len(b) % 4)
-            html = base64.urlsafe_b64decode(b + pad).decode('utf-8', errors='replace')
+            raw = base64.urlsafe_b64decode(b + pad).decode('utf-8', errors='replace')
             # HTML strip with newline-preserving tag handling
-            html = re.sub(r'<(br|/p|/div|/tr|/li|/td)[^>]*>', '\n', html, flags=re.I)
-            html = re.sub(r'<[^>]+>', ' ', html)
+            raw = re.sub(r'<(br|/p|/div|/tr|/li|/td)[^>]*>', '\n', raw, flags=re.I)
+            raw = re.sub(r'<[^>]+>', ' ', raw)
+            # Decode HTML entities: &nbsp; → space, &amp; → & etc.
+            raw = html.unescape(raw)
             # collapse multi-space, preserve newlines
-            html = re.sub(r'[ \t]+', ' ', html)
-            return html
+            raw = re.sub(r'[ \t]+', ' ', raw)
+            return raw
         for sub in (part.get('parts') or []):
             t = walk(sub)
             if t: return t
@@ -134,21 +136,25 @@ async def main():
     total_parse_fail = 0
 
     # /messages endpoint caps at 100 and doesn't paginate. Slice by 30-day
-    # windows working back from today; each slice should be ≤100 results for
-    # a single sender.
+    # non-overlapping windows working back from today.
+    # Gmail operator semantics:
+    #   older_than:Xd  →  emails OLDER THAN X days ago (further back in time)
+    #   newer_than:Yd  →  emails NEWER THAN Y days ago (more recent)
+    # So the window "between X and Y days ago" (X < Y) is older_than:X newer_than:Y.
     window = 30
     batch = 0
-    for older in range(0, days_back, window):
-        newer = max(older - window, 0)
-        # Use Gmail's `newer_than:X` + `older_than:Y` operators in days.
-        q = f'from:bookings@hotel-email.com older_than:{newer}d newer_than:{older + window}d'
+    for older_days in range(0, days_back, window):
+        # This window covers [older_days .. older_days+window) days ago.
+        x = older_days
+        y = older_days + window
+        q = f'from:bookings@hotel-email.com older_than:{x}d newer_than:{y}d'
         batch += 1
         params = {'account': 'info', 'max_results': 100, 'q': q}
         res = gf_get('/messages', **params)
         msgs = res.get('messages', [])
         if not msgs:
             continue
-        print(f'  batch {batch} ({newer}d..{older + window}d): {len(msgs)} stubs')
+        print(f'  batch {batch} ({x}d..{y}d): {len(msgs)} stubs', flush=True)
         for stub in msgs:
             mid = stub.get('id')
             if not mid: continue
