@@ -123,6 +123,26 @@ async def db_all(sql: str, *args):
             await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
             return await c.fetch(sql, *args)
 
+# U84 — for endpoints that need multiple statements in one transaction
+# (e.g. action queue resolve, ingest pipeline writes). Acquires a connection,
+# sets realm and optional entity, releases on exit. NEVER hold this across
+# template rendering or third-party network calls (G3 fix).
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def db_session(entity: str | None = None):
+    """Yields an asyncpg connection with realm + optional entity SET LOCAL.
+    The connection is released on context exit — use inside endpoint
+    blocks only, never around `await call_next` or template renders."""
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+            if entity is not None:
+                # SET LOCAL takes a literal — use set_config() so parameters work
+                await c.execute("SELECT set_config('app.current_entity', $1, true)", str(entity))
+            yield c
+
 # ─── Helpers ────────────────────────────────────────────────────
 async def http_json(url: str, timeout: float = 4.0) -> Any:
     try:
@@ -497,11 +517,25 @@ app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 # Realm middleware: set _current_realm contextvar from X-Realm header when
 # REALM_ENFORCE=1, otherwise pin to 'owner'. Health and static paths are
 # exempt so liveness checks don't 401 when REALM_ENFORCE=1 without a header.
+#
+# U84 — UI vocabulary is now [Work | All]. Map at the middleware boundary:
+#   X-Realm: all   → DB realm 'owner'   (unfiltered; owner sees everything)
+#   X-Realm: work  → DB realm 'work'    (work-only)
+#   X-Realm: family → DB realm 'family' (kept for backwards compat with
+#                     the Private bucket and existing scripts)
+#   X-Realm: owner → DB realm 'owner'   (legacy alias accepted)
 _REALM_EXEMPT_PREFIXES = (
     "/api/healthz",
     "/static",
     "/api/documents/ingest-from-paperless",  # U70 — webhook from Paperless, auth'd by shared secret
 )
+
+_UI_TO_DB_REALM = {
+    "all":    "owner",
+    "owner":  "owner",
+    "work":   "work",
+    "family": "family",
+}
 
 @app.middleware("http")
 async def realm_middleware(request, call_next):
@@ -511,20 +545,25 @@ async def realm_middleware(request, call_next):
 
     # Two header sources, in order of trust:
     #   1. X-Realm — explicit override (used for testing or manual injection)
+    #      Accepts UI vocabulary: 'work' | 'all' | 'family' | 'owner'.
     #   2. Remote-Groups — Authelia forward_auth carries the authenticated
     #      user's group list comma-separated; pick the first valid realm.
-    realm = (request.headers.get("X-Realm") or "").strip()
+    raw = (request.headers.get("X-Realm") or "").strip().lower()
+    realm = _UI_TO_DB_REALM.get(raw)
     if not realm:
         groups = (request.headers.get("Remote-Groups") or "").strip()
         for g in (g.strip() for g in groups.split(",")):
-            if g in ("owner", "work", "family"):
-                realm = g
+            if g in _UI_TO_DB_REALM:
+                realm = _UI_TO_DB_REALM[g]
                 break
-    if realm not in ("owner", "work", "family"):
+    if not realm:
         return JSONResponse(
             {"error": "missing or invalid realm — no X-Realm and no valid Remote-Groups"},
             status_code=401,
         )
+    # Just stash on the contextvar (no DB connection held across the
+    # request — per U84 §4 G3 fix; each endpoint acquires + sets realm
+    # micro-transactionally inside its own block).
     _current_realm.set(realm)
     return await call_next(request)
 
@@ -1217,6 +1256,156 @@ async def economics_page():
 @app.get("/m")
 async def mobile_page():
     return FileResponse(str(STATIC / "m.html"))
+
+
+# ── U84 Phase 2 — Today screens ───────────────────────────────────
+@app.get("/work/today")
+async def work_today_page():
+    return FileResponse(str(STATIC / "work-today.html"))
+
+
+@app.get("/private/today")
+async def private_today_page():
+    return FileResponse(str(STATIC / "private-today.html"))
+
+
+# ── U84 Phase 6 — /all sitemap ────────────────────────────────────
+@app.get("/all")
+async def all_sitemap_page():
+    return FileResponse(str(STATIC / "all-sitemap.html"))
+
+
+@app.get("/api/all/sitemap")
+async def all_sitemap():
+    """Sitemap: every GET route + every approved slug + every public view.
+    Used by /all page for discoverability."""
+    # Routes
+    pages = []
+    for r in app.routes:
+        # FastAPI route objects vary; only include those with a path + GET method
+        path = getattr(r, "path", None)
+        methods = getattr(r, "methods", None) or set()
+        if not path or "GET" not in methods:
+            continue
+        if path.startswith("/api/") or path.startswith("/static") or path == "/openapi.json":
+            continue
+        if path in ("/docs", "/redoc"):
+            continue
+        if "{" in path:  # parameterised — skip from sitemap
+            continue
+        pages.append({"path": path})
+    pages = sorted({p["path"] for p in pages})
+    pages = [{"path": p} for p in pages]
+
+    # Slugs + views
+    p_ = await pool()
+    async with p_.acquire() as c:
+        async with c.transaction():
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+            slug_rows = await c.fetch("""
+                SELECT slug, display_name, description, realm
+                FROM query_whitelist
+                WHERE active = true AND approved_at IS NOT NULL
+                ORDER BY slug
+            """)
+            view_rows = await c.fetch("""
+                SELECT schemaname, viewname
+                FROM pg_views
+                WHERE schemaname IN ('public','mart')
+                  AND viewname LIKE 'v_%'
+                ORDER BY schemaname, viewname
+            """)
+
+    return {
+        "pages": pages,
+        "slugs": [
+            {"slug": r["slug"], "display_name": r["display_name"],
+             "description": r["description"], "realm": r["realm"]}
+            for r in slug_rows
+        ],
+        "views": [
+            {"schema": r["schemaname"], "name": r["viewname"]}
+            for r in view_rows
+        ],
+    }
+
+
+@app.get("/api/all/search")
+async def all_search(q: str = ""):
+    """Search the sitemap. Trgm similarity over page paths, slug names,
+    view names. Returns top 20 ranked."""
+    q = (q or "").strip().lower()
+    if len(q) < 2:
+        return {"results": []}
+
+    p_ = await pool()
+    results: list[dict] = []
+    async with p_.acquire() as c:
+        async with c.transaction():
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+            # Slugs by similarity
+            slug_rows = await c.fetch("""
+                SELECT slug, display_name, description,
+                       greatest(similarity(slug, $1),
+                                similarity(coalesce(display_name,''), $1),
+                                similarity(coalesce(description,''),  $1)) AS score
+                FROM query_whitelist
+                WHERE active = true AND approved_at IS NOT NULL
+                ORDER BY score DESC NULLS LAST
+                LIMIT 10
+            """, q)
+            for r in slug_rows:
+                if (r["score"] or 0) < 0.1:
+                    continue
+                results.append({
+                    "kind": "slug", "label": r["slug"],
+                    "detail": r["display_name"] or r["description"] or "",
+                    "score": float(r["score"] or 0),
+                    "href": f"/api/finance/slug/{r['slug']}",
+                })
+
+            # Views by similarity
+            view_rows = await c.fetch("""
+                SELECT schemaname, viewname,
+                       similarity(viewname, $1) AS score
+                FROM pg_views
+                WHERE schemaname IN ('public','mart') AND viewname LIKE 'v_%'
+                ORDER BY score DESC NULLS LAST
+                LIMIT 10
+            """, q)
+            for r in view_rows:
+                if (r["score"] or 0) < 0.1:
+                    continue
+                results.append({
+                    "kind": "view",
+                    "label": f"{r['schemaname']}.{r['viewname']}",
+                    "detail": "",
+                    "score": float(r["score"] or 0),
+                    "href": "",
+                })
+
+    # Routes by simple substring match
+    for r in app.routes:
+        path = getattr(r, "path", None)
+        if not path or "{" in path or path.startswith("/api/") or path.startswith("/static"):
+            continue
+        if q in path.lower():
+            results.append({
+                "kind": "page", "label": path, "detail": "",
+                "score": 0.5 if path == "/" + q else 0.3,
+                "href": path,
+            })
+
+    # De-dupe + sort
+    seen = set()
+    deduped = []
+    for r in sorted(results, key=lambda x: -x["score"]):
+        key = (r["kind"], r["label"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(r)
+    return {"results": deduped[:20]}
 
 
 @app.get("/vehicles")
@@ -4863,7 +5052,9 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         'transfers_recent','spend_by_category_window','credit_card_status',
                         'recent_finance_events','finance_kpis','top_purchases_window',
                         'mortgages_summary','mortgages_all','capital_summary',
-                        'net_worth_summary','mortgage_coverage')
+                        'net_worth_summary','mortgage_coverage',
+                        -- U84 Phase 2 additions
+                        'today_kpis_work','today_kpis_private','action_queue')
          ORDER BY slug
     """)
     out = []

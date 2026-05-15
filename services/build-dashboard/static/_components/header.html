@@ -1,0 +1,106 @@
+{# U84 header partial. Include at top of every page body.
+   - Realm toggle: [Work | All] segmented control (Gemini fixes G1, G2, J1)
+   - 44px tap targets, focus-visible ring, role=tablist + aria-selected
+   - Reads CAPTURED_REALM via HomeAI.getRealm() into x-data, NOT from live
+     localStorage (G2 fix).
+#}
+<header class="sticky top-0 z-40 backdrop-blur-md bg-black/50 border-b border-white/5"
+        x-data="homeaiHeader()" x-init="boot()">
+  <div class="max-w-6xl mx-auto px-3 py-2 flex items-center gap-2">
+
+    {# Logo / home #}
+    <a href="/" class="flex items-center gap-2 text-zinc-100 min-h-[44px]"
+       aria-label="Home AI — dashboard home">
+      <span class="text-xl leading-none">⌂</span>
+      <span class="font-semibold hidden sm:inline">Home AI</span>
+    </a>
+
+    {# Realm segmented control — [Work | All] #}
+    <div class="ml-2 flex bg-white/5 rounded-lg p-0.5 text-sm min-h-[44px] items-center"
+         role="tablist" aria-label="Realm filter">
+
+      <button type="button" role="tab" data-r="work"
+              :aria-selected="realm === 'work'"
+              :tabindex="realm === 'work' ? 0 : -1"
+              class="px-3 min-h-[44px] min-w-[44px] rounded-md transition
+                     focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none"
+              :class="realm === 'work'
+                       ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-500/40'
+                       : 'text-zinc-400 hover:text-zinc-200'"
+              @click="setRealm('work')"
+              @keydown.right.prevent="setRealm('all')"
+              @keydown.left.prevent="setRealm('work')">
+        Work
+      </button>
+
+      <button type="button" role="tab" data-r="all"
+              :aria-selected="realm === 'all'"
+              :tabindex="realm === 'all' ? 0 : -1"
+              class="px-3 min-h-[44px] min-w-[44px] rounded-md transition
+                     focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:outline-none"
+              :class="realm === 'all'
+                       ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/40'
+                       : 'text-zinc-400 hover:text-zinc-200'"
+              @click="setRealm('all')"
+              @keydown.right.prevent="setRealm('all')"
+              @keydown.left.prevent="setRealm('work')">
+        All
+      </button>
+    </div>
+
+    {# Top-level nav (right) #}
+    <nav class="ml-auto flex items-center gap-1 text-sm text-zinc-400"
+         aria-label="Primary">
+      <a href="/build/pipelines"
+         class="px-2 min-h-[44px] flex items-center rounded-md
+                hover:text-zinc-100 hover:bg-white/5
+                focus-visible:ring-2 focus-visible:ring-zinc-400/40 focus-visible:outline-none">
+        Build
+      </a>
+      <a href="/all"
+         class="px-2 min-h-[44px] flex items-center rounded-md
+                hover:text-zinc-100 hover:bg-white/5
+                focus-visible:ring-2 focus-visible:ring-zinc-400/40 focus-visible:outline-none">
+        All
+      </a>
+      <a href="/ask" title="Search and ask" aria-label="Search and ask"
+         class="px-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-md
+                hover:text-zinc-100 hover:bg-white/5
+                focus-visible:ring-2 focus-visible:ring-zinc-400/40 focus-visible:outline-none">
+        🔍
+      </a>
+      <a href="/settings" title="Settings" aria-label="Settings"
+         class="px-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-md
+                hover:text-zinc-100 hover:bg-white/5
+                focus-visible:ring-2 focus-visible:ring-zinc-400/40 focus-visible:outline-none">
+        ⚙
+      </a>
+      <span class="text-zinc-300 px-2">Jo</span>
+    </nav>
+  </div>
+</header>
+
+<script>
+  // Header Alpine component — keeps the realm-chip visual in sync with
+  // HomeAI's captured value. setRealm() delegates to HomeAI.setRealm so the
+  // handshake mechanism in realm-toggle.js drives the actual change.
+  window.homeaiHeader = function () {
+    return {
+      realm: 'work',
+      boot() {
+        this.realm = (window.HomeAI && window.HomeAI.getRealm())
+                     || localStorage.getItem('homeai.realm')
+                     || 'work';
+        // Keep visual in sync with the global event
+        window.addEventListener('realm-changed', (e) => {
+          this.realm = e.detail.realm;
+        });
+      },
+      setRealm(next) {
+        if (window.HomeAI && window.HomeAI.setRealm) {
+          window.HomeAI.setRealm(next);
+        }
+      }
+    };
+  };
+</script>

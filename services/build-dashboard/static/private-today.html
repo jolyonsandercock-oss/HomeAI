@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0a0a0b">
+<title>Private · Today — Home AI</title>
+
+<script src="/static/vendor/tailwind-3.4.min.js"></script>
+<script defer src="/static/vendor/alpine-3.14.min.js"></script>
+<script src="/static/_components/realm-toggle.js"></script>
+<script src="/static/_components/date-window.js"></script>
+
+<style>
+  :root { color-scheme: dark; }
+  body {
+    background: linear-gradient(180deg, #0f172a 0%, #020617 100%);
+    min-height: 100vh; color: #e2e8f0;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .glass { background: rgba(15,23,42,0.7); border: 1px solid rgba(148,163,184,0.15); }
+  .mono  { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  .pos   { color: #34d399; }
+  .neg   { color: #f43f5e; }
+  .tl    { display:inline-block;width:11px;height:11px;border-radius:999px;margin-right:6px;vertical-align:middle;box-shadow:0 0 8px currentColor; }
+  .tl-green{background:#10b981;color:#10b981}.tl-amber{background:#f59e0b;color:#f59e0b}
+  .tl-red  {background:#f43f5e;color:#f43f5e;animation:pulse 1.4s infinite}.tl-grey{background:#64748b;color:#64748b}
+  @keyframes pulse { 50%{opacity:0.55} }
+  .sk-tile { min-height: 96px; }
+  .sk-row  { min-height: 56px; }
+  .skel    { background: linear-gradient(90deg, rgba(148,163,184,0.06) 0%, rgba(148,163,184,0.12) 50%, rgba(148,163,184,0.06) 100%); background-size: 200% 100%; animation: shimmer 1.4s ease-in-out infinite; border-radius: 6px; }
+  @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+</style>
+</head>
+<body x-data="privateToday()" x-init="boot()">
+
+<header class="sticky top-0 z-40 backdrop-blur-md bg-slate-950/80 border-b border-white/5"
+        x-data="homeaiHeader()" x-init="boot()">
+  <div class="max-w-md mx-auto px-3 py-2 flex items-center gap-2">
+    <a href="/" class="flex items-center gap-2 text-zinc-100 min-h-[44px]" aria-label="Home AI">
+      <span class="text-xl leading-none">⌂</span>
+      <span class="font-semibold text-sm">Home AI</span>
+    </a>
+    <div class="ml-2 flex bg-white/5 rounded-lg p-0.5 text-sm min-h-[44px] items-center"
+         role="tablist" aria-label="Realm filter">
+      <button type="button" role="tab"
+              :aria-selected="realm === 'work'" :tabindex="realm === 'work' ? 0 : -1"
+              class="px-3 min-h-[44px] min-w-[44px] rounded-md transition focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none"
+              :class="realm === 'work' ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-500/40' : 'text-zinc-400 hover:text-zinc-200'"
+              @click="setRealm('work')"
+              @keydown.right.prevent="setRealm('all')"
+              @keydown.left.prevent="setRealm('work')">Work</button>
+      <button type="button" role="tab"
+              :aria-selected="realm === 'all'" :tabindex="realm === 'all' ? 0 : -1"
+              class="px-3 min-h-[44px] min-w-[44px] rounded-md transition focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:outline-none"
+              :class="realm === 'all' ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/40' : 'text-zinc-400 hover:text-zinc-200'"
+              @click="setRealm('all')"
+              @keydown.right.prevent="setRealm('all')"
+              @keydown.left.prevent="setRealm('work')">All</button>
+    </div>
+    <nav class="ml-auto flex items-center gap-1 text-sm text-zinc-400" aria-label="Primary">
+      <a href="/build/pipelines" class="px-2 min-h-[44px] flex items-center rounded-md hover:text-zinc-100 hover:bg-white/5">Build</a>
+      <a href="/all" class="px-2 min-h-[44px] flex items-center rounded-md hover:text-zinc-100 hover:bg-white/5">All</a>
+    </nav>
+  </div>
+</header>
+
+<script>
+  window.homeaiHeader = function () {
+    return {
+      realm: 'all',
+      boot() {
+        this.realm = (window.HomeAI && window.HomeAI.getRealm()) || 'all';
+        window.addEventListener('realm-changed', (e) => { this.realm = e.detail.realm; });
+      },
+      setRealm(next) { if (window.HomeAI && window.HomeAI.setRealm) window.HomeAI.setRealm(next); }
+    };
+  };
+</script>
+
+<main class="max-w-md mx-auto p-3 space-y-3">
+
+  <div class="flex items-baseline justify-between mb-1">
+    <h1 class="text-base font-semibold">Today · Private</h1>
+    <span class="mono text-xs text-slate-500" x-text="lastRefresh"></span>
+  </div>
+
+  <!-- Error banner -->
+  <div x-show="error" x-cloak class="glass border-red-500/30 rounded-lg p-3" aria-live="assertive">
+    <p class="text-red-300 text-sm font-medium">Couldn't load <span x-text="error.what"></span>.</p>
+    <p class="text-zinc-400 text-xs mt-1" x-text="error.detail"></p>
+    <button class="mt-2 min-h-[44px] px-3 text-amber-300 underline text-sm" @click="boot()">Retry</button>
+  </div>
+
+  <section aria-label="Key indicators" class="grid grid-cols-2 gap-2">
+
+    <div class="glass rounded-lg p-3 sk-tile flex flex-col justify-between" :aria-busy="loading">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Family cash</div>
+      <template x-if="loading"><div class="skel h-8 w-32 mt-2"></div></template>
+      <template x-if="!loading">
+        <div class="mt-1">
+          <div class="text-2xl mono font-semibold" :class="kpi.cash_on_hand >= 0 ? 'pos' : 'neg'">
+            <span x-text="fmtMoney(kpi.cash_on_hand)"></span>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">family realm</div>
+        </div>
+      </template>
+    </div>
+
+    <a href="/private/actions" class="glass rounded-lg p-3 sk-tile flex flex-col justify-between
+       hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:outline-none transition"
+       aria-label="View private action queue">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Open actions</div>
+      <template x-if="loading"><div class="skel h-8 w-20 mt-2"></div></template>
+      <template x-if="!loading">
+        <div class="mt-1">
+          <div class="text-2xl mono font-semibold">
+            <span class="tl" :class="kpi.open_actions_count > 0 ? 'tl-amber' : 'tl-green'"></span>
+            <span x-text="kpi.open_actions_count"></span>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">severity ≥ medium</div>
+        </div>
+      </template>
+    </a>
+
+    <a href="/private/docs" class="glass rounded-lg p-3 sk-tile flex flex-col justify-between
+       hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:outline-none transition"
+       aria-label="View private documents">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Docs expiring 60d</div>
+      <template x-if="loading"><div class="skel h-8 w-16 mt-2"></div></template>
+      <template x-if="!loading">
+        <div class="mt-1">
+          <div class="text-2xl mono font-semibold">
+            <span class="tl" :class="kpi.docs_expiring_60d > 0 ? 'tl-amber' : 'tl-green'"></span>
+            <span x-text="kpi.docs_expiring_60d || 0"></span>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">passports, MOT, ins.</div>
+        </div>
+      </template>
+    </a>
+
+    <div class="glass rounded-lg p-3 sk-tile flex flex-col justify-between" :aria-busy="loading">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Calendar · 7d</div>
+      <template x-if="loading"><div class="skel h-8 w-16 mt-2"></div></template>
+      <template x-if="!loading">
+        <div class="mt-1">
+          <div class="text-2xl mono font-semibold">
+            <span x-text="kpi.calendar_7d || 0"></span>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">events ahead</div>
+        </div>
+      </template>
+    </div>
+  </section>
+
+  <!-- Action preview -->
+  <section aria-label="Action queue">
+    <div class="flex items-center justify-between mb-1 px-1">
+      <h2 class="text-xs uppercase tracking-wider text-slate-500">Action queue</h2>
+      <a href="/private/actions" class="text-xs text-emerald-300 hover:text-emerald-200 min-h-[44px] px-2 flex items-center"
+         aria-label="See all private actions">See all →</a>
+    </div>
+
+    <template x-if="loadingActions">
+      <div class="space-y-2">
+        <div class="glass rounded-lg p-3 sk-row skel"></div>
+        <div class="glass rounded-lg p-3 sk-row skel"></div>
+      </div>
+    </template>
+
+    <template x-if="!loadingActions && actions.length === 0">
+      <div class="glass rounded-lg p-4 text-center text-emerald-300 border-emerald-500/20">
+        <div class="text-2xl mb-1">✓</div>
+        <div class="text-sm">No private actions outstanding.</div>
+      </div>
+    </template>
+
+    <template x-if="!loadingActions && actions.length > 0">
+      <ul class="space-y-1.5" role="list">
+        <template x-for="item in actions.slice(0, 5)" :key="item.ref">
+          <li class="glass rounded-lg p-3 flex items-start gap-2 sk-row">
+            <span class="tl mt-2 shrink-0"
+                  :class="{
+                    'tl-red': item.severity === 'critical',
+                    'tl-amber': item.severity === 'high',
+                    'tl-green': item.severity === 'medium'
+                  }"
+                  :aria-label="`Severity ${item.severity}`"></span>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm text-slate-200 truncate" x-text="item.title"></div>
+              <div class="text-xs text-slate-500 mt-0.5">
+                <span x-text="item.kind"></span> · <span x-text="item.age_days + 'd'"></span>
+              </div>
+            </div>
+            <span class="mono text-xs text-slate-600" x-text="'#' + item.ref"></span>
+          </li>
+        </template>
+      </ul>
+    </template>
+  </section>
+
+  <footer class="mt-6 text-center text-xs text-slate-600 mono">
+    <span x-text="kpi.last_data_at ? 'data: ' + fmtTime(kpi.last_data_at) : ''"></span>
+  </footer>
+</main>
+
+<script>
+  window.privateToday = () => ({
+    loading: true,
+    loadingActions: true,
+    error: null,
+    kpi: {},
+    actions: [],
+    lastRefresh: '',
+
+    fmtMoney(v) {
+      if (v == null) return '£—';
+      const sign = v < 0 ? '-' : '';
+      return sign + '£' + Math.abs(v).toLocaleString('en-GB', { maximumFractionDigits: 0 });
+    },
+    fmtTime(iso) {
+      try { return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); }
+      catch (_) { return ''; }
+    },
+
+    async boot() {
+      // Default to 'all' realm so private data is visible by default on this page
+      if (window.HomeAI && window.HomeAI.getRealm() === 'work') {
+        // The user is in Work mode but viewing the Private page — re-fetch with all
+        // so they see something. Don't auto-toggle their setting.
+      }
+      if (window.HomeAI && window.HomeAI.registerRealmHandshake) {
+        window.HomeAI.registerRealmHandshake(async () => { await this.loadAll(); });
+      }
+      await this.loadAll();
+    },
+
+    async loadAll() {
+      this.loading = true;
+      this.loadingActions = true;
+      this.error = null;
+      try {
+        await Promise.all([this.loadKpi(), this.loadActions()]);
+        this.lastRefresh = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      } catch (e) {
+        this.error = { what: 'Private today data', detail: e.message || String(e) };
+      } finally {
+        this.loading = false;
+        this.loadingActions = false;
+      }
+    },
+
+    async loadKpi() {
+      const r = await fetch('/api/finance/slug/today_kpis_private');
+      if (!r.ok) throw new Error(`KPI fetch ${r.status}`);
+      const data = await r.json();
+      this.kpi = (data.rows && data.rows[0]) || {};
+    },
+
+    async loadActions() {
+      const r = await fetch('/api/finance/slug/action_queue');
+      if (!r.ok) throw new Error(`Action queue ${r.status}`);
+      const data = await r.json();
+      // Filter to family + shared realms for the Private page
+      const all = data.rows || [];
+      this.actions = all.filter(x => x.realm === 'family' || x.realm === 'shared');
+    }
+  });
+</script>
+</body>
+</html>

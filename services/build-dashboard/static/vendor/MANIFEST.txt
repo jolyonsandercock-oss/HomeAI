@@ -1,0 +1,16 @@
+# Pinned vendor assets for build-dashboard
+# Refreshed: 2026-05-15
+# Refresh procedure: bash /home_ai/scripts/u84-refresh-vendor.sh
+#
+# Rationale (Gemini critique G6, U84 §25):
+# Live CDN refs break the PWA offline path. Service worker can cache the local
+# HTML shell but un-cached CDN scripts fail when Jo is in a cellar or property
+# with spotty cell. All core dependencies vendored locally, version-pinned,
+# and referenced from /static/vendor/*.
+
+# filename                      sha256                                                                  source
+tailwind-3.4.min.js             b709560188e05f84e063478c97d63c1bcc5929091b4633a369211cbe04a270a4        https://cdn.tailwindcss.com/3.4.0
+alpine-3.14.min.js              358d9afbb1ab5befa2f48061a30776e5bcd7707f410a606ba985f98bc3b1c034        https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js
+tabulator-6.2.5.min.js          b7d4e3dbe26b3a448ee667cd7cb6ea6fcebf03a688ca0504efed67cc94a9bea6        https://unpkg.com/tabulator-tables@6.2.5/dist/js/tabulator.min.js
+tabulator-6.2.5.min.css         0d252122b7963cbc26d776c1ed202d0c8c28ab851728ebe8e6b090d40e091da1        https://unpkg.com/tabulator-tables@6.2.5/dist/css/tabulator_midnight.min.css
+d3-7.9.min.js                   f2094bbf6141b359722c4fe454eb6c4b0f0e42cc10cc7af921fc158fceb86539        https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js

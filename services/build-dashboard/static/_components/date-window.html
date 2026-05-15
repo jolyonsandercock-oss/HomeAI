@@ -1,0 +1,51 @@
+{# U84 unified date-window picker — drop-in partial.
+   Pass `pageKey` (defaults to location.pathname) + optional `defaultPreset`. #}
+<div class="dw-wrap" x-data="dateWindow({ pageKey: '{{ page_key|default('') }}', defaultPreset: '{{ default_preset|default('7d') }}' })" x-init="init()">
+
+  <div class="flex flex-wrap items-center gap-1 bg-white/5 rounded-lg p-1"
+       role="group" aria-label="Date window">
+
+    <template x-for="p in presets" :key="p.id">
+      <button type="button"
+              :aria-pressed="isActive(p.id)"
+              class="px-3 min-h-[44px] min-w-[44px] rounded-md text-sm transition
+                     focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none"
+              :class="isActive(p.id)
+                       ? 'bg-amber-500/20 text-amber-200'
+                       : 'text-zinc-400 hover:text-zinc-200'"
+              @click="setPreset(p.id)"
+              x-text="p.label"></button>
+    </template>
+
+    <button type="button"
+            :aria-pressed="preset === 'custom'"
+            :aria-expanded="showCustom"
+            class="px-3 min-h-[44px] min-w-[44px] rounded-md text-sm transition
+                   focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none"
+            :class="preset === 'custom'
+                     ? 'bg-amber-500/20 text-amber-200'
+                     : 'text-zinc-400 hover:text-zinc-200'"
+            @click="toggleCustom()"
+            aria-label="Custom date range">⟨⟩</button>
+  </div>
+
+  <div x-show="showCustom" x-transition
+       class="mt-2 flex flex-wrap items-end gap-2 bg-white/5 rounded-lg p-3">
+    <label class="flex flex-col text-xs text-zinc-400">
+      From
+      <input type="date" x-model="customFrom"
+             class="mt-1 bg-black/40 border border-white/10 rounded-md px-2 min-h-[44px] text-zinc-100
+                    focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none">
+    </label>
+    <label class="flex flex-col text-xs text-zinc-400">
+      To
+      <input type="date" x-model="customTo"
+             class="mt-1 bg-black/40 border border-white/10 rounded-md px-2 min-h-[44px] text-zinc-100
+                    focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none">
+    </label>
+    <button type="button"
+            class="min-h-[44px] px-4 rounded-md bg-amber-500/30 text-amber-100 hover:bg-amber-500/40
+                   focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none"
+            @click="applyCustom()">Apply</button>
+  </div>
+</div>
