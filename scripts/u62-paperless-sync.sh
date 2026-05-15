@@ -109,3 +109,6 @@ async def main():
 
 asyncio.run(main())
 PYEOF
+
+# U78: route freshly-ingested docs into their typed tables (clover/utility/…).
+python3 /home_ai/scripts/u78-route.py || echo "u78-route failed; non-fatal"
