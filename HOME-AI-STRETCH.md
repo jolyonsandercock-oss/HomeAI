@@ -1321,3 +1321,46 @@ Not in SPEC.md yet — promote to a numbered section if/when we ship it.
 
 ---
 
+
+### 3.36 Deferred functionality from 2026-05-15 planning (U79-U83 secure-and-fix arc)
+
+Captured here so the U79-U83 sprint plans can stay strictly "no new functionality"; promote back into a numbered SPEC section when the upstream blocker clears.
+
+**Clover bank-settlement reconciliation** *(blocked on bank-data import)*
+The original U79 idea: `v_clover_bank_recon` joining `v_clover_daily` to
+`bank_transactions` on Clover/Fiserv descriptor + amount within +/- 5 days, so daily
+batch totals reconcile against bank credits. **Blocker:** ARTL bank account #15
+("ATR Trading current #2 / Dojo settlement") has zero imported transactions on
+record; account #3 has only 81 transactions over 6 years. NatWest CSV import
+needs to run before this view is anything but empty. Queued in U83's in-person
+packet (Track T2). Once bank data lands, this becomes a ~30 min view.
+
+**Booking-vs-card accommodation reconciliation** *(blocked on data shape)*
+Match individual accommodation bookings to the card charges that paid for them.
+Required data we don't have:
+- `payment_channel` column on `caterbook_bookings` (Direct vs Booking.com vs
+  Expedia vs Airbnb vs Cash) — distinguishes which bookings flow through Clover
+  vs which OTA collects directly and remits by bank transfer.
+- Per-transaction Clover data (booking ref / customer name) — currently only
+  daily settlement batches available from the monthly PDF statement.
+Promote once both data sources exist.
+
+**Per-transaction Clover ingest** *(blocked on Clover API access)*
+Sibling `clover_transactions` table mirroring `dojo_transactions` shape (one row
+per card swipe with `transaction_id`, `cardholder_name`, `auth_code`, `mid`,
+etc.). Daily Clover dashboard download or API access required first. Doesn't
+disturb `clover_batches` — coexists.
+
+**U47c — 52-week suggester + reviews scraper + access split** *(carried from
+2026-05-13)*
+- Weekly Sonnet suggester emailing from 52w-old emails to surface seasonal-
+  recurring tasks.
+- TripAdvisor (info@) + Google Reviews (admin@) real scrapers (replacing the
+  manual `u39-insert-review.sh` stub).
+- Caddy basic-auth `/staff/` vs `/family/` interim split before full Authelia
+  forward_auth.
+
+**Tanda timesheet sync** *(deferred from U47b follow-on)*
+`/api/v2/timesheets` not currently pulled — `workforce_timesheets` table empty,
+so forecast-vs-actual labour variance is blank. ~30-min wire-up to enable.
+
