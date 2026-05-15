@@ -15,7 +15,7 @@ docker exec -i homeai-bot-responder python3 <<'PYEOF'
 import asyncio, asyncpg, json, os, sys, time, urllib.request, urllib.error
 
 OLLAMA_URL = "http://homeai-ollama:11434/api/embeddings"
-MODEL      = "qwen2.5:7b"
+MODEL      = "nomic-embed-text"
 BATCH_SIZE = 25
 MAX_CHARS  = 6000
 
@@ -67,8 +67,10 @@ async def main():
         text  = f"{title}\n\n{body}".strip()[:MAX_CHARS]
         if not text:
             continue
+        # nomic-embed-text v1.5: document-side prefix for sharp retrieval.
+        prefixed = "search_document: " + text
         try:
-            vec = embed(text)
+            vec = embed(prefixed)
         except Exception as e:
             print(f"[embed] ERR {row['source_kind']}:{row['source_id']} {e}", file=sys.stderr)
             n_err += 1

@@ -139,7 +139,9 @@ services:
   ollama:
     image: ollama/ollama:0.22.1
     container_name: homeai-ollama
-    networks: [ai-internal]
+    # ai-egress added in U66 so `ollama pull` can reach registry.ollama.ai.
+    # Outbound model fetches only; existing service-to-ollama DNS unchanged.
+    networks: [ai-internal, ai-egress]
     volumes: [ollama_data:/root/.ollama]
     environment:
       OLLAMA_KEEP_ALIVE: "-1"

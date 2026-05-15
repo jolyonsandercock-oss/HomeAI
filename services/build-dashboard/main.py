@@ -1623,13 +1623,17 @@ async def research_page():
     return FileResponse(str(STATIC / "research.html"))
 
 
-async def _ollama_embed(text: str, model: str = "qwen2.5:7b") -> list[float]:
-    """Call homeai-ollama for an embedding. Returns [] on failure."""
+async def _ollama_embed(text: str, model: str = "nomic-embed-text",
+                          mode: str = "query") -> list[float]:
+    """Call homeai-ollama for an embedding. `mode` is 'query' or 'document' —
+    nomic-embed-text v1.5 wants task-specific prefixes for sharp retrieval.
+    Returns [] on failure."""
+    prefix = "search_query: " if mode == "query" else "search_document: "
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             r = await client.post(
                 "http://homeai-ollama:11434/api/embeddings",
-                json={"model": model, "prompt": text[:6000]})
+                json={"model": model, "prompt": prefix + text[:6000]})
         if r.status_code != 200:
             return []
         return r.json().get("embedding") or []
@@ -1669,10 +1673,10 @@ async def api_research_ask(body: dict = Body(...)):
         return JSONResponse({"error": "missing 'question'"}, status_code=400)
     sources = body.get("sources") or ["email", "invoice_line", "document"]
     top_k   = int(body.get("top_k") or 12)
-    # Default 70/30 FTS/cosine — keeps current FTS-led behaviour while
-    # adding a small dense-recall boost. Lower the weight when a better
-    # embedding model is wired (see U65 T3 commit note).
-    fts_weight = float(body.get("fts_weight") or 0.7)
+    # 50/50 FTS/cosine — nomic-embed-text gives much sharper retrieval than
+    # qwen-as-embedding; this default lets the dense pass pull its weight
+    # while FTS keeps proper-noun matches honest.
+    fts_weight = float(body.get("fts_weight") or 0.5)
     fts_weight = max(0.0, min(1.0, fts_weight))
 
     anth = await _vault_read("anthropic")
@@ -1716,7 +1720,7 @@ async def api_research_ask(body: dict = Body(...)):
         vec_rows = await db_all("""
             SELECT source_kind AS source_table, source_id, embedding
               FROM search_vectors
-             WHERE model = 'qwen2.5:7b'
+             WHERE model = 'nomic-embed-text'
                AND source_kind = ANY($1::text[])
         """, sources)
 
@@ -3898,6 +3902,50 @@ async def _run_slug(slug_row: dict, bound: dict) -> dict:
 @app.get("/finance")
 async def finance_page():
     return FileResponse(str(STATIC / "finance.html"))
+
+
+@app.get("/api/recipes/sales-vs-consumption")
+async def api_recipes_sales_vs_consumption(weeks: int = 8, family: str = ""):
+    """U66 T3: sales→consumption from recipe expansion vs invoice purchases.
+    Returns weekly rows per product_canonical, oldest→newest within window."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SELECT set_config('app.current_entity','all',false)")
+        params = [weeks]
+        where  = ["week >= current_date - ($1::int * 7)::int"]
+        if family.strip():
+            where.append("family = $2")
+            params.append(family.strip())
+        rows = await c.fetch(f"""
+          SELECT week, product_canonical_id, product_name, family, base_unit,
+                 implied_consumption::numeric AS used,
+                 purchased::numeric           AS bought,
+                 gap::numeric                 AS gap,
+                 gap_pct
+            FROM v_consumption_vs_purchase
+           WHERE {' AND '.join(where)}
+           ORDER BY week ASC, product_name
+        """, *params)
+    return {"rows": [_isoify(dict(r)) for r in rows], "weeks": weeks, "family_filter": family or None}
+
+
+@app.get("/api/recipes/list")
+async def api_recipes_list():
+    """Inventory of recipes + components for the UI."""
+    rows = await db_all("""
+        SELECT r.id, r.plu_number, r.name, r.menu_section, r.portion_unit,
+               json_agg(json_build_object(
+                  'product_canonical_id', rc.product_canonical_id,
+                  'product_name', pc.name,
+                  'quantity_per_portion', rc.quantity_per_portion,
+                  'unit', rc.base_unit
+               ) ORDER BY rc.id) AS components
+          FROM recipes r
+          JOIN recipe_components rc ON rc.recipe_id = r.id
+          JOIN product_canonical pc ON pc.id = rc.product_canonical_id
+         GROUP BY r.id ORDER BY r.menu_section, r.name
+    """)
+    return {"rows": [_isoify(dict(r)) for r in rows]}
 
 
 @app.get("/api/finance/kpis")
