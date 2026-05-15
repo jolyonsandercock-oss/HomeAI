@@ -497,7 +497,11 @@ app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 # Realm middleware: set _current_realm contextvar from X-Realm header when
 # REALM_ENFORCE=1, otherwise pin to 'owner'. Health and static paths are
 # exempt so liveness checks don't 401 when REALM_ENFORCE=1 without a header.
-_REALM_EXEMPT_PREFIXES = ("/api/healthz", "/static")
+_REALM_EXEMPT_PREFIXES = (
+    "/api/healthz",
+    "/static",
+    "/api/documents/ingest-from-paperless",  # U70 — webhook from Paperless, auth'd by shared secret
+)
 
 @app.middleware("http")
 async def realm_middleware(request, call_next):
@@ -1950,6 +1954,126 @@ async def api_documents_expiry_due():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# U67 — reconciliation page (exceptions + drill-in ask + new rule)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/reconciliation")
+async def reconciliation_page():
+    return FileResponse(str(STATIC / "reconciliation.html"))
+
+
+@app.get("/api/reconciliation/exceptions")
+async def api_reconciliation_exceptions():
+    """Currently-open reconciliation exceptions from:
+      * reconciliation_flags  (free-form flags incl. card_dojo_vs_touchoffice)
+      * till_reconciliation   (cashing-up variance — status='flagged')
+      * v_card_reconciliation (latest mismatch days, summary view)
+      * bank_transaction_rules (the active rule registry)
+    """
+    flags = await db_all("""
+        SELECT id, flag_type, description, status, entity_id, realm,
+               bank_transaction_id, created_at
+          FROM reconciliation_flags
+         WHERE status = 'open'
+         ORDER BY created_at DESC
+         LIMIT 100
+    """)
+    till = await db_all("""
+        SELECT id, recon_date, session, z_reading, card_total,
+               cash_counted, expected_cash, variance, variance_pct, status
+          FROM till_reconciliation
+         WHERE status = 'flagged'
+         ORDER BY recon_date DESC
+         LIMIT 50
+    """)
+    card_recon = await db_all("""
+        SELECT date, site, touchoffice_card, dojo_gross, delta, status
+          FROM v_card_reconciliation
+         WHERE status <> 'ok'
+         ORDER BY date DESC
+         LIMIT 30
+    """)
+    rules = await db_all("""
+        SELECT id, priority, name, description_re, type_in, amount_op,
+               amount_value, category, confidence, notes, realm
+          FROM bank_transaction_rules
+         ORDER BY priority, id
+    """)
+    return {
+        "flags":      [_isoify(dict(r)) for r in flags],
+        "till":       [_isoify(dict(r)) for r in till],
+        "card_recon": [_isoify(dict(r)) for r in card_recon],
+        "rules":      [_isoify(dict(r)) for r in rules],
+    }
+
+
+@app.post("/api/reconciliation/flags/{flag_id}/resolve")
+async def api_reconciliation_flag_resolve(flag_id: int, payload: dict = Body(...)):
+    note = (payload.get("note") or "").strip()[:1000]
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await c.execute("SET LOCAL app.current_entity = 'all'")
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+            await c.execute("""
+                UPDATE reconciliation_flags
+                   SET status = 'resolved',
+                       description = description ||
+                         E'\n[RESOLVED ' || to_char(NOW(), 'YYYY-MM-DD') ||
+                         ' jo] ' || $2
+                 WHERE id = $1 AND status = 'open'
+            """, flag_id, note or "(no note)")
+    return {"ok": True, "id": flag_id}
+
+
+@app.post("/api/reconciliation/rules")
+async def api_reconciliation_rule_create(payload: dict = Body(...)):
+    """Insert a new bank_transaction_rules row. Used from /reconciliation UI
+    when Jo wants to teach the system how to handle a new pattern."""
+    name = (payload.get("name") or "").strip()
+    category = (payload.get("category") or "").strip()
+    description_re = payload.get("description_re") or None
+    type_in_raw = payload.get("type_in")
+    if isinstance(type_in_raw, str):
+        type_in = [t.strip() for t in type_in_raw.split(",") if t.strip()]
+    elif isinstance(type_in_raw, list):
+        type_in = type_in_raw
+    else:
+        type_in = None
+    amount_op = payload.get("amount_op") or None
+    amount_value = payload.get("amount_value")
+    priority = int(payload.get("priority") or 50)
+    confidence = float(payload.get("confidence") or 0.9)
+    notes = (payload.get("notes") or "").strip() or None
+    realm = (payload.get("realm") or _current_realm.get() or "owner").strip()
+
+    if not name or not category:
+        return JSONResponse({"error": "name and category required"}, status_code=400)
+    valid = {"card_settlement","cash_deposit","customer_payment","vendor_payment",
+             "payroll","tax_payment","bank_fee","interest_charged","interest_credit",
+             "inter_entity_transfer","direct_debit","loan_repayment",
+             "rent_received","rent_paid","transfer_uncategorised","refund","other"}
+    if category not in valid:
+        return JSONResponse({"error": f"category must be one of: {sorted(valid)}"},
+                            status_code=400)
+
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await c.execute("SET LOCAL app.current_entity = 'all'")
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+            rule_id = await c.fetchval("""
+                INSERT INTO bank_transaction_rules
+                    (priority, name, description_re, type_in, amount_op,
+                     amount_value, category, confidence, notes, realm)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                RETURNING id
+            """, priority, name, description_re, type_in, amount_op,
+                 amount_value, category, confidence, notes, realm)
+    return {"ok": True, "id": rule_id}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # U66 — whole-system bot ask (used by Telegram free-text + future channels)
 # ─────────────────────────────────────────────────────────────────────────────
 # Unlike /api/finance/ask (finance-slug subset), this loads EVERY approved
@@ -1997,10 +2121,16 @@ WORKFORCE
   v_workforce_shifts_costed (shift_id, user_external_id, shift_date, hours_worked, shift_cost)
 
 SALES
-  touchoffice_fixed_totals (entity_id, site, report_date, totaliser_id, value_pence)
-  touchoffice_department_sales (site, report_date, department_name, total_pence)
-  touchoffice_plu_sales (site, report_date, plu_id, plu_name, qty, total_pence)
-  dojo_transactions (transaction_date, transaction_time, site, transaction_amount, payment_method)
+  touchoffice_fixed_totals (site, report_date, totaliser_id, label, quantity, value)
+    -- site values: 'malthouse' (pub) | 'sandwich' (cafe)
+    -- totaliser_id: 1=NET sales, 2=GROSS Sales, 4=CASH in Drawer,
+    -- 6=CREDIT in Drawer, 12=TOTAL in Drawer, 19=Covers
+    -- `value` is GBP numeric (NOT pence) for money rows; quantity is count
+  touchoffice_department_sales (site, report_date, department, quantity, value)
+  touchoffice_plu_sales (site, report_date, plu_id, plu_name, quantity, value)
+  dojo_transactions (transaction_date, transaction_time, site, transaction_amount, payment_method, transaction_type, transaction_outcome)
+    -- site values for dojo: 'pub' | 'cafe' (NOT malthouse/sandwich)
+    -- Use transaction_amount > 0 AND transaction_outcome='Approved' for real takings.
   v_dojo_daily (date, site, n_txns, gross_sales)
 
 ACCOMMODATION
@@ -2212,10 +2342,10 @@ async def api_bot_ask(body: dict = Body(...)):
     instruction_id = None
 
     async with httpx.AsyncClient(timeout=90.0) as client:
-        for _turn in range(3):
+        for _turn in range(6):
             payload = {
                 "model": "claude-sonnet-4-6",
-                "max_tokens": 1200,
+                "max_tokens": 1600,
                 "system": system,
                 "tools": tools,
                 "messages": messages,
@@ -2448,12 +2578,13 @@ async def _link_to_entity(conn, ocr_text: str, title: str) -> tuple[str | None, 
         if prop:
             return ("properties", prop["id"], "auto:postcode", prop["entity_id"])
 
-    # 3. Child name → children.name (longer names only)
+    # 3. Child name → children.name (longer names only). children has no
+    # entity_id column so the entity column is left NULL for child matches.
     kids = await conn.fetch(
-        "SELECT id, name, entity_id FROM children WHERE length(name) > 4")
+        "SELECT id, name FROM children WHERE length(name) > 4")
     for k in kids:
         if k["name"] and k["name"].lower() in haystack.lower():
-            return ("children", k["id"], "auto:name", k["entity_id"])
+            return ("children", k["id"], "auto:name", None)
 
     return (None, None, None, None)
 
@@ -2461,6 +2592,122 @@ async def _link_to_entity(conn, ocr_text: str, title: str) -> tuple[str | None, 
 @app.get("/documents")
 async def documents_page():
     return FileResponse(str(STATIC / "documents.html"))
+
+
+@app.post("/api/documents/ingest-from-paperless")
+async def api_documents_ingest_from_paperless(payload: dict = Body(...)):
+    """U70 T1: Paperless post-consume webhook.
+
+    Expected payload (from scripts/paperless-post-consume.sh):
+      {
+        "paperless_id":    int,         # Paperless document ID
+        "title":           str,
+        "original_path":   str,         # path inside paperless container
+        "mime_type":       str,
+        "sha256":          str,         # of the original file
+        "ocr_text":        str,         # Paperless-extracted (Tesseract by default)
+        "tags":            [str],
+        "correspondent":   str | null,
+        "document_type":   str | null,  # 'invoice'|'receipt'|'bill'|'letter'|...
+        "secret":          str,         # shared secret from secret/paperless/webhook
+      }
+    """
+    # Shared-secret check
+    expected = await _vault_read("paperless/webhook")
+    expected_secret = (expected or {}).get("secret") or os.environ.get("PAPERLESS_WEBHOOK_SECRET")
+    if not expected_secret:
+        return JSONResponse({"error": "webhook secret not configured"}, status_code=503)
+    if payload.get("secret") != expected_secret:
+        return JSONResponse({"error": "unauthorised"}, status_code=401)
+
+    paperless_id = payload.get("paperless_id")
+    if not paperless_id:
+        return JSONResponse({"error": "paperless_id required"}, status_code=400)
+
+    title       = (payload.get("title") or f"paperless-{paperless_id}").strip()[:200]
+    ocr_text    = payload.get("ocr_text") or ""
+    mime        = payload.get("mime_type") or "application/octet-stream"
+    # Empty sha would collide on the partial unique index — keep NULL.
+    sha         = (payload.get("sha256") or "").strip() or None
+    doc_type    = (payload.get("document_type") or "").lower()
+    category    = doc_type if doc_type else "paperless"
+    correspondent = (payload.get("correspondent") or "").strip()
+
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await c.execute("SET LOCAL app.current_entity = 'all'")
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+
+            # Idempotent on paperless_id (preferred) or sha256 (fallback)
+            existing = await c.fetchval(
+                "SELECT id FROM documents WHERE paperless_id = $1", paperless_id)
+            if not existing and sha:
+                existing = await c.fetchval(
+                    "SELECT id FROM documents WHERE sha256 = $1", sha)
+            if existing:
+                return {"ok": True, "id": existing, "duplicate": True}
+
+            linked_table, linked_id, linked_by, ent_id = await _link_to_entity(
+                c, ocr_text, f"{title} {correspondent}")
+            doc_id = await c.fetchval("""
+                INSERT INTO documents
+                    (entity_id, category, title, status,
+                     paperless_id, file_path, mime_type, sha256, ocr_text,
+                     linked_table, linked_id, linked_by, uploaded_by, realm)
+                VALUES ($1, $2, $3, 'active',
+                        $4, $5, $6, $7, $8,
+                        $9, $10, $11, 'paperless',
+                        COALESCE($12, 'family'))
+                RETURNING id
+            """, ent_id, category, title,
+                 paperless_id, payload.get("original_path"), mime, sha, ocr_text,
+                 linked_table, linked_id, linked_by, None)
+
+            # U70 T2: invoice-shaped Paperless docs flow into vendor_invoice_inbox
+            # so the existing Haiku line-extractor picks them up. NOT NULLs:
+            #   idempotency_key, source_email_id, account, vendor_domain, subject,
+            #   received_at, entity_id (default 1), status (default 'new').
+            invoice_id = None
+            if doc_type in ("invoice", "receipt", "bill"):
+                cols = await _columns_of(c, 'vendor_invoice_inbox')
+                if 'paperless_doc_id' in cols:
+                    idem      = f"paperless:{paperless_id}"
+                    source_id = f"paperless:{paperless_id}"
+                    invoice_id = await c.fetchval("""
+                        INSERT INTO vendor_invoice_inbox
+                            (idempotency_key, source_email_id, account,
+                             vendor_domain, vendor_name, subject,
+                             received_at, body_text, has_pdf,
+                             pipeline_version, paperless_doc_id, realm)
+                        VALUES ($1, $2, 'paperless',
+                                $3, $4, $5,
+                                now(), $6, true,
+                                'paperless:u70', $7, 'work')
+                        ON CONFLICT (idempotency_key) DO NOTHING
+                        RETURNING id
+                    """, idem, source_id,
+                         correspondent or 'paperless',
+                         correspondent or 'Paperless ingest',
+                         title,
+                         ocr_text[:5000],
+                         doc_id)
+
+    return {
+        "ok": True, "id": doc_id, "duplicate": False,
+        "vendor_invoice_inbox_id": invoice_id,
+        "linked_table": linked_table, "linked_id": linked_id, "linked_by": linked_by,
+        "ocr_chars": len(ocr_text),
+    }
+
+
+async def _columns_of(conn, table: str) -> set[str]:
+    """Tiny helper: column-name set for a public.<table>. Cached at first call."""
+    rows = await conn.fetch("""
+        SELECT column_name FROM information_schema.columns
+         WHERE table_schema='public' AND table_name=$1
+    """, table)
+    return {r["column_name"] for r in rows}
 
 
 @app.post("/api/documents/upload")
@@ -2981,20 +3228,37 @@ async def api_kpi_sparklines(days: int = 14):
 
 @app.get("/api/vehicles")
 async def api_vehicles():
-    """U51 T5 — vehicles + 30-day expiry alerts."""
+    """U51 T5 — vehicles + 30-day expiry alerts. U66 — also surfaces docs
+    linked to each vehicle (auto-linked at upload by plate regex, or manual)."""
     p = await pool()
     async with p.acquire() as c:
         await c.execute("SET app.current_entity = 'all'")
+        await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
         rows = await c.fetch("""
-          SELECT id, registration, make_model, year_built, v5c_doc_ref,
-                 mot_due, insurance_renewal, road_tax_due,
-                 service_due_date, service_due_miles, current_miles,
-                 entity_id, notes
-            FROM vehicles ORDER BY registration
+          SELECT v.id, v.registration, v.make_model, v.year_built, v.v5c_doc_ref,
+                 v.mot_due, v.insurance_renewal, v.road_tax_due,
+                 v.service_due_date, v.service_due_miles, v.current_miles,
+                 v.entity_id, v.notes, v.updated_at,
+                 COALESCE(d.n, 0) AS doc_count
+            FROM vehicles v
+            LEFT JOIN (
+                SELECT linked_id, COUNT(*) AS n
+                  FROM documents
+                 WHERE linked_table = 'vehicles'
+                 GROUP BY linked_id
+            ) d ON d.linked_id = v.id
+            ORDER BY v.registration
         """)
         alerts = await c.fetch("""
           SELECT vehicle_id, registration, make_model, kind, due, days_until
             FROM v_vehicle_alerts
+        """)
+        docs = await c.fetch("""
+          SELECT id, title, category, linked_id, linked_by, created_at,
+                 mime_type, LENGTH(coalesce(ocr_text, '')) AS ocr_chars
+            FROM documents
+           WHERE linked_table = 'vehicles'
+           ORDER BY linked_id, created_at DESC
         """)
 
     def _row(r):
@@ -3004,7 +3268,9 @@ async def api_vehicles():
             else: out[k] = v
         return out
 
-    return {"rows": [_row(r) for r in rows], "alerts": [_row(a) for a in alerts]}
+    return {"rows":   [_row(r) for r in rows],
+            "alerts": [_row(a) for a in alerts],
+            "docs":   [_row(d) for d in docs]}
 
 
 # ─── U54 D — Manager notes + till-reconciliation resolve ─────────

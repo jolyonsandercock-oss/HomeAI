@@ -485,6 +485,9 @@ services:
       - paperless_media:/usr/src/paperless/media
       - ./storage/paperless/consume:/usr/src/paperless/consume
       - ./storage/paperless/export:/usr/src/paperless/export
+      # U70 T1 — POST_CONSUME_SCRIPT runs after each ingest and webhooks
+      # build-dashboard so docs land in our documents + vendor_invoice_inbox.
+      - ./scripts/paperless-post-consume.sh:/usr/src/paperless/scripts/post-consume.sh:ro
     environment:
       PAPERLESS_DBHOST: homeai-postgres
       PAPERLESS_DBPORT: "5432"
@@ -501,6 +504,11 @@ services:
       PAPERLESS_ADMIN_PASSWORD: "${PAPERLESS_ADMIN_PASSWORD}"
       USERMAP_UID: "1000"
       USERMAP_GID: "1000"
+      # U70 T1 — post-consume hook
+      PAPERLESS_POST_CONSUME_SCRIPT: "/usr/src/paperless/scripts/post-consume.sh"
+      PAPERLESS_WEBHOOK_URL:    "http://homeai-build-dashboard:8090/api/documents/ingest-from-paperless"
+      PAPERLESS_WEBHOOK_SECRET: "${PAPERLESS_WEBHOOK_SECRET}"
+      PAPERLESS_API_TOKEN:      "${PAPERLESS_API_TOKEN:-}"
     restart: unless-stopped
 
 volumes:
