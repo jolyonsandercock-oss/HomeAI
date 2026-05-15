@@ -1,0 +1,95 @@
+{
+  "_comment": [
+    "RECON-NIGHTLY-001 — wraps u68-recon-orchestrator.sh (L1+L2+L3) in n8n.",
+    "Per SPEC §4b.8 Phase 7/8/9: n8n is the canonical orchestrator; the",
+    "host-cron equivalent (crontab '30 4 * * * /home_ai/scripts/u68-recon-",
+    "orchestrator.sh 30') is grandfathered per §4b.9 and should be removed",
+    "from crontab once this workflow is imported and verified.",
+    "",
+    "Import:",
+    "  docker exec -i homeai-n8n n8n import:workflow --input=- \\",
+    "    < /home_ai/n8n-workflows/RECON-NIGHTLY-001.json",
+    "Then activate via the n8n UI or:",
+    "  docker exec homeai-n8n n8n update:workflow --id=<NEW_ID> --active=true",
+    "",
+    "Verify: tomorrow morning, mart.daily_totals + mart.exceptions show",
+    "fresh rows with computed_at > 04:30 today; one Telegram pulse arrived",
+    "between 04:30 and 04:45."
+  ],
+  "name": "RECON-NIGHTLY-001",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "cronExpression", "expression": "30 4 * * *"}]
+        }
+      },
+      "id": "trig-1",
+      "name": "Cron 04:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "bash /home_ai/scripts/u68-recon-orchestrator.sh 30"
+      },
+      "id": "exec-1",
+      "name": "Run orchestrator",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict"},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.exitCode }}",
+              "rightValue": 0,
+              "operator": {"type": "number", "operation": "notEquals"}
+            }
+          ]
+        }
+      },
+      "id": "if-1",
+      "name": "Orchestrator failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "command": "bash /home_ai/.claude/scripts/notify-telegram.sh '<b>RECON-NIGHTLY-001 FAILED</b>%0AOrchestrator exit code: {{ $json.exitCode }}%0Astderr tail: <pre>{{ $json.stderr | slice(-400) }}</pre>' 'u68-recon-failure'"
+      },
+      "id": "exec-2",
+      "name": "Telegram on failure",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [940, 220]
+    }
+  ],
+  "connections": {
+    "Cron 04:30": {
+      "main": [[{"node": "Run orchestrator", "type": "main", "index": 0}]]
+    },
+    "Run orchestrator": {
+      "main": [[{"node": "Orchestrator failed?", "type": "main", "index": 0}]]
+    },
+    "Orchestrator failed?": {
+      "main": [
+        [{"node": "Telegram on failure", "type": "main", "index": 0}],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "errorWorkflow": ""
+  },
+  "tags": ["recon", "payment", "u68"]
+}
