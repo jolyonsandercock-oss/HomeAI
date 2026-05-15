@@ -2675,7 +2675,7 @@ async def _link_to_entity(conn, ocr_text: str, title: str) -> tuple[str | None, 
         pc = re.sub(r"\s+", "", pc_match.group(1).upper())
         prop = await conn.fetchrow("""
             SELECT id, entity_id FROM properties
-             WHERE upper(replace(coalesce(postcode_full, ''), ' ', '')) = $1
+             WHERE upper(replace(coalesce(postcode, ''), ' ', '')) = $1
              LIMIT 1
         """, pc)
         if prop:
