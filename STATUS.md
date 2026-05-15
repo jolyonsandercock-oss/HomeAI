@@ -1,15 +1,18 @@
 # STATUS
 
-_generated: 2026-05-15T22:47:34+01:00_
+_generated: 2026-05-15T23:05:31+01:00_
 _by: scripts/u89-regen-status.sh_
 
 ## Current branch
 
-`u73-hd-samba-paperless` at `cbed534`
+`u73-hd-samba-paperless` at `f2ec94c`
 
 ## Recent commits (last 20)
 
 ```
+f2ec94c U95: broad invoice harvester (jo + info + admin × invoice/receipt/bill + overdue)
+f76286f U94 T1 fix: HTML-entity decoding + non-overlapping window slicing
+f333ea9 STATUS regen — U94 T1 backfill in flight
 cbed534 U94 T1: hotel-email.com bookings harvester + V100 schema
 b5639d1 U94 plan: booking harvest + surface (36-mo horizon, 9 tracks)
 1fca2a7 U93 T0: corrections from boxbot bi#59 + bi#60
@@ -27,9 +30,6 @@ a1efedd U89: tidy — auto-doc generation + untracked sweep + STATUS regen + ent
 fe94f66 U79-U83 plans: secure-and-fix overnight arc (no new functionality)
 b1c2beb U80: auto-parse mortgage statements in ingest-from-paperless webhook
 03a6d01 U79: mortgage statement coverage view + Stmt coverage tab
-3bb3598 U78: forensic rebuild of mortgage_accounts from OCR data
-c70f905 U78: Clover batch ingest + account_property_map + scan auto-routing
-999c4bc U77: capital position + net worth on /finance
 ```
 
 ## Open work signals
