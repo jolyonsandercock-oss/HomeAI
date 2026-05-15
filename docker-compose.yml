@@ -500,7 +500,11 @@ services:
     volumes:
       - paperless_data:/usr/src/paperless/data
       - paperless_media:/usr/src/paperless/media
-      - ./storage/paperless/consume:/usr/src/paperless/consume
+      # U73 — consume folder is on the 6TB HD, also the Brother scanner's
+      # Samba drop point (share=scans, user=scanner). Brother writes a PDF
+      # into /mnt/shared_storage/scans/inbox → Paperless picks it up within
+      # 30s → POST_CONSUME_SCRIPT webhooks build-dashboard.
+      - /mnt/shared_storage/scans/inbox:/usr/src/paperless/consume
       - ./storage/paperless/export:/usr/src/paperless/export
       # U70 T1 — POST_CONSUME_SCRIPT runs after each ingest and webhooks
       # build-dashboard so docs land in our documents + vendor_invoice_inbox.
