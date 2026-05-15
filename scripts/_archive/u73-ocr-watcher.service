@@ -1,0 +1,22 @@
+[Unit]
+Description=Brother scanner OCR watcher (u73)
+After=network-online.target smbd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=scanner
+Group=scanner
+ExecStart=/home_ai/scripts/u73-ocr-watcher.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/mnt/shared_storage/scans/inbox /tmp/u73-ocr-locks /tmp
+
+[Install]
+WantedBy=multi-user.target

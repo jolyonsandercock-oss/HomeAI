@@ -4051,6 +4051,60 @@ async def invoices_page():
     return FileResponse(str(STATIC / "invoices.html"))
 
 
+@app.get("/invoices/needs-review")
+async def invoices_needs_review_page():
+    return FileResponse(str(STATIC / "invoices-needs-review.html"))
+
+
+@app.get("/api/invoices/needs-review")
+async def api_invoices_needs_review():
+    """U75 — slim feed of vendor_invoice_inbox rows in 'needs_review' for the
+    triage page. Returns all rows regardless of date so backlog is visible."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        rows = await c.fetch("""
+          SELECT id, vendor_name, vendor_domain, subject, received_at::date AS received_date,
+                 invoice_date, amount_seen, net_amount, vat_amount, gross_amount,
+                 extraction_method, extraction_confidence, has_pdf, attachment_count,
+                 first_attachment_path, paperless_doc_id
+            FROM vendor_invoice_inbox
+           WHERE status = 'needs_review'
+           ORDER BY received_at DESC NULLS LAST
+        """)
+    out = []
+    for r in rows:
+        row = {}
+        for k, v in dict(r).items():
+            if hasattr(v, 'isoformat'):    row[k] = v.isoformat()
+            elif hasattr(v, 'to_eng_string'): row[k] = str(v)
+            else: row[k] = v
+        out.append(row)
+    return {"n": len(out), "rows": out}
+
+
+@app.post("/api/invoices/{invoice_id}/mark")
+async def api_invoices_mark(invoice_id: int, payload: dict = Body(...)):
+    """U75 — change vendor_invoice_inbox.status. Body: {status: 'extracted'|'ignored'|'needs_review'|'new'}"""
+    new_status = (payload.get("status") or "").strip().lower()
+    if new_status not in ('extracted', 'ignored', 'needs_review', 'new'):
+        return JSONResponse({"error": "status must be one of extracted|ignored|needs_review|new"}, status_code=400)
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await c.execute("SELECT home_ai.set_realm('work')")
+            await c.execute("SET LOCAL app.current_entity = 'all'")
+            row = await c.fetchrow("""
+                UPDATE vendor_invoice_inbox
+                   SET status = $1
+                 WHERE id = $2
+                 RETURNING id, status
+            """, new_status, invoice_id)
+    if not row:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return {"id": row["id"], "status": row["status"]}
+
+
 @app.get("/api/invoices/list")
 async def api_invoices_list(
     days: int = 90,

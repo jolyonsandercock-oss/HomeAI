@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invoices — Needs Review</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  body { background: #0f172a; color: #e2e8f0; font-family: ui-sans-serif, system-ui; }
+  .tile { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 12px; }
+  .mono { font-variant-numeric: tabular-nums; }
+  .btn { padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; }
+  .btn-extract { background: #047857; }
+  .btn-extract:hover { background: #059669; }
+  .btn-ignore { background: #57534e; }
+  .btn-ignore:hover { background: #78716c; }
+  .btn-disabled { background: #1e293b; color: #475569; cursor: not-allowed; }
+  .vanish { opacity: 0; transform: translateX(40px); transition: all 0.3s; }
+  details summary { cursor: pointer; user-select: none; }
+</style>
+</head>
+<body>
+<div x-data="needsReview()" x-init="boot()" class="max-w-6xl mx-auto p-4 space-y-3">
+
+<header class="flex items-center justify-between">
+  <h1 class="text-2xl font-semibold">Invoices · needs review
+    <span class="text-base text-slate-400 mono">(<span x-text="rows.length"></span> open)</span>
+  </h1>
+  <div class="text-xs text-slate-400">
+    <a class="text-emerald-400 hover:underline" href="/invoices">all invoices</a> ·
+    <a class="text-emerald-400 hover:underline" href="/finance">finance</a> ·
+    <a class="text-emerald-400 hover:underline" href="/">home</a>
+  </div>
+</header>
+
+<div x-show="rows.length === 0" class="tile text-center text-slate-400 py-8">
+  Nothing to review.
+</div>
+
+<div class="space-y-2" x-show="rows.length > 0">
+  <template x-for="r in rows" :key="r.id">
+    <div class="tile" :class="r._fading ? 'vanish' : ''">
+      <div class="flex justify-between items-start gap-3">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-baseline gap-3 flex-wrap">
+            <span class="font-medium text-slate-200" x-text="r.vendor_name || r.vendor_domain || '(unknown vendor)'"></span>
+            <span class="text-xs text-slate-500 mono" x-text="r.received_date || ''"></span>
+            <template x-if="r.extraction_method">
+              <span class="text-xs text-slate-500" x-text="'· ' + r.extraction_method
+                + (r.extraction_confidence ? ' (conf ' + Number(r.extraction_confidence).toFixed(2) + ')' : '')"></span>
+            </template>
+          </div>
+          <div class="text-sm text-slate-300 mt-1 truncate" x-text="r.subject || '(no subject)'"></div>
+          <div class="flex gap-4 text-xs text-slate-400 mt-1 mono">
+            <span x-show="r.amount_seen">seen: £<span x-text="Number(r.amount_seen).toFixed(2)"></span></span>
+            <span x-show="r.gross_amount">gross: £<span x-text="Number(r.gross_amount).toFixed(2)"></span></span>
+            <span x-show="r.net_amount">net: £<span x-text="Number(r.net_amount).toFixed(2)"></span></span>
+            <span x-show="r.vat_amount">VAT: £<span x-text="Number(r.vat_amount).toFixed(2)"></span></span>
+            <span x-show="r.has_pdf" class="text-amber-300">PDF</span>
+            <span x-show="!r.has_pdf" class="text-slate-600">no PDF</span>
+            <span x-show="r.paperless_doc_id">paperless#<span x-text="r.paperless_doc_id"></span></span>
+          </div>
+        </div>
+        <div class="flex gap-2 flex-shrink-0">
+          <button class="btn btn-extract" @click="mark(r, 'extracted')" :disabled="r._fading">✓ Extracted</button>
+          <button class="btn btn-ignore"  @click="mark(r, 'ignored')"   :disabled="r._fading">Ignore</button>
+        </div>
+      </div>
+    </div>
+  </template>
+</div>
+
+</div>
+
+<script>
+function needsReview() {
+  return {
+    rows: [],
+    async boot() {
+      const r = await fetch('/api/invoices/needs-review');
+      const j = await r.json();
+      this.rows = j.rows || [];
+    },
+    async mark(row, status) {
+      row._fading = true;
+      const r = await fetch('/api/invoices/' + row.id + '/mark', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (r.ok) {
+        setTimeout(() => { this.rows = this.rows.filter(x => x.id !== row.id); }, 300);
+      } else {
+        row._fading = false;
+        const e = await r.json().catch(() => ({}));
+        alert('Failed: ' + (e.error || r.statusText));
+      }
+    },
+  };
+}
+</script>
+</body>
+</html>
