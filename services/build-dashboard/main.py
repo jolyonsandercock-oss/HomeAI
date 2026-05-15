@@ -1623,6 +1623,45 @@ async def research_page():
     return FileResponse(str(STATIC / "research.html"))
 
 
+async def _ollama_embed(text: str, model: str = "qwen2.5:7b") -> list[float]:
+    """Call homeai-ollama for an embedding. Returns [] on failure."""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.post(
+                "http://homeai-ollama:11434/api/embeddings",
+                json={"model": model, "prompt": text[:6000]})
+        if r.status_code != 200:
+            return []
+        return r.json().get("embedding") or []
+    except Exception:
+        return []
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    """Cosine similarity over two equal-length float vectors."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sa = sb = 0.0
+    for x, y in zip(a, b):
+        dot += x * y
+        sa  += x * x
+        sb  += y * y
+    if sa <= 0 or sb <= 0:
+        return 0.0
+    return dot / ((sa ** 0.5) * (sb ** 0.5))
+
+
+def _normalise(scores: dict) -> dict:
+    """Map dict<id → score> to 0..1 by min/max within the dict."""
+    if not scores:
+        return {}
+    vals = list(scores.values())
+    lo, hi = min(vals), max(vals)
+    if hi - lo < 1e-9:
+        return {k: 1.0 if v > 0 else 0.0 for k, v in scores.items()}
+    return {k: (v - lo) / (hi - lo) for k, v in scores.items()}
+
+
 @app.post("/api/research/ask")
 async def api_research_ask(body: dict = Body(...)):
     question = (body.get("question") or "").strip()
@@ -1630,16 +1669,16 @@ async def api_research_ask(body: dict = Body(...)):
         return JSONResponse({"error": "missing 'question'"}, status_code=400)
     sources = body.get("sources") or ["email", "invoice_line", "document"]
     top_k   = int(body.get("top_k") or 12)
+    # 60/40 cosine/FTS by default; override via body.fts_weight in [0,1].
+    fts_weight = float(body.get("fts_weight") or 0.4)
+    fts_weight = max(0.0, min(1.0, fts_weight))
 
-    # Fetch Anthropic key (same path as /api/finance/ask).
     anth = await _vault_read("anthropic")
     api_key = (anth or {}).get("api_key")
     if not api_key:
         return JSONResponse({"error": "anthropic key not available"}, status_code=503)
 
-    # Build an OR-joined tsquery so multi-word natural questions hit any
-    # significant term (websearch_to_tsquery is AND-only across terms, which
-    # is too strict for "how much wagyu beef from forest" style queries).
+    # ── Lexical (FTS) pass ──────────────────────────────────────────────
     stopwords = {"a","an","and","are","as","at","be","by","for","from","how",
                  "in","is","it","of","on","or","that","the","this","to","was",
                  "were","what","when","where","which","who","why","with","i",
@@ -1649,7 +1688,7 @@ async def api_research_ask(body: dict = Body(...)):
     terms = [t for t in terms if t and len(t) > 2 and t not in stopwords]
     or_query = " | ".join(t.replace(":", "") for t in terms) or question
 
-    rows = await db_all("""
+    fts_rows = await db_all("""
         WITH q AS (SELECT to_tsquery('english', $1) AS tsq)
         SELECT source_table, source_id, title, account, entity_id, realm,
                event_at,
@@ -1663,10 +1702,69 @@ async def api_research_ask(body: dict = Body(...)):
          WHERE ts @@ q.tsq
            AND source_table = ANY($2::text[])
          ORDER BY rank DESC, event_at DESC NULLS LAST
-         LIMIT $3
-    """, or_query, sources, top_k)
+         LIMIT 50
+    """, or_query, sources)
+    fts_by_id  = {(r["source_table"], r["source_id"]): r for r in fts_rows}
+    fts_scores = {(r["source_table"], r["source_id"]): float(r["rank"]) for r in fts_rows}
 
-    passages = [_isoify(dict(r)) for r in rows]
+    # ── Dense (vector) pass ─────────────────────────────────────────────
+    qvec = await _ollama_embed(question)
+    vec_rows = []
+    if qvec:
+        vec_rows = await db_all("""
+            SELECT source_kind AS source_table, source_id, embedding
+              FROM search_vectors
+             WHERE model = 'qwen2.5:7b'
+               AND source_kind = ANY($1::text[])
+        """, sources)
+
+    vec_scores = {}
+    for r in vec_rows:
+        emb = r["embedding"]
+        if emb:
+            vec_scores[(r["source_table"], r["source_id"])] = _cosine(qvec, list(emb))
+
+    # ── Hybrid blend ────────────────────────────────────────────────────
+    # Union the candidate set; missing-on-one-side gets 0 on that side.
+    candidates = set(fts_scores) | set(vec_scores)
+    nf = _normalise(fts_scores)
+    nv = _normalise(vec_scores)
+    hybrid = {
+        k: fts_weight * nf.get(k, 0.0) + (1 - fts_weight) * nv.get(k, 0.0)
+        for k in candidates
+    }
+    top = sorted(hybrid.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
+
+    # Resolve passage records: prefer the FTS row (it has snippet); fall back
+    # to a synthesised record from v_research_corpus for vector-only hits.
+    missing_ids = [k for k, _ in top if k not in fts_by_id]
+    extra_rows = []
+    if missing_ids:
+        st_array = list({k[0] for k in missing_ids})
+        id_array = list({k[1] for k in missing_ids})
+        extra_rows = await db_all("""
+            SELECT source_table, source_id, title, body, account, entity_id, realm, event_at
+              FROM v_research_corpus
+             WHERE source_table = ANY($1::text[])
+               AND source_id    = ANY($2::bigint[])
+        """, st_array, id_array)
+    extra_by_id = {(r["source_table"], r["source_id"]): r for r in extra_rows}
+
+    passages = []
+    for (st, sid), score in top:
+        if (st, sid) in fts_by_id:
+            row = dict(fts_by_id[(st, sid)])
+        elif (st, sid) in extra_by_id:
+            r = extra_by_id[(st, sid)]
+            row = dict(r)
+            row["rank"]    = 0.0
+            row["snippet"] = (r["body"] or r["title"] or "")[:240]
+        else:
+            continue
+        row["hybrid_score"] = round(score, 4)
+        row["cosine"]       = round(vec_scores.get((st, sid), 0.0), 4)
+        row["fts_rank"]     = round(fts_scores.get((st, sid), 0.0), 4)
+        passages.append(_isoify(row))
     if not passages:
         return {
             "question": question, "n_passages": 0, "passages": [],
