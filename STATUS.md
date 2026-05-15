@@ -1,15 +1,16 @@
 # STATUS
 
-_generated: 2026-05-15T20:38:52+01:00_
+_generated: 2026-05-15T20:42:54+01:00_
 _by: scripts/u89-regen-status.sh_
 
 ## Current branch
 
-`u73-hd-samba-paperless` at `1b7f8e7`
+`u73-hd-samba-paperless` at `a1efedd`
 
 ## Recent commits (last 20)
 
 ```
+a1efedd U89: tidy — auto-doc generation + untracked sweep + STATUS regen + entropy-hook tightening
 1b7f8e7 U88: fix-and-forget — 4 tracks done (T1 retire + T2 disable + T6 cron + T7 TODOs)
 0e63b3f U87: secure — RLS coverage + Vault rotation calendar + entropy hook + sprint-number guard
 731bdf2 U86: data-integrity audit (bank coverage / FK orphans / idempotency / schema drift / dead-letters / hunters)
@@ -29,20 +30,21 @@ d51c4fa U73: 6TB HD ext4 + Samba scans share → Paperless consume
 4bd8ff6 U71: phase-9 finish — till form, critical NOTIFY, recipes, pipeline-role runway
 e50101d U70: paper-invoice OCR backbone (Paperless webhook + adapter pattern)
 027c30e U69: Phase 9 — cash variance + morning digest + /recon dashboard
-3fd7304 U68: RECON-L2-light + L3-daily-aggregate + nightly orchestrator
 ```
 
 ## Open work signals
 
 - Pending bot_instructions: 0
 - Open CRITICAL exceptions: 0
-- Working-tree state: 27 files modified/untracked
+- Working-tree state: 25 files modified/untracked
 
 ## Audit log recent entries
 
 ## 2026-05-15 — U86 data-integrity sweep
 ## 2026-05-15 — U87 secure (RLS + Vault + entropy)
 ## 2026-05-15 — U88 fix-and-forget
+## 2026-05-15 — U89 tidy (auto-doc + untracked sweep + STATUS regen)
+## 2026-05-15 — U90 in-person packet
 
 ## Active sprint plans
 
