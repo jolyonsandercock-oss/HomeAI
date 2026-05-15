@@ -1,0 +1,30 @@
+# /home/joly is anchored as a git repo solely so ultraplan can attach.
+# We do NOT want $HOME tracked. Ignore everything by default, then allow
+# only the .claude/plans tree (where the plan files live).
+
+# 1. Ignore everything.
+*
+
+# 2. Re-allow .claude/ as a path so its children can be selectively un-ignored.
+!.claude/
+
+# 3. Inside .claude/, ignore everything except plans/.
+.claude/*
+!.claude/plans/
+
+# 4. Inside plans/, allow every .md.
+!.claude/plans/*.md
+
+# Explicit denials of things we never want even if a pattern misses:
+*.json
+*.log
+*.token
+.bash_history
+.ssh/
+.aws/
+.config/
+.cache/
+.local/
+Downloads/
+Desktop/
+Documents/
