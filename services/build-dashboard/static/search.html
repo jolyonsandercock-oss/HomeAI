@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Email search — Home AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link href="https://unpkg.com/tabulator-tables@5.5.4/dist/css/tabulator.min.css" rel="stylesheet">
+<link href="/static/css/tables.css" rel="stylesheet">
+<script src="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+  .muted { color: #94a3b8; }
+  mark { background: rgba(250,204,21,0.4); color: #fef9c3; padding: 0 2px; border-radius: 2px; }
+  .chip-btn { padding: 4px 10px; font-size: 12px; border-radius: 6px; background: rgba(15,23,42,0.6);
+    border: 1px solid rgba(148,163,184,0.2); cursor: pointer; color: #cbd5e1; }
+  .chip-btn:hover { background: rgba(15,23,42,0.9); }
+  .chip-btn.active { background: rgb(59,130,246); color: white; border-color: transparent; }
+</style>
+</head>
+<body class="text-slate-100">
+
+<div x-data="searchPage()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-5">
+
+  <header class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Email search</h1>
+      <p class="text-sm muted">Full-text search across all 5 Gmail accounts. Phrases ("…"), OR, and -exclusions all work.</p>
+    </div>
+    <a href="/" class="text-xs muted hover:text-slate-200">← Mission Control</a>
+  </header>
+
+  <section class="glass rounded-xl p-4 space-y-3">
+    <form @submit.prevent="search()" class="flex gap-2">
+      <input x-model="q" type="text" autocomplete="off"
+             placeholder='Search… e.g. "MAL125", invoice OR receipt, "sort code" -spam'
+             class="flex-1 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-base mono focus:outline-none focus:border-blue-500"
+             autofocus>
+      <button type="submit" class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-md text-sm font-medium"
+              :disabled="loading" x-text="loading ? 'Searching…' : 'Search'"></button>
+    </form>
+
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-xs uppercase muted">Account</span>
+      <template x-for="a in accounts" :key="a">
+        <button class="chip-btn" :class="{active: account === a}" @click="setAccount(a)"
+                x-text="a || 'all'"></button>
+      </template>
+      <span class="h-5 border-l border-slate-700 mx-2"></span>
+      <span class="text-xs uppercase muted">From</span>
+      <input type="date" x-model="fromDate" @change="search()"
+             class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+      <span class="text-xs muted">→</span>
+      <input type="date" x-model="toDate" @change="search()"
+             class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+      <button class="chip-btn" @click="fromDate=''; toDate=''; search()">clear dates</button>
+    </div>
+  </section>
+
+  <section class="glass rounded-xl p-3 md:p-4">
+    <div class="text-xs muted mb-2 px-1">
+      <span x-show="!hasSearched">Type a query and press Enter.</span>
+      <span x-show="hasSearched" x-text="results.length + ' result' + (results.length===1?'':'s') + (results.length === 500 ? ' (max — refine your query)' : '')"></span>
+    </div>
+    <div id="search-table"></div>
+  </section>
+
+</div>
+
+<script>
+function searchPage() {
+  return {
+    q: '',
+    account: '',
+    fromDate: '',
+    toDate: '',
+    loading: false,
+    hasSearched: false,
+    results: [],
+    table: null,
+    accounts: ['', 'jo', 'pounana', 'bot', 'info', 'admin'],
+
+    async boot() {
+      // pre-populate from URL ?q=
+      const u = new URL(location.href);
+      if (u.searchParams.get('q')) { this.q = u.searchParams.get('q'); this.search(); }
+    },
+
+    setAccount(a) { this.account = a; if (this.q) this.search(); },
+
+    async search() {
+      if (!this.q.trim()) return;
+      this.loading = true;
+      try {
+        const params = new URLSearchParams({q: this.q, limit: 500});
+        if (this.account)  params.set('account',   this.account);
+        if (this.fromDate) params.set('from_date', this.fromDate);
+        if (this.toDate)   params.set('to_date',   this.toDate);
+        const r = await fetch('/api/emails/search?' + params.toString());
+        const d = await r.json();
+        this.results = d.rows || [];
+        this.hasSearched = true;
+        this.render();
+      } catch (e) {
+        console.error(e);
+        alert('Search failed: ' + e.message);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    render() {
+      if (this.table) this.table.destroy();
+      this.table = new Tabulator('#search-table', {
+        data: this.results,
+        layout: 'fitDataStretch',
+        height: '70vh',
+        pagination: true, paginationSize: 50,
+        columns: [
+          { title:'Received', field:'received_at', width:155,
+            formatter: c => (c.getValue() || '').slice(0, 16).replace('T',' ') },
+          { title:'Account',  field:'account', width:80 },
+          { title:'From',     field:'from_name', widthGrow:1,
+            formatter: c => {
+              const r = c.getRow().getData();
+              return `<div class="leading-tight">
+                <div>${(r.from_name || '').slice(0, 40)}</div>
+                <div class="text-[10px] text-slate-500">${(r.from_address || '').slice(0, 50)}</div>
+              </div>`;
+            } },
+          { title:'Subject', field:'subject', widthGrow:2,
+            formatter: c => `<a href="/viewer/email/${encodeURIComponent(c.getRow().getData().account)}/${encodeURIComponent(c.getRow().getData().gmail_message_id)}" target="_blank" class="text-blue-300 hover:text-blue-200">${(c.getValue() || '(no subject)').slice(0, 80)}</a>` },
+          { title:'Match', field:'snippet', widthGrow:3,
+            formatter: c => `<div class="text-xs text-slate-300">${c.getValue() || ''}</div>` },
+          { title:'Att?', field:'has_attachment', width:55, hozAlign:'center',
+            formatter: c => c.getValue() ? '📎' : '' },
+          { title:'Rank', field:'rank', width:65, hozAlign:'right',
+            formatter: c => Number(c.getValue() || 0).toFixed(3) },
+        ],
+        placeholder: 'No matches.',
+      });
+    },
+  };
+}
+</script>
+</body>
+</html>

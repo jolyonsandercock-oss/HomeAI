@@ -49,6 +49,37 @@
     border-color: transparent; font-weight: 600; }
   .fb-modal .actions button:hover { background: rgba(30,41,59,0.9); }
   .fb-modal .actions button.primary:hover { background: rgb(252,211,77); }
+
+  /* U61 T2 — invoice side panel */
+  .side-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 40;
+    display: flex; justify-content: flex-end; backdrop-filter: blur(3px); }
+  .side-panel { width: min(1100px, 95vw); height: 100vh; background: #0b1220;
+    border-left: 1px solid rgba(148,163,184,0.25); overflow-y: auto;
+    box-shadow: -20px 0 60px rgba(0,0,0,0.5); }
+  .side-panel header { position: sticky; top: 0; background: #0b1220;
+    border-bottom: 1px solid rgba(148,163,184,0.18); padding: 14px 20px;
+    z-index: 2; display: flex; align-items: center; justify-content: space-between; }
+  .side-panel section { padding: 14px 20px; }
+  .side-panel .meta-row { display: grid; grid-template-columns: 130px 1fr; gap: 6px 14px;
+    font-size: 13px; }
+  .side-panel .meta-row dt { color: #94a3b8; }
+  .side-panel .meta-row dd { color: #e2e8f0; font-family: ui-monospace, Menlo, monospace; }
+  .side-panel .preview-img { max-width: 100%; border-radius: 6px;
+    border: 1px solid rgba(148,163,184,0.15); }
+  .side-panel .notes-area { width: 100%; min-height: 100px;
+    background: #020617; border: 1px solid rgba(148,163,184,0.25); border-radius: 6px;
+    padding: 8px; color: #e2e8f0; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  .side-panel .notes-history { background: #020617; border: 1px solid rgba(148,163,184,0.10);
+    border-radius: 6px; padding: 10px; min-height: 60px; max-height: 180px;
+    overflow-y: auto; font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+    color: #cbd5e1; white-space: pre-wrap; }
+  .close-btn { padding: 6px 12px; background: rgba(148,163,184,0.15); border-radius: 6px;
+    border: 1px solid rgba(148,163,184,0.25); color: #e2e8f0; cursor: pointer; font-size: 13px; }
+  .close-btn:hover { background: rgba(148,163,184,0.30); }
+  .save-btn { padding: 7px 14px; background: rgb(59,130,246); border-radius: 6px;
+    border: none; color: white; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .save-btn:hover { background: rgb(37,99,235); }
+  .save-btn:disabled { background: rgba(59,130,246,0.4); cursor: not-allowed; }
 </style>
 </head>
 <body class="text-slate-100">
@@ -153,8 +184,70 @@
 
 <section class="glass rounded-xl p-3 md:p-4">
   <h2 class="text-lg font-medium mb-2 px-1">Inbox</h2>
+  <p class="text-xs text-slate-500 mb-2 px-1">Click the 🔍 icon on any row to open the line-item view, preview the PDF, and add notes.</p>
   <div id="invoice-table"></div>
 </section>
+
+<!-- U61 T2 — invoice detail side panel -->
+<template x-if="panel.open">
+  <div class="side-overlay" @click.self="closePanel()">
+    <div class="side-panel">
+      <header>
+        <div>
+          <div class="text-lg font-medium" x-text="'#' + panel.id + ' — ' + (panel.row?.vendor_domain || '')"></div>
+          <div class="text-xs text-slate-400 mono" x-text="(panel.row?.subject || '').slice(0,90)"></div>
+        </div>
+        <div class="flex items-center gap-2">
+          <a class="text-xs text-blue-300 hover:text-blue-200"
+             :href="'/api/invoice/' + panel.id + '/pdf'" target="_blank">open PDF →</a>
+          <a class="text-xs text-blue-300 hover:text-blue-200"
+             :href="'/viewer/email/' + encodeURIComponent(panel.row?.account || '') + '/' + encodeURIComponent(panel.row?.source_email_id || '')"
+             target="_blank">source email →</a>
+          <button class="close-btn" @click="closePanel()">✕ close</button>
+        </div>
+      </header>
+
+      <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div>
+          <h3 class="text-sm uppercase tracking-wide text-slate-400 mb-2">Page 1 preview</h3>
+          <img class="preview-img" :src="'/api/invoices/' + panel.id + '/preview-image?width=1200'"
+               alt="invoice page 1">
+        </div>
+        <div class="space-y-4">
+          <div>
+            <h3 class="text-sm uppercase tracking-wide text-slate-400 mb-2">Invoice details</h3>
+            <dl class="meta-row">
+              <dt>Date</dt><dd x-text="panel.row?.invoice_date || panel.row?.delivery_date || '—'"></dd>
+              <dt>Category</dt><dd x-text="panel.row?.vendor_category || '—'"></dd>
+              <dt>Site</dt><dd x-text="panel.row?.site || '—'"></dd>
+              <dt>Net</dt><dd x-text="'£' + (panel.row?.net_amount ?? '—')"></dd>
+              <dt>Gross</dt><dd x-text="'£' + (panel.row?.gross_amount ?? '—')"></dd>
+              <dt>Status</dt><dd x-text="panel.row?.status || '—'"></dd>
+            </dl>
+          </div>
+          <div>
+            <h3 class="text-sm uppercase tracking-wide text-slate-400 mb-2 flex items-center justify-between">
+              <span>Notes</span>
+              <span class="text-[10px] text-slate-500 normal-case">append-only ledger</span>
+            </h3>
+            <div class="notes-history mb-2" x-text="panel.notes || '(no notes yet)'"></div>
+            <textarea class="notes-area" x-model="panel.draft"
+                      placeholder="Add a note about this invoice…"></textarea>
+            <div class="flex justify-end mt-2 gap-2">
+              <button class="save-btn" :disabled="!panel.draft.trim() || panel.saving"
+                      @click="saveNote()" x-text="panel.saving ? 'Saving…' : 'Add note'"></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h3 class="text-sm uppercase tracking-wide text-slate-400 mb-2">Line items</h3>
+        <div id="panel-lines-table"></div>
+      </section>
+    </div>
+  </div>
+</template>
 
 <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
   <div class="glass rounded-xl p-3 md:p-4">
@@ -181,6 +274,8 @@ function inv() {
     invoiceTable: null,
     vendorTable: null,
     catTable: null,
+    panel: { open: false, id: null, row: null, lines: [], notes: '', draft: '', saving: false },
+    linesTable: null,
     async boot() {
       // wait for the dateWindow + siteFilter components to dispatch their initial events
       setTimeout(() => this.reload(), 50);
@@ -246,10 +341,23 @@ function inv() {
             formatter: (c) => c.getValue() ? '📋' : '',
             hozAlign: 'center', width: 50, headerFilter: false },
           { title: 'PDF',      field: 'first_attachment_path',
-            formatter: (c) => c.getValue()
-              ? `<a href="/api/invoice/${c.getRow().getData().id}/pdf" target="_blank" onclick="event.stopPropagation()">📄</a>`
-              : '',
+            formatter: (c) => {
+              // U61 T2: the fallback at /api/invoice/{id}/pdf now serves files
+              // from /home_ai/data/invoice-pdfs/{id}.pdf when first_attachment_path
+              // is NULL — so this icon is always shown if has_pdf=true.
+              const r = c.getRow().getData();
+              return (c.getValue() || r.has_pdf)
+                ? `<a href="/api/invoice/${r.id}/pdf" target="_blank" onclick="event.stopPropagation()">📄</a>`
+                : '';
+            },
             hozAlign: 'center', width: 50, headerFilter: false },
+          { title: '🔍', field: 'id',
+            titleFormatter: () => `<span title="Open detail panel: PDF preview, line items, notes">🔍</span>`,
+            formatter: (c) => `<button
+              onclick="event.stopPropagation(); window.openInvoicePanel(${c.getValue()})"
+              title="Open detail panel"
+              style="background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.4);color:#93c5fd;padding:3px 8px;border-radius:5px;cursor:pointer;font-size:11px;">🔍 view</button>`,
+            hozAlign: 'center', width: 80, headerFilter: false },
           { title: 'Teach AI', field: 'id',
             titleFormatter: () => `<span title="Click ✎ on a row to tell the AI how to handle it next time. Sonnet processes feedback overnight.">Teach AI ⓘ</span>`,
             formatter: (c) => `<button class="feedback-btn"
@@ -297,6 +405,84 @@ function inv() {
       if (this.vendorTable) this.vendorTable.destroy();
       this.vendorTable = homeai_table('#vendor-table', this.data.by_vendor, cfg);
     },
+    // ── U61 T2: invoice detail side panel ────────────────────────────────
+    async openPanel(id) {
+      this.panel.open = true;
+      this.panel.id = id;
+      this.panel.row = (this.data.invoices || []).find(r => r.id === id) || null;
+      this.panel.lines = [];
+      this.panel.notes = '';
+      this.panel.draft = '';
+      this.panel.saving = false;
+      // load lines + notes in parallel
+      try {
+        const [ln, nt] = await Promise.all([
+          fetch(`/api/invoices/${id}/lines`).then(r => r.json()),
+          fetch(`/api/invoices/${id}/notes`).then(r => r.json()).catch(() => ({notes:''})),
+        ]);
+        this.panel.lines = ln.lines || [];
+        this.panel.notes = nt.notes || '';
+      } catch (e) {
+        console.error('panel load failed', e);
+      }
+      // Render lines Tabulator after the template has rendered
+      await this.$nextTick();
+      if (this.linesTable) { this.linesTable.destroy(); this.linesTable = null; }
+      this.linesTable = new Tabulator('#panel-lines-table', {
+        data: this.panel.lines,
+        layout: 'fitDataStretch',
+        columns: [
+          { title:'#', field:'line_no', width:40, hozAlign:'right' },
+          { title:'Description', field:'raw_description', widthGrow:3 },
+          { title:'Qty', field:'qty', width:60, hozAlign:'right',
+            formatter: c => Number(c.getValue() || 0).toString() },
+          { title:'Unit £', field:'unit_price', width:80, hozAlign:'right',
+            formatter: c => c.getValue() != null ? '£' + Number(c.getValue()).toFixed(2) : '' },
+          { title:'Net £', field:'line_net', width:90, hozAlign:'right',
+            formatter: c => '£' + Number(c.getValue() || 0).toFixed(2) },
+          { title:'VAT £', field:'line_vat', width:75, hozAlign:'right',
+            formatter: c => '£' + Number(c.getValue() || 0).toFixed(2) },
+          { title:'Canonical', field:'canonical_name', widthGrow:2,
+            formatter: c => c.getValue()
+              ? `<span style="color:#86efac">${c.getValue()}</span>`
+              : `<span style="color:#94a3b8">— unmatched —</span>` },
+          { title:'Confidence', field:'extraction_confidence', width:100, hozAlign:'right',
+            formatter: c => {
+              const v = c.getValue(); if (v == null) return '';
+              const colour = v >= 0.9 ? '#86efac' : v >= 0.7 ? '#fde047' : '#fca5a5';
+              return `<span style="color:${colour}">${Number(v).toFixed(2)}</span>`;
+            } },
+        ],
+        placeholder: 'No line items — invoice not yet extracted.',
+      });
+    },
+    closePanel() {
+      this.panel.open = false;
+      if (this.linesTable) { this.linesTable.destroy(); this.linesTable = null; }
+    },
+    async saveNote() {
+      if (!this.panel.draft.trim()) return;
+      this.panel.saving = true;
+      try {
+        const r = await fetch(`/api/invoices/${this.panel.id}/notes`, {
+          method: 'PUT',
+          headers: {'content-type':'application/json'},
+          body: JSON.stringify({notes: this.panel.draft.trim(), user: 'jo'}),
+        });
+        const j = await r.json();
+        if (j.ok) {
+          this.panel.notes = j.notes;
+          this.panel.draft = '';
+        } else {
+          alert('Note save failed: ' + (j.error || 'unknown'));
+        }
+      } catch (e) {
+        alert('Note save failed: ' + e.message);
+      } finally {
+        this.panel.saving = false;
+      }
+    },
+
     searchAll(v) {
       if (!this.invoiceTable) return;
       v = (v || '').trim();
@@ -308,6 +494,17 @@ function inv() {
     },
   };
 }
+
+// U61 T2 — let Tabulator inline onclick reach the Alpine component.
+// We bind on first call by walking up from the table element.
+window.openInvoicePanel = function(invoiceId) {
+  const root = document.querySelector('[x-data="inv()"]');
+  if (!root) return;
+  // Alpine.js exposes the component via __x_dataStack since v3.x
+  const stack = root._x_dataStack;
+  if (!stack || !stack[0]) return;
+  stack[0].openPanel(invoiceId);
+};
 
 // U47a — proper feedback modal (replaces the old window.prompt flow).
 window.openFeedback = function(invoiceId) {

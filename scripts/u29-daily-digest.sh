@@ -75,6 +75,15 @@ async def main():
       SELECT COUNT(*) FROM touchoffice_scrapes
        WHERE scraped_at::date=$1 AND success=false
     """, DATE_OBJ)
+    uncertain = await conn.fetch("""
+      SELECT email_id, gmail_message_id, account, from_address, subject,
+             classification, confidence_score
+        FROM v_classifier_uncertain
+       WHERE received_at::date=$1
+         AND already_reviewed=false
+       ORDER BY confidence_score ASC, received_at DESC
+       LIMIT 5
+    """, DATE_OBJ)
     await conn.close()
 
     pub  = next((r for r in to_sites if r["site"] == "malthouse"), None)
@@ -116,6 +125,15 @@ async def main():
         L.append("CHILDREN (school correspondence today)")
         for k in kids:
             L.append(f"  {k['name']:22} {(k['summary'] or '')[:60]}")
+        L.append("")
+
+    if uncertain:
+        L.append("UNCERTAIN CLASSIFICATIONS — top 5 today")
+        for u in uncertain:
+            src = (u["from_address"] or "?")[:32]
+            sub = (u["subject"] or "")[:48]
+            L.append(f"  {u['confidence_score']:.2f}  {u['classification']:9}  {src:32}  {sub}")
+        L.append("  → http://100.104.82.53/dashboard/invoices  (click ✎ to teach the AI)")
         L.append("")
 
     L.append("HEALTH")
@@ -165,6 +183,20 @@ async def main():
         for k in kids:
             H.append(f'<li><b>{k["name"]}</b>: {(k["summary"] or "")[:120]}</li>')
         H.append('</ul>')
+
+    if uncertain:
+        H.append('<h3>Uncertain classifications — top 5 today</h3>')
+        H.append('<table style="border-collapse:collapse;font-size:0.9em">')
+        H.append('<tr style="color:#64748b"><th align="left">conf</th><th align="left">class</th><th align="left">from</th><th align="left">subject</th></tr>')
+        for u in uncertain:
+            url = f'http://100.104.82.53/dashboard/viewer/email/{u["account"]}/{u["gmail_message_id"]}'
+            H.append(
+                f'<tr><td style="padding:2px 8px">{u["confidence_score"]:.2f}</td>'
+                f'<td style="padding:2px 8px"><b>{u["classification"]}</b></td>'
+                f'<td style="padding:2px 8px">{(u["from_address"] or "?")[:32]}</td>'
+                f'<td style="padding:2px 8px"><a href="{url}">{(u["subject"] or "")[:60]}</a></td></tr>')
+        H.append('</table>')
+        H.append('<p style="color:#64748b;font-size:0.85em">→ <a href="http://100.104.82.53/dashboard/invoices">open invoices page</a> and click ✎ on any row to teach the AI.</p>')
 
     H.append(f'<p style="color:#64748b;font-size:0.85em">firing+unacked alerts: {firing} · scrape failures today: {scrape_fails}</p>')
     H.append('<p style="color:#64748b">— jolyboxbot</p></body></html>')

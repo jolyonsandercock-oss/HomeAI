@@ -25,7 +25,7 @@ from typing import Any
 import asyncpg
 import httpx
 import yaml
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request, Body
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -1556,7 +1556,11 @@ async def api_weather_5day():
 async def api_invoice_pdf(invoice_id: int):
     """U44 — serve the stored PDF for a vendor_invoice_inbox row.
     Path-traversal guarded: resolves the recorded path and confirms it stays
-    inside /home_ai/storage/invoices."""
+    inside /home_ai/storage/invoices.
+    U61 fallback: when first_attachment_path is NULL the row may still have a
+    PDF on disk at /home_ai/data/invoice-pdfs/{id}.pdf (where invoice-pipeline
+    drops attachments before vii rows get their path field). Serve from there
+    when present."""
     p = await pool()
     async with p.acquire() as c:
         await c.execute("SET app.current_entity = '1'")
@@ -1565,6 +1569,10 @@ async def api_invoice_pdf(invoice_id: int):
             invoice_id,
         )
     if not path:
+        fallback = f"/home_ai/data/invoice-pdfs/{invoice_id}.pdf"
+        if _os.path.exists(fallback):
+            return FileResponse(fallback, media_type="application/pdf",
+                                filename=f"{invoice_id}.pdf")
         return JSONResponse({"error": "no PDF on disk for this invoice (may not yet be extracted)"}, status_code=404)
     real = _os.path.realpath(path)
     if not real.startswith(_os.path.realpath(_INVOICE_STORAGE_ROOT) + "/"):
@@ -1573,6 +1581,614 @@ async def api_invoice_pdf(invoice_id: int):
         return JSONResponse({"error": "file not found on disk"}, status_code=404)
     return FileResponse(real, media_type="application/pdf",
                         filename=_os.path.basename(real))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# U61 T3 — email full-text search across every mailbox
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/search")
+async def search_page():
+    return FileResponse(str(STATIC / "search.html"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# U61 T6 — feed coverage tile
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/coverage/summary")
+async def api_coverage_summary():
+    rows = await db_all("SELECT * FROM v_feed_coverage_summary")
+    return [_isoify(dict(r)) for r in rows]
+
+
+@app.get("/api/coverage/recent-gaps")
+async def api_coverage_recent_gaps(limit: int = Query(50, ge=1, le=500)):
+    rows = await db_all(
+        "SELECT * FROM v_feed_coverage_recent_gaps LIMIT $1", limit)
+    return [_isoify(dict(r)) for r in rows]
+
+
+@app.get("/coverage")
+async def coverage_page():
+    return FileResponse(str(STATIC / "coverage.html"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# U64 — FTS research endpoint (vector embeddings in U65)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/research")
+async def research_page():
+    return FileResponse(str(STATIC / "research.html"))
+
+
+@app.post("/api/research/ask")
+async def api_research_ask(body: dict = Body(...)):
+    question = (body.get("question") or "").strip()
+    if not question:
+        return JSONResponse({"error": "missing 'question'"}, status_code=400)
+    sources = body.get("sources") or ["email", "invoice_line", "document"]
+    top_k   = int(body.get("top_k") or 12)
+
+    # Fetch Anthropic key (same path as /api/finance/ask).
+    anth = await _vault_read("anthropic")
+    api_key = (anth or {}).get("api_key")
+    if not api_key:
+        return JSONResponse({"error": "anthropic key not available"}, status_code=503)
+
+    # Build an OR-joined tsquery so multi-word natural questions hit any
+    # significant term (websearch_to_tsquery is AND-only across terms, which
+    # is too strict for "how much wagyu beef from forest" style queries).
+    stopwords = {"a","an","and","are","as","at","be","by","for","from","how",
+                 "in","is","it","of","on","or","that","the","this","to","was",
+                 "were","what","when","where","which","who","why","with","i",
+                 "me","my","much","did","do","does","done","have","has","had",
+                 "you","your","we","our","tell","show","find","list"}
+    terms = [t.strip(".,?!\"'") for t in re.split(r"\s+", question.lower())]
+    terms = [t for t in terms if t and len(t) > 2 and t not in stopwords]
+    or_query = " | ".join(t.replace(":", "") for t in terms) or question
+
+    rows = await db_all("""
+        WITH q AS (SELECT to_tsquery('english', $1) AS tsq)
+        SELECT source_table, source_id, title, account, entity_id, realm,
+               event_at,
+               ts_rank_cd(ts, q.tsq) AS rank,
+               ts_headline('english',
+                           COALESCE(body, title, ''),
+                           q.tsq,
+                           'MaxFragments=2, MaxWords=22, MinWords=6, '
+                           'StartSel=<<, StopSel=>>') AS snippet
+          FROM v_research_corpus, q
+         WHERE ts @@ q.tsq
+           AND source_table = ANY($2::text[])
+         ORDER BY rank DESC, event_at DESC NULLS LAST
+         LIMIT $3
+    """, or_query, sources, top_k)
+
+    passages = [_isoify(dict(r)) for r in rows]
+    if not passages:
+        return {
+            "question": question, "n_passages": 0, "passages": [],
+            "narrative": "No passages matched that query across emails, "
+                          "invoice line items, or documents. Try a broader phrase.",
+        }
+
+    # Build context for Sonnet
+    ctx_lines = []
+    for i, p in enumerate(passages, 1):
+        ctx_lines.append(
+            f"[{i}] ({p['source_table']}#{p['source_id']}) "
+            f"{p.get('event_at') or ''} {p['title'] or ''}\n"
+            f"    snippet: {p['snippet']}"
+        )
+    context = "\n".join(ctx_lines)
+
+    system = (
+        "You are Jo's research assistant. You answer questions using ONLY the "
+        "passages provided. Always cite passages by their [N] index. If the "
+        "passages don't contain the answer, say so plainly — do not invent "
+        "facts. Money is in GBP, formatted £x,xxx.xx. Keep the answer to "
+        "1-3 short paragraphs."
+    )
+
+    payload = {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 800,
+        "system": system,
+        "messages": [{
+            "role": "user",
+            "content":
+                f"Question: {question}\n\nPassages:\n{context}\n\n"
+                f"Cite the passages used by their [N] index.",
+        }],
+    }
+
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.post("https://api.anthropic.com/v1/messages",
+                              headers=headers, json=payload)
+    if r.status_code != 200:
+        return JSONResponse(
+            {"error": "anthropic API error", "status": r.status_code,
+             "body": r.text[:300]},
+            status_code=502)
+    j = r.json()
+    narrative = "".join(b.get("text", "") for b in (j.get("content") or [])
+                         if b.get("type") == "text").strip()
+    return {
+        "question": question,
+        "n_passages": len(passages),
+        "passages": passages,
+        "narrative": narrative or "(no narrative)",
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# U62 T1 — calendar
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/calendar/upcoming")
+async def api_calendar_upcoming(days: int = Query(30, ge=1, le=180)):
+    rows = await db_all("""
+        SELECT id, source_account, title, location, start_at, end_at, all_day,
+               organiser_email, realm
+          FROM calendar_events
+         WHERE start_at >= NOW() - INTERVAL '1 day'
+           AND start_at <= NOW() + ($1 || ' days')::interval
+           AND status <> 'cancelled'
+         ORDER BY start_at ASC
+    """, str(days))
+    return {"n": len(rows), "rows": [_isoify(dict(r)) for r in rows]}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# U62 T2 — tasks
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/tasks")
+async def tasks_page():
+    return FileResponse(str(STATIC / "tasks.html"))
+
+
+@app.get("/api/tasks/list")
+async def api_tasks_list(status: str = Query("open,in_progress,snoozed")):
+    statuses = [s.strip() for s in status.split(",") if s.strip()]
+    if not statuses:
+        statuses = ["open"]
+    rows = await db_all("""
+        SELECT * FROM v_tasks_unified
+         WHERE status = ANY($1::text[])
+    """, statuses)
+    return {"n": len(rows), "rows": [_isoify(dict(r)) for r in rows]}
+
+
+@app.post("/api/tasks/create")
+async def api_tasks_create(payload: dict = Body(...)):
+    title = (payload.get("title") or "").strip()
+    if not title:
+        return JSONResponse({"error": "title required"}, status_code=400)
+    body     = (payload.get("body") or "").strip() or None
+    priority = (payload.get("priority") or "normal").strip()
+    due_at   = payload.get("due_at") or None
+    realm    = (payload.get("realm") or "owner").strip()
+    entity   = payload.get("entity_id")
+
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET LOCAL app.current_entity = 'all'")
+        await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+        task_id = await c.fetchval("""
+            INSERT INTO tasks (source, title, body, priority, due_at, entity_id, realm)
+            VALUES ('manual', $1, $2, $3, $4::timestamptz, $5, $6)
+            RETURNING id
+        """, title[:500], body, priority, due_at, entity, realm)
+    return {"ok": True, "id": task_id}
+
+
+@app.post("/api/tasks/{task_id}/complete")
+async def api_tasks_complete(task_id: int):
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET LOCAL app.current_entity = 'all'")
+        await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+        n = await c.execute("""
+            UPDATE tasks
+               SET status='done', completed_at=NOW(), updated_at=NOW()
+             WHERE id = $1 AND status <> 'done'
+        """, task_id)
+    return {"ok": True, "updated": n}
+
+
+@app.post("/api/tasks/{task_id}/snooze")
+async def api_tasks_snooze(task_id: int, payload: dict = Body(...)):
+    snooze_until = payload.get("snooze_until")
+    if not snooze_until:
+        return JSONResponse({"error": "snooze_until required (ISO timestamp)"}, status_code=400)
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET LOCAL app.current_entity = 'all'")
+        await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+        await c.execute("""
+            UPDATE tasks
+               SET status='snoozed', snoozed_until=$2::timestamptz, updated_at=NOW()
+             WHERE id = $1
+        """, task_id, snooze_until)
+    return {"ok": True}
+
+
+@app.post("/api/tasks/{task_id}/reopen")
+async def api_tasks_reopen(task_id: int):
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET LOCAL app.current_entity = 'all'")
+        await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+        await c.execute("""
+            UPDATE tasks
+               SET status='open', completed_at=NULL, updated_at=NOW()
+             WHERE id = $1
+        """, task_id)
+    return {"ok": True}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# U62 T4 — document expiry alerts
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/documents/expiry-due")
+async def api_documents_expiry_due():
+    rows = await db_all("SELECT * FROM v_documents_expiry_due")
+    return {"n": len(rows), "rows": [_isoify(dict(r)) for r in rows]}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# U61 T4 — document upload, OCR, entity linking
+# ─────────────────────────────────────────────────────────────────────────────
+
+from fastapi import UploadFile, File
+import hashlib as _hashlib
+
+_DOCS_ROOT = "/home_ai/storage/documents"
+_PLATE_RE = re.compile(r"\b([A-Z]{2}\s?\d{2}\s?[A-Z]{3})\b")
+
+
+def _norm_plate(s: str) -> str:
+    return re.sub(r"\s+", "", (s or "").upper())
+
+
+async def _extract_ocr_text(content: bytes, mime_type: str) -> str:
+    """Call pdfplumber service for PDFs. For images, return empty for now
+    (Paperless-ngx will handle full OCR in Track 4b)."""
+    if mime_type.startswith("application/pdf"):
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                r = await client.post(
+                    "http://homeai-pdfplumber:8003/extract-pdf",
+                    files={"file": ("upload.pdf", content, "application/pdf")})
+                r.raise_for_status()
+                return r.json().get("text", "") or ""
+        except Exception:
+            return ""
+    return ""
+
+
+async def _link_to_entity(conn, ocr_text: str, title: str) -> tuple[str | None, int | None, str | None, int | None]:
+    """Return (linked_table, linked_id, linked_by, entity_id) or all-None."""
+    haystack = (ocr_text or "") + " " + (title or "")
+
+    # 1. Plate regex → vehicles.registration
+    for m in _PLATE_RE.finditer(haystack.upper()):
+        plate = _norm_plate(m.group(1))
+        veh = await conn.fetchrow("""
+            SELECT id, entity_id, registration, make_model
+              FROM vehicles
+             WHERE upper(replace(registration, ' ', '')) = $1
+             LIMIT 1
+        """, plate)
+        if veh:
+            return ("vehicles", veh["id"], "auto:plate_regex", veh["entity_id"])
+
+    # 2. Postcode → properties.postcode_full (if such column / table exists)
+    postcode_re = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b", re.I)
+    pc_match = postcode_re.search(haystack.upper())
+    if pc_match:
+        pc = re.sub(r"\s+", "", pc_match.group(1).upper())
+        prop = await conn.fetchrow("""
+            SELECT id, entity_id FROM properties
+             WHERE upper(replace(coalesce(postcode_full, ''), ' ', '')) = $1
+             LIMIT 1
+        """, pc)
+        if prop:
+            return ("properties", prop["id"], "auto:postcode", prop["entity_id"])
+
+    # 3. Child name → children.name (longer names only)
+    kids = await conn.fetch(
+        "SELECT id, name, entity_id FROM children WHERE length(name) > 4")
+    for k in kids:
+        if k["name"] and k["name"].lower() in haystack.lower():
+            return ("children", k["id"], "auto:name", k["entity_id"])
+
+    return (None, None, None, None)
+
+
+@app.get("/documents")
+async def documents_page():
+    return FileResponse(str(STATIC / "documents.html"))
+
+
+@app.post("/api/documents/upload")
+async def api_documents_upload(
+    file: UploadFile = File(...),
+    title: str = Query(""),
+    category: str = Query(""),
+):
+    """Upload a document — PDF or image. We OCR it (PDFs only for now via
+    pdfplumber; image OCR is queued for the Paperless-ngx pipeline) and
+    try to auto-link to a vehicle/property/child by content scan.
+    Stored at /home_ai/storage/documents/<sha256>.<ext>."""
+    content = await file.read()
+    if len(content) > 50 * 1024 * 1024:
+        return JSONResponse({"error": "file too large (max 50MB)"}, status_code=413)
+    sha = _hashlib.sha256(content).hexdigest()
+    mime = file.content_type or "application/octet-stream"
+    ext = {"application/pdf": "pdf", "image/jpeg": "jpg",
+           "image/png": "png", "image/tiff": "tiff"}.get(mime, "bin")
+    _os.makedirs(_DOCS_ROOT, exist_ok=True)
+    file_path = f"{_DOCS_ROOT}/{sha}.{ext}"
+    if not _os.path.exists(file_path):
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+    ocr_text = await _extract_ocr_text(content, mime)
+    title = (title or file.filename or "untitled").strip()[:200]
+    category = (category or "uncategorised").strip()[:80]
+
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await c.execute("SET LOCAL app.current_entity = 'all'")
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+
+            # Idempotent on sha256
+            existing = await c.fetchval(
+                "SELECT id FROM documents WHERE sha256 = $1", sha)
+            if existing:
+                return {"ok": True, "id": existing, "duplicate": True}
+
+            linked_table, linked_id, linked_by, ent_id = await _link_to_entity(
+                c, ocr_text, title)
+            doc_id = await c.fetchval("""
+                INSERT INTO documents
+                    (entity_id, category, title, status,
+                     file_path, mime_type, sha256, ocr_text,
+                     linked_table, linked_id, linked_by, uploaded_by, realm)
+                VALUES ($1, $2, $3, 'active',
+                        $4, $5, $6, $7,
+                        $8, $9, $10, 'jo',
+                        COALESCE($11, 'family'))
+                RETURNING id
+            """, ent_id, category, title, file_path, mime, sha, ocr_text,
+                 linked_table, linked_id, linked_by,
+                 # realm derived from linked entity if known, else family
+                 None)
+    return {
+        "ok": True, "id": doc_id, "sha256": sha,
+        "linked_table": linked_table, "linked_id": linked_id, "linked_by": linked_by,
+        "ocr_chars": len(ocr_text),
+    }
+
+
+@app.get("/api/documents/list")
+async def api_documents_list(limit: int = Query(100, ge=1, le=500)):
+    rows = await db_all("""
+        SELECT id, title, category, mime_type, file_path,
+               linked_table, linked_id, linked_by, entity_id, realm,
+               LENGTH(coalesce(ocr_text,'')) AS ocr_chars,
+               created_at
+          FROM documents
+         ORDER BY created_at DESC
+         LIMIT $1
+    """, limit)
+    return {"n": len(rows), "rows": [_isoify(dict(r)) for r in rows]}
+
+
+@app.get("/api/documents/by-link/{table}/{linked_id}")
+async def api_documents_by_link(table: str, linked_id: int):
+    if table not in ("vehicles", "properties", "children", "invoices", "employees"):
+        return JSONResponse({"error": "unknown table"}, status_code=400)
+    rows = await db_all("""
+        SELECT id, title, category, mime_type, file_path, linked_by,
+               LENGTH(coalesce(ocr_text,'')) AS ocr_chars, created_at
+          FROM documents
+         WHERE linked_table = $1 AND linked_id = $2
+         ORDER BY created_at DESC
+    """, table, linked_id)
+    return {"n": len(rows), "rows": [_isoify(dict(r)) for r in rows]}
+
+
+@app.get("/api/documents/{doc_id}/file")
+async def api_documents_file(doc_id: int):
+    row = await db_one(
+        "SELECT file_path, mime_type, title FROM documents WHERE id = $1", doc_id)
+    if not row or not row["file_path"]:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    real = _os.path.realpath(row["file_path"])
+    if not real.startswith(_os.path.realpath(_DOCS_ROOT) + "/"):
+        return JSONResponse({"error": "path traversal blocked"}, status_code=403)
+    if not _os.path.exists(real):
+        return JSONResponse({"error": "file missing on disk"}, status_code=404)
+    return FileResponse(real, media_type=row["mime_type"] or "application/octet-stream",
+                        filename=row["title"] or _os.path.basename(real))
+
+
+@app.get("/api/emails/search")
+async def api_emails_search(
+    q: str = Query("", min_length=0, max_length=500),
+    account: str = Query(""),
+    from_date: str = Query(""),
+    to_date: str = Query(""),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """Full-text search across emails. q is a websearch query string
+    (supports quoted phrases, OR, -negation). When q matches anything that
+    looks like an account/sort code (digits with separators) we also do a
+    trigram ILIKE fallback so partial number strings hit."""
+    q = (q or "").strip()
+    if not q:
+        return {"q": q, "n_rows": 0, "rows": []}
+
+    where_extra = []
+    args = []
+    arg_n = 1
+
+    args.append(q)              # $1 — for websearch_to_tsquery
+    arg_n += 1
+    args.append(f"%{q}%")       # $2 — for ILIKE fallback
+    arg_n += 1
+
+    if account:
+        where_extra.append(f"AND e.account = ${arg_n}")
+        args.append(account)
+        arg_n += 1
+    if from_date:
+        where_extra.append(f"AND e.received_at >= ${arg_n}::date")
+        args.append(from_date)
+        arg_n += 1
+    if to_date:
+        where_extra.append(f"AND e.received_at <= (${arg_n}::date + INTERVAL '1 day')")
+        args.append(to_date)
+        arg_n += 1
+    extra = " ".join(where_extra)
+    args.append(limit)
+
+    sql = f"""
+        SELECT e.id, e.gmail_message_id, e.account, e.from_address, e.from_name,
+               e.subject, e.received_at, e.has_attachment, e.realm,
+               ts_rank_cd(e.tsv, websearch_to_tsquery('english', $1)) AS rank,
+               ts_headline('english', COALESCE(e.body_text, e.subject, ''),
+                           websearch_to_tsquery('english', $1),
+                           'MaxFragments=2, MaxWords=20, MinWords=5,
+                            StartSel=<mark>, StopSel=</mark>') AS snippet
+          FROM emails e
+         WHERE (
+                e.tsv @@ websearch_to_tsquery('english', $1)
+             OR e.subject  ILIKE $2
+             OR e.body_text ILIKE $2
+             OR e.from_address ILIKE $2
+         )
+         {extra}
+         ORDER BY rank DESC, e.received_at DESC
+         LIMIT ${arg_n}
+    """
+    rows = await db_all(sql, *args)
+    return {"q": q, "n_rows": len(rows),
+            "rows": [_isoify(dict(r)) for r in rows]}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# U61 T2 — invoice line items, preview image, plain-text notes
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/invoices/{invoice_id}/lines")
+async def api_invoice_lines(invoice_id: int):
+    """List line items for an invoice, joined to product_canonical."""
+    rows = await db_all("""
+        SELECT line_id, line_no, raw_description, qty, unit, unit_price,
+               line_net, line_vat, line_gross,
+               canonical_id, canonical_family, canonical_name,
+               extracted_by, extraction_confidence
+          FROM v_invoice_lines_resolved
+         WHERE invoice_id = $1
+         ORDER BY line_no
+    """, invoice_id)
+    return {"invoice_id": invoice_id, "n_lines": len(rows),
+            "lines": [_isoify(dict(r)) for r in rows]}
+
+
+@app.get("/api/invoices/{invoice_id}/preview-image")
+async def api_invoice_preview_image(invoice_id: int, width: int = 1200):
+    """Page-1 PNG render, cached on disk under /home_ai/storage/invoice-previews/."""
+    cache_dir = "/home_ai/storage/invoice-previews"
+    _os.makedirs(cache_dir, exist_ok=True)
+    cache_path = f"{cache_dir}/{invoice_id}_{int(width)}.png"
+    if _os.path.exists(cache_path):
+        return FileResponse(cache_path, media_type="image/png")
+
+    # Locate PDF — same fallback logic as /api/invoice/{id}/pdf.
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = '1'")
+        path = await c.fetchval(
+            "SELECT first_attachment_path FROM vendor_invoice_inbox WHERE id=$1",
+            invoice_id)
+    pdf_path = None
+    if path:
+        real = _os.path.realpath(path)
+        if real.startswith(_os.path.realpath(_INVOICE_STORAGE_ROOT) + "/") \
+                and _os.path.exists(real):
+            pdf_path = real
+    if not pdf_path:
+        fallback = f"/home_ai/data/invoice-pdfs/{invoice_id}.pdf"
+        if _os.path.exists(fallback):
+            pdf_path = fallback
+    if not pdf_path:
+        return JSONResponse({"error": "no PDF on disk"}, status_code=404)
+
+    # Call pdfplumber service.
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            with open(pdf_path, "rb") as f:
+                r = await client.post(
+                    "http://homeai-pdfplumber:8003/render-page1-png",
+                    files={"file": (f"{invoice_id}.pdf", f, "application/pdf")},
+                    params={"width": int(width)})
+            r.raise_for_status()
+            with open(cache_path, "wb") as out:
+                out.write(r.content)
+    except Exception as e:
+        return JSONResponse({"error": f"render failed: {e}"}, status_code=500)
+    return FileResponse(cache_path, media_type="image/png")
+
+
+@app.put("/api/invoices/{invoice_id}/notes")
+async def api_invoice_notes_put(invoice_id: int, payload: dict = Body(...)):
+    """Append a plain-text note to vendor_invoice_inbox.notes. Format:
+       [YYYY-MM-DD username] <text>
+       Notes are append-only; the textarea on the UI loads the full history."""
+    text = (payload.get("notes") or payload.get("text") or "").strip()
+    if not text or len(text) < 1:
+        return JSONResponse({"error": "empty note"}, status_code=400)
+    if len(text) > 2000:
+        text = text[:2000]
+    user = (payload.get("user") or "jo").strip() or "jo"
+    today = datetime.now().strftime("%Y-%m-%d")
+    line = f"[{today} {user}] {text}\n"
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = '1'")
+        await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+        existing = await c.fetchval(
+            "SELECT notes FROM vendor_invoice_inbox WHERE id=$1", invoice_id)
+        if existing is None and (await c.fetchval(
+                "SELECT 1 FROM vendor_invoice_inbox WHERE id=$1", invoice_id)) is None:
+            return JSONResponse({"error": "invoice not found"}, status_code=404)
+        new_notes = (existing or "") + line
+        await c.execute("UPDATE vendor_invoice_inbox SET notes=$1 WHERE id=$2",
+                        new_notes, invoice_id)
+    return {"ok": True, "notes": new_notes}
+
+
+@app.get("/api/invoices/{invoice_id}/notes")
+async def api_invoice_notes_get(invoice_id: int):
+    notes = await db_one(
+        "SELECT notes FROM vendor_invoice_inbox WHERE id=$1", invoice_id)
+    if not notes:
+        return JSONResponse({"error": "invoice not found"}, status_code=404)
+    return {"invoice_id": invoice_id, "notes": notes["notes"] or ""}
 
 
 @app.post("/api/invoice/{invoice_id}/feedback")
@@ -3053,3 +3669,307 @@ async def benchmark_stream(model: str = Query("qwen2.5:7b"),
         gen(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# U60 — Finance dashboard
+# ─────────────────────────────────────────────────────────────────────────────
+# /finance is a unified board over:
+#   - bank_accounts + bank_transactions   (NatWest + RBS Mastercards)
+#   - card_statements                     (V73)
+#   - account_transfers                   (V73 — paired inter-account moves)
+#   - vendor_invoice_inbox + dojo_transactions (already-ingested feeds)
+#
+# Three modes of interaction:
+#   1. Headline KPI ribbon from v_finance_kpis (single GET).
+#   2. Pre-canned tabs (Balances, Owings, Transfers, Costs, Recent) — each
+#      tab calls one slug directly via /api/finance/slug/{slug}.
+#   3. NL textbox → /api/finance/ask. Haiku-4.5 tool-use loop picks one of
+#      the query_whitelist finance slugs and we run it server-side.
+
+ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+# Match :param but not :: (PG type-cast). Negative lookbehind excludes the
+# second colon of ::interval, ::int, ::numeric, etc.
+_NAMED_PARAM_RE = re.compile(r"(?<!:):([a-zA-Z_][a-zA-Z0-9_]*)")
+
+
+async def _vault_read(path: str) -> dict | None:
+    token = os.environ.get("VAULT_TOKEN")
+    if not token:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as c:
+            r = await c.get(f"{VAULT_URL}/v1/secret/data/{path}",
+                            headers={"X-Vault-Token": token})
+            r.raise_for_status()
+            return r.json()["data"]["data"]
+    except Exception:
+        return None
+
+
+async def _load_finance_slugs(conn) -> list[dict]:
+    """Approved finance slugs in query_whitelist, owner realm visible."""
+    rows = await conn.fetch("""
+        SELECT id, slug, display_name, description, intent_examples,
+               sql_template, param_schema, result_format
+          FROM query_whitelist
+         WHERE active = true AND approved_at IS NOT NULL
+           AND slug IN ('interest_paid_window','fees_paid_window','account_balances',
+                        'owings_summary','monthly_finance_costs','top_vendors_window',
+                        'transfers_recent','spend_by_category_window','credit_card_status',
+                        'recent_finance_events','finance_kpis','top_purchases_window')
+         ORDER BY slug
+    """)
+    out = []
+    for r in rows:
+        out.append({
+            "id":              r["id"],
+            "slug":            r["slug"],
+            "display_name":    r["display_name"],
+            "description":     r["description"],
+            "intent_examples": list(r["intent_examples"] or []),
+            "sql_template":    r["sql_template"],
+            "param_schema":    (r["param_schema"] if isinstance(r["param_schema"], dict)
+                                else json.loads(r["param_schema"] or "{}")),
+            "result_format":   r["result_format"],
+        })
+    return out
+
+
+def _bind_params(param_schema: dict, supplied: dict) -> tuple[bool, Any]:
+    """Validate + coerce. Returns (ok, bound_or_error_msg)."""
+    bound = {}
+    for name, spec in (param_schema or {}).items():
+        if name in supplied and supplied[name] is not None and supplied[name] != "":
+            v = supplied[name]
+        elif spec.get("required"):
+            return False, f"missing required param '{name}'"
+        elif "default" in spec:
+            v = spec["default"]
+        else:
+            continue
+        t = spec.get("type", "string")
+        try:
+            if   t == "int":   v = int(v)
+            elif t == "float": v = float(v)
+            elif t == "bool":  v = bool(v)
+            elif t == "enum":
+                if v not in spec.get("values", []):
+                    return False, f"{name}={v!r} not in {spec.get('values')}"
+            else:
+                v = str(v)
+        except (ValueError, TypeError) as e:
+            return False, f"{name}={v!r}: {e}"
+        if "min" in spec and v < spec["min"]:
+            return False, f"{name}={v} < min {spec['min']}"
+        if "max" in spec and v > spec["max"]:
+            return False, f"{name}={v} > max {spec['max']}"
+        bound[name] = v
+    extras = set(supplied) - set(param_schema or {})
+    # ignore unknown params silently to be forgiving on the dashboard side
+    return True, bound
+
+
+async def _run_slug(slug_row: dict, bound: dict) -> dict:
+    sql = slug_row["sql_template"]
+    seen: list[str] = []
+    def repl(m):
+        n = m.group(1)
+        if n not in seen:
+            seen.append(n)
+        return f"${seen.index(n) + 1}"
+    sql_pg = _NAMED_PARAM_RE.sub(repl, sql)
+    args = [bound[n] for n in seen]
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction(readonly=True):
+            await c.execute("SET LOCAL app.current_entity = 'all'")
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+            rows = await c.fetch(sql_pg, *args)
+    return {
+        "slug": slug_row["slug"],
+        "display_name": slug_row["display_name"],
+        "params": bound,
+        "n_rows": len(rows),
+        "rows": [_isoify({k: r[k] for k in r.keys()}) for r in rows],
+    }
+
+
+@app.get("/finance")
+async def finance_page():
+    return FileResponse(str(STATIC / "finance.html"))
+
+
+@app.get("/api/finance/kpis")
+async def finance_kpis():
+    row = await db_one("SELECT * FROM v_finance_kpis")
+    return _isoify(dict(row)) if row else {}
+
+
+@app.get("/api/finance/slugs")
+async def finance_slugs():
+    """List of finance slugs available to the dashboard."""
+    p = await pool()
+    async with p.acquire() as c:
+        slugs = await _load_finance_slugs(c)
+    # Strip SQL templates from the public list — clients only need names+params.
+    return [{"slug": s["slug"], "display_name": s["display_name"],
+             "description": s["description"], "intent_examples": s["intent_examples"],
+             "param_schema": s["param_schema"]} for s in slugs]
+
+
+@app.get("/api/finance/slug/{slug}")
+async def finance_slug_run(slug: str, request: Request):
+    """Run a finance slug directly. Query-string params bind into SQL."""
+    p = await pool()
+    async with p.acquire() as c:
+        slugs = await _load_finance_slugs(c)
+    row = next((s for s in slugs if s["slug"] == slug), None)
+    if not row:
+        return JSONResponse({"error": f"unknown slug {slug!r}"}, status_code=404)
+    ok, bound = _bind_params(row["param_schema"], dict(request.query_params))
+    if not ok:
+        return JSONResponse({"error": bound}, status_code=400)
+    return await _run_slug(row, bound)
+
+
+class _AskBody:
+    """Lightweight pydantic-free body parser to avoid touching imports."""
+    def __init__(self, question: str):
+        self.question = question
+
+
+@app.post("/api/finance/ask")
+async def finance_ask(body: dict = Body(...)):
+    """Natural-language entry point. Routes the question to Haiku-tool-use,
+    runs the picked slug, and returns rows + a one-line narrative."""
+    question = (body.get("question") or "").strip()
+    if not question:
+        return JSONResponse({"error": "missing 'question'"}, status_code=400)
+
+    anth = await _vault_read("anthropic")
+    api_key = (anth or {}).get("api_key")
+    if not api_key:
+        return JSONResponse({"error": "anthropic key not available; "
+                                       "VAULT_TOKEN missing or vault sealed"},
+                            status_code=503)
+
+    p = await pool()
+    async with p.acquire() as c:
+        slugs = await _load_finance_slugs(c)
+    if not slugs:
+        return JSONResponse({"error": "no finance slugs registered"}, status_code=500)
+
+    # Build the Anthropic tool list from slugs.
+    tools = []
+    for s in slugs:
+        props = {}
+        required = []
+        for name, spec in (s["param_schema"] or {}).items():
+            t = spec.get("type", "string")
+            jt = {"int": "integer", "float": "number", "bool": "boolean",
+                  "enum": "string", "string": "string", "str": "string"}.get(t, "string")
+            prop = {"type": jt}
+            if "default" in spec:
+                prop["description"] = f"default {spec['default']}"
+            if spec.get("required"):
+                required.append(name)
+            props[name] = prop
+        tools.append({
+            "name": s["slug"],
+            "description": (s["description"] or "")
+                + (("\nExamples: " + "; ".join(s["intent_examples"])) if s["intent_examples"] else ""),
+            "input_schema": {"type": "object", "properties": props, "required": required},
+        })
+
+    system = ("You are Jo's home-finance assistant. The user is Jo Sandercock who runs a pub, "
+              "a sandwich bar, an accommodation business and a property company. Use the "
+              "provided data tools to answer the question. Never invent numbers. If no tool "
+              "fits, reply directly with a short sentence explaining what's missing. Keep "
+              "your final reply to 1-3 sentences. Money is in GBP, formatted £x,xxx.xx.")
+
+    messages = [{"role": "user", "content": question}]
+
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+
+    tool_results = []
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for _ in range(3):  # max 3 tool-use turns
+            payload = {
+                "model": ANTHROPIC_MODEL,
+                "max_tokens": 1024,
+                "system": system,
+                "tools": tools,
+                "messages": messages,
+            }
+            r = await client.post("https://api.anthropic.com/v1/messages",
+                                  headers=headers, json=payload)
+            if r.status_code != 200:
+                return JSONResponse(
+                    {"error": "anthropic API error",
+                     "status": r.status_code, "body": r.text[:400]},
+                    status_code=502)
+            resp = r.json()
+
+            blocks = resp.get("content") or []
+            messages.append({"role": "assistant", "content": blocks})
+
+            if resp.get("stop_reason") != "tool_use":
+                narrative = "".join(
+                    b.get("text", "") for b in blocks if b.get("type") == "text"
+                ).strip()
+                return {
+                    "question": question,
+                    "narrative": narrative or "(no narrative)",
+                    "tool_results": tool_results,
+                    "stop_reason": resp.get("stop_reason"),
+                }
+
+            # Execute every tool_use block in this assistant turn.
+            tool_use_blocks = [b for b in blocks if b.get("type") == "tool_use"]
+            tool_result_msgs = []
+            for tu in tool_use_blocks:
+                slug = tu.get("name")
+                slug_row = next((s for s in slugs if s["slug"] == slug), None)
+                if not slug_row:
+                    tool_result_msgs.append({
+                        "type": "tool_result", "tool_use_id": tu["id"],
+                        "is_error": True,
+                        "content": f"unknown tool {slug!r}",
+                    })
+                    continue
+                ok, bound = _bind_params(slug_row["param_schema"], tu.get("input") or {})
+                if not ok:
+                    tool_result_msgs.append({
+                        "type": "tool_result", "tool_use_id": tu["id"],
+                        "is_error": True, "content": f"param error: {bound}",
+                    })
+                    continue
+                try:
+                    run = await _run_slug(slug_row, bound)
+                except Exception as e:
+                    tool_result_msgs.append({
+                        "type": "tool_result", "tool_use_id": tu["id"],
+                        "is_error": True, "content": f"SQL error: {e}",
+                    })
+                    continue
+                tool_results.append(run)
+                # Truncate rows in the message back to Anthropic to stay cheap.
+                preview_rows = run["rows"][:40]
+                tool_result_msgs.append({
+                    "type": "tool_result", "tool_use_id": tu["id"],
+                    "content": json.dumps({"n_rows": run["n_rows"],
+                                            "rows_preview": preview_rows},
+                                           default=str)[:6000],
+                })
+            messages.append({"role": "user", "content": tool_result_msgs})
+
+    return {
+        "question": question,
+        "narrative": "(tool-loop did not converge after 3 turns)",
+        "tool_results": tool_results,
+    }

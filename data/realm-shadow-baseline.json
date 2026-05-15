@@ -1,9 +1,9 @@
 {
-  "captured_at": "2026-05-14T16:01:55+01:00",
+  "captured_at": "2026-05-14T18:58:55+01:00",
   "mode": "pre-V65-baseline",
   "counts": {
     "emails": 473,
-    "events": 1523,
+    "events": 1540,
     "vendor_invoice_inbox": 194,
     "workforce_shifts": 1486,
     "workforce_departments": 5,
@@ -21,6 +21,6 @@
     "caterbook_daily_snapshots": 143,
     "ops_thresholds": 3,
     "product_canonical": 68,
-    "audit_log": 7560
+    "audit_log": 7760
   }
 }

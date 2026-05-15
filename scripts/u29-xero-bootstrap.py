@@ -46,12 +46,14 @@ CONNECTIONS_URL = "https://api.xero.com/connections"
 #   accounting.transactions.read   → invoices, credit notes, bank txns, payments
 #   accounting.contacts.read       → vendor + customer list
 #   accounting.settings.read       → org info, accounts, tracking categories
-SCOPES = " ".join([
+_DEFAULT_SCOPES = [
     "offline_access",
     "accounting.transactions.read",
     "accounting.contacts.read",
     "accounting.settings.read",
-])
+]
+# Set XERO_SCOPES=offline_access to test minimum-viable flow.
+SCOPES = os.environ.get("XERO_SCOPES") or " ".join(_DEFAULT_SCOPES)
 
 _state = secrets.token_urlsafe(16)
 _callback_result = {"code": None, "state": None, "error": None}

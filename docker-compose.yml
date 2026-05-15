@@ -244,13 +244,20 @@ services:
     build: ./services/build-dashboard
     image: homeai-build-dashboard:2.0
     container_name: homeai-build-dashboard
-    networks: [ai-internal, ai-monitoring]
+    # ai-egress added in U60 so /api/finance/ask can reach api.anthropic.com.
+    networks: [ai-internal, ai-monitoring, ai-egress]
     volumes:
       - ./services/build-dashboard/data:/app/data:ro
       - ./postgres/migrations:/home_ai/postgres/migrations:ro
       - ./backups:/home_ai/backups:ro
       - ./storage/dreaming:/home_ai/storage/dreaming:ro
       - ./storage/invoices:/home_ai/storage/invoices:ro
+      # U61 — the invoice-pipeline drops attachments here; vendor_invoice_inbox
+      # rows often have first_attachment_path NULL but the file is named by id.
+      - ./data/invoice-pdfs:/home_ai/data/invoice-pdfs:ro
+      # U61 T4 — documents upload + invoice-preview PNG cache (writable).
+      - ./storage/documents:/home_ai/storage/documents:rw
+      - ./storage/invoice-previews:/home_ai/storage/invoice-previews:rw
       - ./SPEC.md:/home_ai/SPEC.md:ro
       - ./AGENTS.md:/home_ai/AGENTS.md:ro
       - ./HOME-AI-STRETCH.md:/home_ai/HOME-AI-STRETCH.md:ro
@@ -263,6 +270,9 @@ services:
       PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
       PROM_URL: "http://homeai-prometheus:9090"
       VAULT_URL: "http://homeai-vault:8200"
+      # VAULT_TOKEN lets /api/finance/ask fetch the anthropic key. Read-only
+      # usage; same token bot-responder uses. (Add to your .env)
+      VAULT_TOKEN: "${VAULT_TOKEN}"
       OLLAMA_URL: "http://homeai-ollama:11434"
       N8N_BASE_URL: "http://100.104.82.53:5678"
       MONTHLY_BUDGET_GBP: "15.0"
@@ -451,6 +461,46 @@ services:
       REALM_ENFORCE: "1"
     restart: unless-stopped
 
+  # ── U62 T3 — Paperless-ngx ─────────────────────────────────────────────
+  # Phase-3 scanner intake. Brother ADS-2800W SMB-drops PDFs into
+  # ./storage/paperless/consume on the host; the container OCRs and serves
+  # them. The u62-paperless-sync.sh cron pulls into the local `documents`
+  # table so the linker can connect them to vehicles/properties/children.
+  # Behind the existing Caddy/Authelia stack on port 8011.
+  paperless:
+    image: ghcr.io/paperless-ngx/paperless-ngx:2.13.5
+    container_name: homeai-paperless
+    # ai-proxy added so 100.104.82.53:8011 host port works (ai-internal +
+    # ai-services are both internal:true and block port publishing).
+    networks: [ai-internal, ai-services, ai-proxy]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis:    {condition: service_started}
+    ports:
+      - "100.104.82.53:8011:8000"
+    volumes:
+      - paperless_data:/usr/src/paperless/data
+      - paperless_media:/usr/src/paperless/media
+      - ./storage/paperless/consume:/usr/src/paperless/consume
+      - ./storage/paperless/export:/usr/src/paperless/export
+    environment:
+      PAPERLESS_DBHOST: homeai-postgres
+      PAPERLESS_DBPORT: "5432"
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_DBUSER: paperless
+      PAPERLESS_DBPASS: "${PAPERLESS_DB_PASSWORD}"
+      PAPERLESS_REDIS:  "redis://:${REDIS_PASSWORD}@redis:6379/2"
+      PAPERLESS_SECRET_KEY: "${PAPERLESS_SECRET_KEY}"
+      PAPERLESS_TIME_ZONE: "Europe/London"
+      PAPERLESS_OCR_LANGUAGE: "eng"
+      PAPERLESS_CONSUMER_POLLING: "30"
+      PAPERLESS_URL: "http://100.104.82.53:8011"
+      PAPERLESS_ADMIN_USER: "jo"
+      PAPERLESS_ADMIN_PASSWORD: "${PAPERLESS_ADMIN_PASSWORD}"
+      USERMAP_UID: "1000"
+      USERMAP_GID: "1000"
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   qdrant_data:
@@ -462,3 +512,5 @@ volumes:
   caddy_data:
   alertmanager_data:
   caddy_config:
+  paperless_data:
+  paperless_media:

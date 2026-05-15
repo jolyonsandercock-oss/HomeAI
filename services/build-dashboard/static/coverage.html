@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feed coverage — Home AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link href="https://unpkg.com/tabulator-tables@5.5.4/dist/css/tabulator.min.css" rel="stylesheet">
+<link href="/static/css/tables.css" rel="stylesheet">
+<script src="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .muted { color: #94a3b8; }
+  .pct-good { color: #86efac; }
+  .pct-amber { color: #fcd34d; }
+  .pct-bad { color: #fca5a5; }
+</style>
+</head>
+<body class="text-slate-100">
+
+<div x-data="covPage()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-5">
+
+  <header class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Feed coverage</h1>
+      <p class="text-sm muted">Per-feed daily presence over the last 2 years. Some "missing" rows are legitimate closed-business days.</p>
+    </div>
+    <a href="/" class="text-xs muted hover:text-slate-200">← Mission Control</a>
+  </header>
+
+  <section class="glass rounded-xl p-3 md:p-4">
+    <h2 class="text-lg font-medium mb-2 px-1">Per-feed summary</h2>
+    <div id="summary-table"></div>
+  </section>
+
+  <section class="glass rounded-xl p-3 md:p-4">
+    <h2 class="text-lg font-medium mb-2 px-1">Last-30d gaps</h2>
+    <div id="gaps-table"></div>
+  </section>
+</div>
+
+<script>
+function covPage() {
+  return {
+    summary: [],
+    gaps: [],
+    async boot() {
+      const [r1, r2] = await Promise.all([
+        fetch('/api/coverage/summary').then(r => r.json()),
+        fetch('/api/coverage/recent-gaps?limit=200').then(r => r.json()),
+      ]);
+      this.summary = Array.isArray(r1) ? r1 : (r1.rows || []);
+      this.gaps    = Array.isArray(r2) ? r2 : (r2.rows || []);
+      this.render();
+    },
+    pctColor(p) { p = Number(p || 0); return p >= 90 ? 'pct-good' : p >= 50 ? 'pct-amber' : 'pct-bad'; },
+    render() {
+      new Tabulator('#summary-table', {
+        data: this.summary,
+        layout: 'fitDataStretch',
+        columns: [
+          { title:'Feed', field:'feed_name', widthGrow:2 },
+          { title:'Dates', field:'n_dates', width:80, hozAlign:'right' },
+          { title:'OK', field:'n_ok', width:80, hozAlign:'right' },
+          { title:'Missing', field:'n_missing', width:90, hozAlign:'right',
+            formatter: c => c.getValue() > 0 ? `<span class="pct-bad">${c.getValue()}</span>` : '0' },
+          { title:'Partial', field:'n_partial', width:80, hozAlign:'right' },
+          { title:'% OK', field:'pct_ok', width:80, hozAlign:'right',
+            formatter: c => {
+              const v = c.getValue() == null ? '—' : Number(c.getValue()).toFixed(1) + '%';
+              const cls = c.getValue() == null ? '' : (c.getValue() >= 90 ? 'pct-good' : c.getValue() >= 50 ? 'pct-amber' : 'pct-bad');
+              return `<span class="${cls}">${v}</span>`;
+            } },
+          { title:'First', field:'earliest', width:110,
+            formatter: c => (c.getValue() || '').slice(0,10) },
+          { title:'Last', field:'latest', width:110,
+            formatter: c => (c.getValue() || '').slice(0,10) },
+        ],
+      });
+      new Tabulator('#gaps-table', {
+        data: this.gaps,
+        layout: 'fitDataStretch',
+        height: '50vh',
+        pagination: true, paginationSize: 50,
+        columns: [
+          { title:'Date',   field:'expected_date', width:110,
+            formatter: c => (c.getValue() || '').slice(0,10) },
+          { title:'Feed',   field:'feed_name', widthGrow:2 },
+          { title:'Status', field:'status', width:100,
+            formatter: c => `<span class="${c.getValue()==='missing'?'pct-bad':'pct-amber'}">${c.getValue()}</span>` },
+          { title:'Rows',   field:'row_count', width:80, hozAlign:'right' },
+        ],
+        placeholder: 'No recent gaps.',
+      });
+    },
+  };
+}
+</script>
+</body>
+</html>

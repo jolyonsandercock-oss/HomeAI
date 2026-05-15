@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Documents — Home AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link href="https://unpkg.com/tabulator-tables@5.5.4/dist/css/tabulator.min.css" rel="stylesheet">
+<link href="/static/css/tables.css" rel="stylesheet">
+<script src="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .muted { color: #94a3b8; }
+  .drop { border: 2px dashed rgba(148,163,184,0.3); border-radius: 12px; padding: 28px; text-align: center;
+    cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+  .drop:hover, .drop.over { border-color: rgb(59,130,246); background: rgba(59,130,246,0.06); }
+  .pill-auto    { background: rgba(74,222,128,0.18); color: #86efac; padding: 1px 8px; border-radius: 9999px; font-size: 0.72rem; }
+  .pill-manual  { background: rgba(168,85,247,0.18); color: #d8b4fe; padding: 1px 8px; border-radius: 9999px; font-size: 0.72rem; }
+  .pill-none    { background: rgba(148,163,184,0.18); color: #cbd5e1; padding: 1px 8px; border-radius: 9999px; font-size: 0.72rem; }
+</style>
+</head>
+<body class="text-slate-100">
+
+<div x-data="docsPage()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-5">
+
+  <header class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Documents</h1>
+      <p class="text-sm muted">Upload PDFs / TIFFs / images. We OCR them and auto-link to vehicles, properties or family members.</p>
+    </div>
+    <a href="/" class="text-xs muted hover:text-slate-200">← Mission Control</a>
+  </header>
+
+  <section class="glass rounded-xl p-4 space-y-3">
+    <div class="drop" :class="{over: dragOver}"
+         @click="$refs.fileInput.click()"
+         @dragover.prevent="dragOver = true"
+         @dragleave="dragOver = false"
+         @drop.prevent="onDrop($event)">
+      <div class="text-base font-medium" x-show="!uploading">📄 Drop a file here or click to choose</div>
+      <div class="text-base font-medium" x-show="uploading" x-text="`Uploading ${uploadingName}…`"></div>
+      <div class="text-xs muted mt-1">PDF, JPEG, PNG, TIFF accepted. Max 50 MB.</div>
+      <input type="file" x-ref="fileInput" class="hidden" multiple
+             accept="application/pdf,image/jpeg,image/png,image/tiff"
+             @change="onChange($event)">
+    </div>
+    <div x-show="lastResults.length" class="text-xs muted">
+      <template x-for="r in lastResults" :key="r.id || r.error">
+        <div class="mono py-0.5">
+          <template x-if="r.error">
+            <span class="text-rose-400" x-text="'✗ ' + (r.filename || '') + ': ' + r.error"></span>
+          </template>
+          <template x-if="!r.error">
+            <span>
+              <span class="text-emerald-400">✓</span>
+              #<span x-text="r.id"></span>
+              · <span x-text="r.ocr_chars + ' chars OCR'"></span>
+              <template x-if="r.linked_table">
+                <span class="pill-auto ml-1" x-text="r.linked_table + ' #' + r.linked_id + ' (' + r.linked_by + ')'"></span>
+              </template>
+              <template x-if="!r.linked_table">
+                <span class="pill-none ml-1">no auto-link</span>
+              </template>
+              <template x-if="r.duplicate">
+                <span class="pill-manual ml-1">already on file</span>
+              </template>
+            </span>
+          </template>
+        </div>
+      </template>
+    </div>
+  </section>
+
+  <section class="glass rounded-xl p-3 md:p-4">
+    <h2 class="text-lg font-medium mb-2 px-1">Stored documents</h2>
+    <div id="docs-table"></div>
+  </section>
+
+</div>
+
+<script>
+function docsPage() {
+  return {
+    dragOver: false,
+    uploading: false,
+    uploadingName: '',
+    lastResults: [],
+    docs: [],
+    table: null,
+
+    async boot() {
+      await this.loadList();
+    },
+
+    async loadList() {
+      const r = await fetch('/api/documents/list?limit=300');
+      const d = await r.json();
+      this.docs = d.rows || [];
+      this.render();
+    },
+
+    onChange(e) {
+      this.uploadAll(Array.from(e.target.files || []));
+      e.target.value = '';
+    },
+    onDrop(e) {
+      this.dragOver = false;
+      this.uploadAll(Array.from(e.dataTransfer.files || []));
+    },
+
+    async uploadAll(files) {
+      this.lastResults = [];
+      for (const f of files) {
+        this.uploading = true;
+        this.uploadingName = f.name;
+        try {
+          const fd = new FormData();
+          fd.append('file', f);
+          const r = await fetch('/api/documents/upload?title=' + encodeURIComponent(f.name),
+                                { method: 'POST', body: fd });
+          const j = await r.json();
+          this.lastResults.push({ ...j, filename: f.name });
+        } catch (e) {
+          this.lastResults.push({ error: e.message, filename: f.name });
+        }
+      }
+      this.uploading = false;
+      await this.loadList();
+    },
+
+    render() {
+      if (this.table) this.table.destroy();
+      this.table = new Tabulator('#docs-table', {
+        data: this.docs,
+        layout: 'fitDataStretch',
+        height: '60vh',
+        pagination: true, paginationSize: 50,
+        columns: [
+          { title:'Added', field:'created_at', width:150,
+            formatter: c => (c.getValue() || '').slice(0, 16).replace('T',' ') },
+          { title:'Title', field:'title', widthGrow:3,
+            formatter: c => `<a href="/api/documents/${c.getRow().getData().id}/file" target="_blank" class="text-blue-300 hover:text-blue-200">${c.getValue() || ''}</a>` },
+          { title:'Category', field:'category', width:140 },
+          { title:'Type', field:'mime_type', width:130 },
+          { title:'OCR', field:'ocr_chars', width:80, hozAlign:'right',
+            formatter: c => (c.getValue() || 0) + ' ch' },
+          { title:'Linked to', field:'linked_table', widthGrow:1,
+            formatter: c => {
+              const r = c.getRow().getData();
+              if (!r.linked_table) return '<span class="pill-none">none</span>';
+              return `<span class="pill-auto">${r.linked_table} #${r.linked_id}</span>`;
+            } },
+          { title:'How', field:'linked_by', width:140,
+            formatter: c => c.getValue() || '' },
+          { title:'Entity', field:'entity_id', width:80, hozAlign:'right' },
+          { title:'Realm', field:'realm', width:80 },
+        ],
+        placeholder: 'No documents uploaded yet.',
+      });
+    },
+  };
+}
+</script>
+</body>
+</html>

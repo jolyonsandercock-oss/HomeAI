@@ -10,6 +10,7 @@
 <link href="/static/css/tables.css" rel="stylesheet">
 <script src="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"></script>
 <script src="/static/js/homeai-table.js"></script>
+<script src="/static/js/u45-components.js"></script>
 <style>
   :root { color-scheme: dark; }
   body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -17,10 +18,15 @@
   .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
   .pill-malthouse { background: rgba(96,165,250,0.15); color: #93c5fd; border: 1px solid rgba(96,165,250,0.3); padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; }
   .pill-sandwich  { background: rgba(74,222,128,0.15); color: #86efac; border: 1px solid rgba(74,222,128,0.3); padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; }
+  .dw-btn { padding: 4px 10px; font-size: 12px; border-radius: 6px; background: rgba(15,23,42,0.6); border: 1px solid rgba(148,163,184,0.2); cursor: pointer; color: #cbd5e1; }
+  .dw-btn:hover { background: rgba(15,23,42,0.9); }
+  .dw-btn.active { background: rgb(99,102,241); color: white; border-color: transparent; }
 </style>
 </head>
 <body class="text-slate-100">
-<div x-data="to()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+<div x-data="to()" x-init="boot()"
+     @date-window-changed.window="onDateChange($event.detail)"
+     class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
 
 <header class="flex flex-wrap items-center justify-between gap-3">
   <div>
@@ -31,15 +37,30 @@
     <input type="text" data-homeai-search placeholder="search… (/)"
            class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm w-40"
            @input="searchAll($event.target.value)">
-    <label class="text-xs text-slate-400">Window
-      <select x-model.number="days" @change="reload()" class="ml-2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm">
-        <option value="7">7d</option><option value="30" selected>30d</option>
-        <option value="90">90d</option><option value="365">1y</option><option value="1095">3y</option>
-      </select>
-    </label>
     <a href="/" class="text-xs text-slate-400 hover:text-slate-200">← Mission Control</a>
   </div>
 </header>
+
+<section class="glass rounded-xl p-3">
+  <div x-data="dateWindow('touchoffice')" x-init="boot()" class="flex items-center gap-2 flex-wrap">
+    <span class="text-xs uppercase tracking-wide text-slate-400">Window</span>
+    <button class="dw-btn" :class="{active: preset==='today'}"      @click="setPreset('today')">Today</button>
+    <button class="dw-btn" :class="{active: preset==='yesterday'}"  @click="setPreset('yesterday')">Yesterday</button>
+    <button class="dw-btn" :class="{active: preset==='this_week'}"  @click="setPreset('this_week')">This wk</button>
+    <button class="dw-btn" :class="{active: preset==='last_week'}"  @click="setPreset('last_week')">Last wk</button>
+    <button class="dw-btn" :class="{active: preset==='mtd'}"        @click="setPreset('mtd')">MTD</button>
+    <button class="dw-btn" :class="{active: preset==='last_month'}" @click="setPreset('last_month')">Last mo</button>
+    <button class="dw-btn" :class="{active: preset==='30d'}"        @click="setPreset('30d')">30d</button>
+    <button class="dw-btn" :class="{active: preset==='90d'}"        @click="setPreset('90d')">90d</button>
+    <span class="text-xs text-slate-500 mx-2">or</span>
+    <input type="date" x-model="customFrom" @change="setCustom()"
+           class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+    <span class="text-xs text-slate-500">→</span>
+    <input type="date" x-model="customTo" @change="setCustom()"
+           class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs">
+    <span class="text-xs text-slate-400 ml-2" x-text="label"></span>
+  </div>
+</section>
 
 <section class="grid grid-cols-1 md:grid-cols-2 gap-4">
   <template x-for="c in data.coverage" :key="c.site">
@@ -86,7 +107,13 @@ function to() {
     days: 30,
     data: { coverage: [], per_day: [], top_departments: [], top_plus: [], recent_scrapes: [] },
     tables: {},
-    async boot() { await this.reload(); },
+    async boot() {
+      // First reload waits for the dateWindow component to dispatch its init event.
+      setTimeout(() => this.reload(), 50);
+    },
+    onDateChange({days}) {
+      if (days && days !== this.days) { this.days = days; this.reload(); }
+    },
     async reload() {
       const r = await fetch(`/api/touchoffice/overview?days=${this.days}`);
       this.data = await r.json();

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import Response
 import pdfplumber, pandas as pd, io, hashlib, re
 
 app = FastAPI()
@@ -30,6 +31,27 @@ async def parse_csv(file: UploadFile = File(...)):
     df = pd.read_csv(io.BytesIO(content), nrows=1000)
     df = df.where(pd.notna(df), None)
     return {"data": df.to_dict(orient='records'), "row_count": len(df)}
+
+@app.post("/render-page1-png")
+async def render_page1_png(file: UploadFile = File(...), width: int = 1200):
+    """U61 T2 — render page 1 of a PDF as a PNG (Wand/ImageMagick under the
+    hood via pdfplumber.Page.to_image). Used by the dashboard invoice side panel.
+    Capped at 10MB input and 2000px width."""
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(413, "File too large")
+    width = max(400, min(int(width), 2000))
+    with pdfplumber.open(io.BytesIO(content)) as pdf:
+        if not pdf.pages:
+            raise HTTPException(400, "PDF has no pages")
+        # resolution=N maps to N DPI. 1200px wide at A4 portrait ≈ 144 DPI.
+        page = pdf.pages[0]
+        target_dpi = max(72, int(width / (page.width / 72)))
+        img = page.to_image(resolution=target_dpi)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+    return Response(content=buf.getvalue(), media_type="image/png")
+
 
 @app.get("/healthcheck")
 async def healthcheck():

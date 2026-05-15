@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tasks — Home AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link href="https://unpkg.com/tabulator-tables@5.5.4/dist/css/tabulator.min.css" rel="stylesheet">
+<link href="/static/css/tables.css" rel="stylesheet">
+<script src="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .muted { color: #94a3b8; }
+  .pri-urgent { background: rgba(244,63,94,0.20); color: #fca5a5; padding: 1px 8px; border-radius: 9999px; font-size: 0.72rem; }
+  .pri-high   { background: rgba(245,158,11,0.20); color: #fcd34d; padding: 1px 8px; border-radius: 9999px; font-size: 0.72rem; }
+  .pri-normal { background: rgba(59,130,246,0.18); color: #93c5fd; padding: 1px 8px; border-radius: 9999px; font-size: 0.72rem; }
+  .pri-low    { background: rgba(148,163,184,0.18); color: #cbd5e1; padding: 1px 8px; border-radius: 9999px; font-size: 0.72rem; }
+  .btn-primary { background: rgb(59,130,246); color: white; padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; }
+  .btn-primary:hover { background: rgb(37,99,235); }
+  .btn-primary:disabled { background: rgba(59,130,246,0.4); cursor: not-allowed; }
+</style>
+</head>
+<body class="text-slate-100">
+
+<div x-data="tasksPage()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-5">
+
+  <header class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Tasks</h1>
+      <p class="text-sm muted">Manual to-dos + AI-extracted email tasks in one feed.</p>
+    </div>
+    <a href="/" class="text-xs muted hover:text-slate-200">← Mission Control</a>
+  </header>
+
+  <section class="glass rounded-xl p-4 space-y-2">
+    <h2 class="text-sm uppercase tracking-wide muted">Add task</h2>
+    <form @submit.prevent="create()" class="flex flex-wrap gap-2 items-end">
+      <input x-model="draft.title" type="text" placeholder="What needs doing?"
+             class="flex-1 min-w-[220px] bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm">
+      <select x-model="draft.priority"
+              class="bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm">
+        <option value="low">low</option>
+        <option value="normal" selected>normal</option>
+        <option value="high">high</option>
+        <option value="urgent">urgent</option>
+      </select>
+      <input x-model="draft.due_at" type="datetime-local"
+             class="bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm">
+      <select x-model="draft.realm"
+              class="bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm">
+        <option value="owner">owner</option>
+        <option value="work">work</option>
+        <option value="family" selected>family</option>
+        <option value="shared">shared</option>
+      </select>
+      <button class="btn-primary" :disabled="!draft.title.trim() || saving"
+              x-text="saving ? 'Saving…' : 'Add'"></button>
+    </form>
+  </section>
+
+  <section class="glass rounded-xl p-3 md:p-4">
+    <h2 class="text-lg font-medium mb-2 px-1">
+      Open <span class="muted text-sm" x-text="`(${rows.length})`"></span>
+    </h2>
+    <div id="tasks-table"></div>
+  </section>
+
+</div>
+
+<script>
+function tasksPage() {
+  return {
+    rows: [],
+    table: null,
+    saving: false,
+    draft: { title:'', priority:'normal', due_at:'', realm:'family' },
+
+    async boot() { await this.load(); },
+
+    async load() {
+      const r = await fetch('/api/tasks/list');
+      const d = await r.json();
+      this.rows = d.rows || [];
+      this.render();
+    },
+
+    async create() {
+      if (!this.draft.title.trim()) return;
+      this.saving = true;
+      try {
+        const body = { ...this.draft };
+        if (!body.due_at) delete body.due_at;
+        const r = await fetch('/api/tasks/create', {
+          method:'POST',
+          headers:{'content-type':'application/json'},
+          body: JSON.stringify(body),
+        });
+        const j = await r.json();
+        if (j.ok) {
+          this.draft.title = '';
+          this.draft.due_at = '';
+          await this.load();
+        } else {
+          alert('Create failed: ' + (j.error || 'unknown'));
+        }
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    async complete(id) {
+      await fetch(`/api/tasks/${id}/complete`, { method:'POST' });
+      await this.load();
+    },
+
+    render() {
+      if (this.table) this.table.destroy();
+      const _this = this;
+      this.table = new Tabulator('#tasks-table', {
+        data: this.rows,
+        layout: 'fitDataStretch',
+        height: '65vh',
+        pagination: true, paginationSize: 50,
+        initialSort: [{column:'due_at', dir:'asc'}],
+        columns: [
+          { title:'Source', field:'kind', width:110,
+            formatter: c => c.getValue() === 'manual' ? '<span class="text-slate-300">manual</span>' : '<span class="text-amber-300">email</span>' },
+          { title:'Priority', field:'priority', width:90,
+            formatter: c => `<span class="pri-${c.getValue() || 'normal'}">${c.getValue() || 'normal'}</span>` },
+          { title:'Title', field:'title', widthGrow:3 },
+          { title:'Due', field:'due_at', width:160,
+            formatter: c => (c.getValue() || '').slice(0,16).replace('T',' ') },
+          { title:'Status', field:'status', width:110 },
+          { title:'Realm', field:'realm', width:80 },
+          { title:'', field:'task_id', width:90,
+            formatter: (c) => {
+              const r = c.getRow().getData();
+              if (r.kind !== 'manual' || !c.getValue()) return '';
+              return `<button onclick="event.stopPropagation(); window._tasksComplete(${c.getValue()})" style="background:rgba(16,185,129,0.18);border:1px solid rgba(16,185,129,0.4);color:#86efac;padding:3px 8px;border-radius:5px;cursor:pointer;font-size:11px;">✓ done</button>`;
+            },
+          },
+        ],
+        placeholder: 'No open tasks.',
+      });
+      window._tasksComplete = (id) => _this.complete(id);
+    },
+  };
+}
+</script>
+</body>
+</html>

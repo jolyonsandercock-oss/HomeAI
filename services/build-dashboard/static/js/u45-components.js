@@ -1,7 +1,17 @@
 // U45 shared dashboard components — date-window picker + site filter.
 // Standalone Alpine.js components used by invoices.html, workforce.html, caterbook.html.
+// U61 T5 — additional `days` integer in the date-window-changed event so
+// legacy pages (touchoffice, economics, dojo, finance) that take a single
+// `days` query param can listen too. days is inclusive of both endpoints.
 
 (function () {
+
+  function _daysBetween(fromIso, toIso) {
+    if (!fromIso || !toIso) return null;
+    const f = new Date(fromIso + 'T00:00:00Z');
+    const t = new Date(toIso   + 'T00:00:00Z');
+    return Math.max(1, Math.round((t - f) / 86400000) + 1);
+  }
 
   /**
    * dateWindow — 5 preset buttons + custom range picker.
@@ -92,7 +102,9 @@
         this.fromIso = from; this.toIso = to;
         this.customFrom = from; this.customTo = to;
         localStorage.setItem(`homeai-dw-${this.scope}`, JSON.stringify({ preset: this.preset }));
-        this.$dispatch && this.$dispatch('date-window-changed', { from, to, label: this.label, preset: this.preset });
+        this.$dispatch && this.$dispatch('date-window-changed', {
+          from, to, label: this.label, preset: this.preset, days: _daysBetween(from, to)
+        });
       },
 
       setCustom() {
@@ -104,7 +116,8 @@
           preset: 'custom', from: this.customFrom, to: this.customTo
         }));
         this.$dispatch && this.$dispatch('date-window-changed', {
-          from: this.customFrom, to: this.customTo, label: this.label, preset: 'custom'
+          from: this.customFrom, to: this.customTo, label: this.label, preset: 'custom',
+          days: _daysBetween(this.customFrom, this.customTo)
         });
       },
     };

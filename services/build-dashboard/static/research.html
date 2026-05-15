@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Research — Home AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .muted { color: #94a3b8; }
+  mark { background: rgba(250,204,21,0.4); color: #fef9c3; padding: 0 2px; border-radius: 2px; }
+  .narrative mark { display: none; }
+  .pill-email { background: rgba(96,165,250,0.18); color: #93c5fd; padding: 1px 8px; border-radius: 999px; font-size: 0.72rem; }
+  .pill-invoice_line { background: rgba(245,158,11,0.18); color: #fcd34d; padding: 1px 8px; border-radius: 999px; font-size: 0.72rem; }
+  .pill-document { background: rgba(168,85,247,0.18); color: #d8b4fe; padding: 1px 8px; border-radius: 999px; font-size: 0.72rem; }
+  .chip { padding: 4px 10px; font-size: 12px; border-radius: 6px; background: rgba(15,23,42,0.6);
+    border: 1px solid rgba(148,163,184,0.2); cursor: pointer; color: #cbd5e1; }
+  .chip.active { background: rgb(99,102,241); color: white; border-color: transparent; }
+</style>
+</head>
+<body class="text-slate-100">
+
+<div x-data="researchPage()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-5">
+
+  <header class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Research</h1>
+      <p class="text-sm muted">Ask anything across emails, invoice line items, and uploaded documents. Sonnet answers with cited passages.</p>
+    </div>
+    <a href="/" class="text-xs muted hover:text-slate-200">← Mission Control</a>
+  </header>
+
+  <section class="glass rounded-xl p-4 space-y-3">
+    <form @submit.prevent="ask()" class="flex gap-2">
+      <input x-model="question" type="text" autocomplete="off"
+             placeholder='Try: "what was my biggest meat order this year?"'
+             class="flex-1 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-base focus:outline-none focus:border-blue-500"
+             autofocus>
+      <button type="submit"
+              class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-md text-sm font-medium"
+              :disabled="asking"
+              x-text="asking ? 'Thinking…' : 'Ask'"></button>
+    </form>
+    <div class="flex items-center gap-2 flex-wrap">
+      <span class="text-xs uppercase muted">Sources</span>
+      <template x-for="s in allSources" :key="s.key">
+        <button type="button" class="chip"
+                :class="{active: sources.includes(s.key)}"
+                @click="toggle(s.key)" x-text="s.label"></button>
+      </template>
+    </div>
+  </section>
+
+  <template x-if="answer">
+    <section class="glass rounded-xl p-4 space-y-4">
+      <div>
+        <h2 class="text-sm uppercase muted mb-1">Answer</h2>
+        <div class="narrative text-base whitespace-pre-wrap" x-text="answer.narrative"></div>
+        <div class="text-xs muted mt-2"
+             x-text="answer.n_passages + ' passages searched · GPT-class citations [N] refer to the list below'"></div>
+      </div>
+      <div x-show="(answer.passages || []).length">
+        <h3 class="text-sm uppercase muted mb-2">Passages</h3>
+        <ol class="space-y-2">
+          <template x-for="(p, i) in answer.passages || []" :key="p.source_table + p.source_id">
+            <li class="bg-slate-900/40 rounded p-3 border border-slate-700/30">
+              <div class="flex items-center gap-2 text-xs">
+                <span class="muted" x-text="'[' + (i+1) + ']'"></span>
+                <span :class="'pill-' + p.source_table" x-text="p.source_table"></span>
+                <span class="muted" x-text="(p.event_at || '').slice(0,16).replace('T',' ')"></span>
+                <span class="muted">·</span>
+                <span class="muted" x-text="'rank ' + Number(p.rank).toFixed(3)"></span>
+              </div>
+              <div class="text-sm font-medium mt-1" x-text="p.title || '(no title)'"></div>
+              <div class="text-sm mt-1" x-html="p.snippet?.replaceAll('&lt;&lt;','<mark>').replaceAll('&gt;&gt;','</mark>')"></div>
+            </li>
+          </template>
+        </ol>
+      </div>
+    </section>
+  </template>
+</div>
+
+<script>
+function researchPage() {
+  return {
+    question: '',
+    asking: false,
+    answer: null,
+    allSources: [
+      { key:'email',        label:'Emails' },
+      { key:'invoice_line', label:'Invoice lines' },
+      { key:'document',     label:'Documents' },
+    ],
+    sources: ['email','invoice_line','document'],
+
+    async boot() {
+      const u = new URL(location.href);
+      if (u.searchParams.get('q')) { this.question = u.searchParams.get('q'); this.ask(); }
+    },
+
+    toggle(k) {
+      const i = this.sources.indexOf(k);
+      if (i === -1) this.sources.push(k); else this.sources.splice(i, 1);
+    },
+
+    async ask() {
+      if (!this.question.trim()) return;
+      this.asking = true;
+      this.answer = null;
+      try {
+        const r = await fetch('/api/research/ask', {
+          method:'POST',
+          headers:{'content-type':'application/json'},
+          body: JSON.stringify({
+            question: this.question,
+            sources: this.sources.length ? this.sources : ['email','invoice_line','document'],
+            top_k: 12,
+          }),
+        });
+        this.answer = await r.json();
+      } catch (e) {
+        this.answer = { narrative: 'Error: ' + (e.message || e), passages: [] };
+      } finally {
+        this.asking = false;
+      }
+    },
+  };
+}
+</script>
+</body>
+</html>
