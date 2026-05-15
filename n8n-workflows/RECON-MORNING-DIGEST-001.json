@@ -1,0 +1,50 @@
+{
+  "_comment": [
+    "RECON-MORNING-DIGEST-001 — wraps u69-morning-digest.sh per SPEC §4b.7.",
+    "Cron 08:30 daily. Single Telegram pulse summarising prior-day mart.",
+    "exceptions. Silent when zero exceptions in window (spec explicit).",
+    "",
+    "Import:",
+    "  docker exec -i homeai-n8n n8n import:workflow --input=- \\",
+    "    < /home_ai/n8n-workflows/RECON-MORNING-DIGEST-001.json",
+    "Then activate via UI or:",
+    "  docker exec homeai-n8n n8n update:workflow --id=<NEW_ID> --active=true",
+    "",
+    "After activation, remove the grandfathered host-cron entry:",
+    "  crontab -l | grep -v u69-morning-digest | crontab -"
+  ],
+  "name": "RECON-MORNING-DIGEST-001",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "cronExpression", "expression": "30 8 * * *"}]
+        }
+      },
+      "id": "trig-1",
+      "name": "Cron 08:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "bash /home_ai/scripts/u69-morning-digest.sh"
+      },
+      "id": "exec-1",
+      "name": "Run morning digest",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Cron 08:30": {
+      "main": [[{"node": "Run morning digest", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {"executionOrder": "v1"},
+  "tags": ["recon", "digest", "u69"]
+}

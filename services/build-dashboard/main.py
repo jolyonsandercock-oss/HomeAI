@@ -1950,6 +1950,445 @@ async def api_documents_expiry_due():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# U66 — whole-system bot ask (used by Telegram free-text + future channels)
+# ─────────────────────────────────────────────────────────────────────────────
+# Unlike /api/finance/ask (finance-slug subset), this loads EVERY approved
+# query_whitelist slug in the caller's realm AND exposes a `queue_instruction`
+# tool that drops free-text instructions into bot_instructions for the
+# existing bot-responder pipeline.
+
+_RO_POOL: asyncpg.Pool | None = None
+
+async def _ro_pool() -> asyncpg.Pool:
+    """Lazy-init pool with homeai_readonly role. Cannot INSERT/UPDATE/DELETE
+    (CREATE etc.) — protects free-text SQL from accidentally mutating state.
+    Statement timeout 5s, row limit imposed at query time."""
+    global _RO_POOL
+    if _RO_POOL is not None:
+        return _RO_POOL
+    sec = await _vault_read("postgres-roles")
+    ro_pw = (sec or {}).get("homeai_readonly")
+    if not ro_pw:
+        raise RuntimeError("homeai_readonly password not in vault")
+    dsn = f"postgresql://homeai_readonly:{ro_pw}@homeai-postgres:5432/homeai"
+    _RO_POOL = await asyncpg.create_pool(
+        dsn, min_size=1, max_size=3,
+        server_settings={"statement_timeout": "5000"})
+    return _RO_POOL
+
+
+# Curated table catalog — surfaces the most-useful tables/views to the bot's
+# SQL writer. The model can also call describe_table for full column lists.
+_BOT_TABLE_CATALOG = """\
+FINANCE
+  bank_accounts (id, entity_id, bank_name, account_name, account_number, sort_code, account_type, realm)
+  bank_transactions (id, bank_account_id, entity_id, transaction_date, description, amount, balance, category, realm)
+  card_statements (bank_account_id, statement_date, period_start, period_end, opening_balance, payments_credited, spending_charged, closing_balance, min_payment, credit_limit)
+  account_transfers (src_txn_id, dst_txn_id, amount, transfer_date, confidence)
+  v_finance_kpis (total_cash_balance, total_credit_card_debt, net_worth, mtd_in/out, interest_paid_12m, fees_paid_12m)
+  v_account_balances_now (bank_account_id, account_name, account_type, balance, is_liability, as_of_date)
+  v_inter_entity_owings (entity_a_id, entity_b_id, n_transfers, gross_a_to_b, gross_b_to_a, net_flow_a_to_b)
+
+WORKFORCE
+  workforce_users (external_id, full_name, preferred_name, email, base_pay_rate, active, hire_date)
+  workforce_shifts (user_external_id, location_external_id, shift_date, start_time, end_time, hours_worked, cost_estimate)
+  workforce_timesheets (user_external_id, period_start, period_end, hours_total, cost_total)
+  staff_meta (user_external_id, hourly_rate_pence, on_cost_pct, role_tags, source)
+  v_workforce_shifts_costed (shift_id, user_external_id, shift_date, hours_worked, shift_cost)
+
+SALES
+  touchoffice_fixed_totals (entity_id, site, report_date, totaliser_id, value_pence)
+  touchoffice_department_sales (site, report_date, department_name, total_pence)
+  touchoffice_plu_sales (site, report_date, plu_id, plu_name, qty, total_pence)
+  dojo_transactions (transaction_date, transaction_time, site, transaction_amount, payment_method)
+  v_dojo_daily (date, site, n_txns, gross_sales)
+
+ACCOMMODATION
+  caterbook_room_nights (ref, room, guest_name, room_type, rate_code, night_date, rate_per_night)
+  caterbook_daily_snapshots (snapshot_date, total_in_house, revenue_in_house, arrivals_count, departures_count)
+  caterbook_bookings (ref, room, guest_name, arrival_date, departure_date, rate_total)
+  v_daily_accom_revenue (date, revenue_gbp, room_nights_sold)
+
+INVOICES & PURCHASES
+  vendor_invoice_inbox (id, entity_id, vendor_domain, vendor_name, subject, received_at, amount_seen, invoice_date, has_pdf, site, notes)
+  vendor_invoice_lines (invoice_id, line_no, description, qty, unit_price, line_net, canonical_id)
+  product_canonical (id, family, name, default_unit)
+  v_invoice_lines_resolved (line_id, invoice_id, invoice_date, vendor, canonical_family, canonical_name, qty, line_net)
+
+EMAIL / COMMS
+  emails (id, gmail_message_id, account, from_address, subject, received_at, body_text, classification, tsv)
+  email_tasks (subject, task_type, severity, due_by, status)
+  telegram_outbox (source, severity, body_preview, sent_at, suppressed)
+  bot_instructions (id, source, lane, status, raw_subject, raw_text, received_at)
+
+TASKS & CALENDAR
+  tasks (id, source, title, body, priority, status, due_at, realm)
+  calendar_events (source_account, gcal_event_id, title, start_at, end_at, location)
+  v_tasks_unified, v_calendar_upcoming
+
+DOCUMENTS
+  documents (id, title, category, file_path, ocr_text, linked_table, linked_id, entity_id, realm)
+  v_documents_linked, v_documents_expiry_due
+
+VEHICLES / PROPERTIES / FAMILY
+  vehicles (id, registration, make_model, mot_due, insurance_renewal, road_tax_due)
+  properties (id, address_line1, postcode_full, purchase_date, purchase_price)
+  children (id, name, date_of_birth, school_name)
+
+SYSTEM / SUPPORT
+  entities (id, name)
+  system_alerts (id, name, severity, status, fired_at, acknowledged)
+  audit_log (id, action, source, payload, created_at)
+  feed_coverage (feed_name, expected_date, row_count, status)
+  events / events_2026_NN (id, event_type, status, payload, created_at)
+  dead_letter (id, pipeline, resolved, last_attempt_at)
+  ai_usage (provider, model, input_tokens, output_tokens, cost_pence, created_at)
+
+CONVENTIONS
+  - Most tables have a `realm` column (owner/work/family/shared). RLS is on.
+  - Money columns: numeric(12,2), GBP, unless `_pence` suffix.
+  - Dates: YYYY-MM-DD. Timestamps: timestamptz UTC.
+  - Joins for workforce: workforce_shifts.user_external_id = workforce_users.external_id.
+  - Joins for invoice lines: vendor_invoice_lines.invoice_id = vendor_invoice_inbox.id.
+"""
+
+
+def _is_safe_select(sql: str) -> tuple[bool, str]:
+    """Allow SELECT / WITH / EXPLAIN only. Reject anything else."""
+    s = sql.strip().rstrip(";").strip()
+    if not s:
+        return False, "empty"
+    head = re.split(r"\s+", s, maxsplit=1)[0].upper()
+    if head not in ("SELECT", "WITH", "EXPLAIN"):
+        return False, f"only SELECT/WITH/EXPLAIN allowed, got {head}"
+    # Reject obviously-destructive keywords even inside CTEs / subqueries.
+    bad = re.search(r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COPY|VACUUM|REINDEX)\b",
+                    s, re.I)
+    if bad:
+        return False, f"contains forbidden keyword: {bad.group(1)}"
+    # Reject SET / RESET — the bot must not flip RLS context.
+    if re.search(r"\b(SET|RESET)\b\s+(?!LOCAL)", s, re.I):
+        return False, "SET/RESET not allowed"
+    return True, ""
+
+
+@app.post("/api/bot/ask")
+async def api_bot_ask(body: dict = Body(...)):
+    question = (body.get("question") or "").strip()
+    channel  = (body.get("channel") or "telegram").strip()
+    if not question:
+        return JSONResponse({"error": "missing 'question'"}, status_code=400)
+
+    anth = await _vault_read("anthropic")
+    api_key = (anth or {}).get("api_key")
+    if not api_key:
+        return JSONResponse({"error": "anthropic key not available"}, status_code=503)
+
+    caller_realm = _current_realm.get() or "owner"
+
+    # Load every approved slug visible to the caller's realm.
+    p = await pool()
+    async with p.acquire() as c:
+        rows = await c.fetch("""
+            SELECT id, slug, display_name, description, intent_examples,
+                   sql_template, param_schema, result_format, realm
+              FROM query_whitelist
+             WHERE active = true AND approved_at IS NOT NULL
+               AND ($1 = 'owner' OR realm = $1 OR realm = 'shared')
+             ORDER BY slug
+        """, caller_realm)
+    slugs = []
+    for r in rows:
+        slugs.append({
+            "slug":            r["slug"],
+            "display_name":    r["display_name"],
+            "description":     r["description"],
+            "intent_examples": list(r["intent_examples"] or []),
+            "sql_template":    r["sql_template"],
+            "param_schema":    (r["param_schema"] if isinstance(r["param_schema"], dict)
+                                else json.loads(r["param_schema"] or "{}")),
+        })
+
+    # Build tools: one per slug + queue_instruction.
+    tools = []
+    for s in slugs:
+        props, required = {}, []
+        for name, spec in (s["param_schema"] or {}).items():
+            t = spec.get("type", "string")
+            jt = {"int":"integer","float":"number","bool":"boolean",
+                  "enum":"string","string":"string","str":"string"}.get(t,"string")
+            prop = {"type": jt}
+            if "default" in spec:
+                prop["description"] = f"default {spec['default']}"
+            if spec.get("required"):
+                required.append(name)
+            props[name] = prop
+        tools.append({
+            "name": s["slug"],
+            "description": (s["description"] or "")
+                + (("\nExamples: " + "; ".join(s["intent_examples"]))
+                   if s["intent_examples"] else ""),
+            "input_schema": {"type":"object","properties":props,"required":required},
+        })
+
+    tools.append({
+        "name": "describe_table",
+        "description":
+            "Return the column list (name, type, nullable) for a public-schema "
+            "table or view. Use this when you need to know exact column names "
+            "before writing run_query SQL.",
+        "input_schema": {
+            "type":"object",
+            "properties":{
+                "table":{"type":"string","description":"table or view name (no schema prefix)"},
+            },
+            "required":["table"],
+        },
+    })
+
+    tools.append({
+        "name": "run_query",
+        "description":
+            "Run a read-only SELECT (or WITH … SELECT) against the homeai "
+            "database. Use this for ANY question that the curated slug tools "
+            "above can't answer specifically — e.g. 'how many shifts has Tom "
+            "worked', 'top 5 vendors by cost this month', 'which days had "
+            "highest pub gross', 'show me the last 5 invoices from St "
+            "Austell'. Rules:\n"
+            "  - SELECT / WITH / EXPLAIN only. No writes.\n"
+            "  - ALWAYS include LIMIT 200 unless aggregating.\n"
+            "  - Use the table catalog in the system prompt. Call "
+            "describe_table first if unsure of columns.\n"
+            "  - Money columns are GBP numeric(12,2) unless `_pence`.\n"
+            "  - Sets a 5s statement timeout — keep queries simple.",
+        "input_schema": {
+            "type":"object",
+            "properties":{
+                "sql":{"type":"string","description":"the SELECT statement"},
+                "purpose":{"type":"string","description":"one-line reason — logged for audit"},
+            },
+            "required":["sql"],
+        },
+    })
+
+    tools.append({
+        "name": "queue_instruction",
+        "description":
+            "Queue a free-text instruction for the human operator to action later. "
+            "USE THIS only when the user explicitly asks for something to be DONE "
+            "(e.g. 'run the touchoffice backfill', 'send Jane an email', 'build "
+            "me a new dashboard tile'). Do NOT use for questions — use a data tool "
+            "for those. Returns the queued bot_instructions row id.",
+        "input_schema": {
+            "type":"object",
+            "properties":{
+                "text":{"type":"string","description":"the user's verbatim instruction"},
+                "lane":{"type":"string","enum":["query","data","unknown"],
+                        "description":"'data' for write/system actions, 'query' otherwise"},
+                "summary":{"type":"string","description":"one-line summary for the queue"},
+            },
+            "required":["text","summary"],
+        },
+    })
+
+    system = ("You are jolyboxbot, Jo's whole-system assistant via Telegram. "
+              "Jo runs a pub (Atlantic Road Trading), a property company "
+              "(Atlantic Road Estates), and family/personal affairs. ALWAYS "
+              "use a data tool for questions — never invent figures. The "
+              "curated slug tools handle common questions; for deep / "
+              "ad-hoc queries, use describe_table then run_query against "
+              "the database directly. Use queue_instruction ONLY when Jo "
+              "asks for something to be DONE. Keep replies 1-3 short "
+              "paragraphs. Money is GBP, format £x,xxx.xx.\n\n"
+              "Database table catalog:\n" + _BOT_TABLE_CATALOG)
+
+    messages = [{"role": "user", "content": question}]
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    tool_results = []
+    instruction_id = None
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        for _turn in range(3):
+            payload = {
+                "model": "claude-sonnet-4-6",
+                "max_tokens": 1200,
+                "system": system,
+                "tools": tools,
+                "messages": messages,
+            }
+            r = await client.post("https://api.anthropic.com/v1/messages",
+                                  headers=headers, json=payload)
+            if r.status_code != 200:
+                return JSONResponse({"error":"anthropic API error",
+                                     "status":r.status_code,
+                                     "body":r.text[:400]}, status_code=502)
+            resp = r.json()
+            blocks = resp.get("content") or []
+            messages.append({"role":"assistant","content":blocks})
+
+            if resp.get("stop_reason") != "tool_use":
+                narrative = "".join(b.get("text","") for b in blocks
+                                     if b.get("type")=="text").strip()
+                return {"question":question, "channel":channel,
+                        "narrative":narrative or "(no narrative)",
+                        "tool_results":tool_results,
+                        "instruction_id":instruction_id}
+
+            tu_msgs = []
+            for tu in [b for b in blocks if b.get("type")=="tool_use"]:
+                name = tu.get("name")
+                if name == "describe_table":
+                    table = ((tu.get("input") or {}).get("table") or "").strip()
+                    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", table):
+                        tu_msgs.append({"type":"tool_result","tool_use_id":tu["id"],
+                                        "is_error":True,"content":"bad table name"})
+                        continue
+                    cols = await db_all("""
+                        SELECT column_name, data_type, is_nullable
+                          FROM information_schema.columns
+                         WHERE table_schema='public' AND table_name=$1
+                         ORDER BY ordinal_position
+                    """, table)
+                    if not cols:
+                        tu_msgs.append({"type":"tool_result","tool_use_id":tu["id"],
+                                        "content":f"no such table or view: {table}"})
+                        continue
+                    out = "\n".join(f"  {c['column_name']:30s} {c['data_type']}"
+                                     + (" NULL" if c['is_nullable']=='YES' else "")
+                                     for c in cols)
+                    tu_msgs.append({"type":"tool_result","tool_use_id":tu["id"],
+                                    "content":f"Columns of {table}:\n{out}"})
+                    tool_results.append({"slug":"describe_table","table":table,
+                                          "n_columns":len(cols)})
+                    continue
+
+                if name == "run_query":
+                    inp = tu.get("input") or {}
+                    sql = (inp.get("sql") or "").strip()
+                    purpose = (inp.get("purpose") or "")[:300]
+                    ok_sql, why = _is_safe_select(sql)
+                    if not ok_sql:
+                        tu_msgs.append({"type":"tool_result","tool_use_id":tu["id"],
+                                        "is_error":True,
+                                        "content":f"rejected: {why}"})
+                        tool_results.append({"slug":"run_query","sql":sql[:200],
+                                              "rejected":why})
+                        continue
+                    # Add LIMIT if missing (lazy heuristic — skip if aggregating)
+                    sql_to_run = sql.rstrip(";").strip()
+                    if " LIMIT " not in sql_to_run.upper() \
+                            and " GROUP BY " not in sql_to_run.upper() \
+                            and " HAVING "   not in sql_to_run.upper():
+                        sql_to_run += " LIMIT 200"
+                    try:
+                        ro = await _ro_pool()
+                        async with ro.acquire() as ro_conn:
+                            async with ro_conn.transaction(readonly=True):
+                                # Pin RLS context for the bot caller.
+                                await ro_conn.execute(
+                                    "SET LOCAL app.current_entity = 'all'")
+                                await ro_conn.execute(
+                                    "SELECT home_ai.set_realm($1)", caller_realm)
+                                rows = await ro_conn.fetch(sql_to_run)
+                        # Audit
+                        try:
+                            await db_one("""
+                                INSERT INTO audit_log
+                                    (action, source, payload)
+                                VALUES ('bot_run_query', 'api/bot/ask',
+                                        jsonb_build_object(
+                                          'channel', $1::text,
+                                          'sql', $2::text,
+                                          'purpose', $3::text,
+                                          'n_rows', $4::int))
+                            """, channel, sql_to_run, purpose, len(rows))
+                        except Exception:
+                            pass
+                        preview = [_isoify(dict(r)) for r in rows[:50]]
+                        tu_msgs.append({"type":"tool_result","tool_use_id":tu["id"],
+                                        "content":json.dumps(
+                                          {"n_rows":len(rows), "rows":preview},
+                                          default=str)[:8000]})
+                        tool_results.append({"slug":"run_query",
+                                              "sql":sql_to_run[:500],
+                                              "n_rows":len(rows),
+                                              "rows":preview})
+                    except Exception as e:
+                        msg = str(e)[:400]
+                        tu_msgs.append({"type":"tool_result","tool_use_id":tu["id"],
+                                        "is_error":True,
+                                        "content":f"SQL error: {msg}"})
+                        tool_results.append({"slug":"run_query","sql":sql_to_run[:200],
+                                              "error":msg})
+                    continue
+
+                if name == "queue_instruction":
+                    inp = tu.get("input") or {}
+                    text = (inp.get("text") or "").strip()
+                    lane = (inp.get("lane") or "data").strip()
+                    summary = (inp.get("summary") or "").strip()
+                    if not text:
+                        tu_msgs.append({"type":"tool_result","tool_use_id":tu["id"],
+                                        "is_error":True, "content":"text required"})
+                        continue
+                    async with p.acquire() as c:
+                        async with c.transaction():
+                            await c.execute("SET LOCAL app.current_entity = '3'")
+                            await c.execute("SELECT home_ai.set_realm($1)", caller_realm)
+                            bi_id = await c.fetchval("""
+                                INSERT INTO bot_instructions
+                                    (source, source_id, from_user, sender_email,
+                                     received_at, raw_subject, raw_text,
+                                     lane, status, entity_id, realm)
+                                VALUES ('telegram', NULL, 'jo-telegram',
+                                        'jolyon.sandercock@gmail.com',
+                                        now(), $1, $2, $3, 'pending', 3, $4)
+                                RETURNING id
+                            """, summary[:200], text[:4000], lane, caller_realm)
+                    instruction_id = bi_id
+                    tool_results.append({"slug":"queue_instruction",
+                                          "instruction_id":bi_id,
+                                          "lane":lane, "summary":summary})
+                    tu_msgs.append({"type":"tool_result","tool_use_id":tu["id"],
+                                    "content":json.dumps({"queued_id":bi_id,
+                                                          "lane":lane})})
+                    continue
+
+                slug_row = next((s for s in slugs if s["slug"] == name), None)
+                if not slug_row:
+                    tu_msgs.append({"type":"tool_result","tool_use_id":tu["id"],
+                                    "is_error":True,"content":f"unknown tool {name!r}"})
+                    continue
+                ok, bound = _bind_params(slug_row["param_schema"], tu.get("input") or {})
+                if not ok:
+                    tu_msgs.append({"type":"tool_result","tool_use_id":tu["id"],
+                                    "is_error":True,"content":f"param error: {bound}"})
+                    continue
+                try:
+                    run = await _run_slug(slug_row, bound)
+                except Exception as e:
+                    tu_msgs.append({"type":"tool_result","tool_use_id":tu["id"],
+                                    "is_error":True,"content":f"SQL error: {e}"})
+                    continue
+                tool_results.append(run)
+                preview = run["rows"][:30]
+                tu_msgs.append({"type":"tool_result","tool_use_id":tu["id"],
+                                "content":json.dumps({"n_rows":run["n_rows"],
+                                                      "rows":preview},
+                                                      default=str)[:7000]})
+            messages.append({"role":"user","content":tu_msgs})
+
+    return {"question":question, "channel":channel,
+            "narrative":"(tool-loop did not converge in 3 turns)",
+            "tool_results":tool_results,
+            "instruction_id":instruction_id}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # U61 T4 — document upload, OCR, entity linking
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -3902,6 +4341,83 @@ async def _run_slug(slug_row: dict, bound: dict) -> dict:
 @app.get("/finance")
 async def finance_page():
     return FileResponse(str(STATIC / "finance.html"))
+
+
+@app.get("/recon")
+async def recon_page():
+    return FileResponse(str(STATIC / "recon.html"))
+
+
+@app.get("/api/recon/summary")
+async def api_recon_summary(window_days: int = 30):
+    """U69 T3: top-of-page tiles for /recon — counts per level + cash variance."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SELECT set_config('app.current_entity','all',false)")
+        await c.execute("SELECT set_config('app.current_realm','owner',false)")
+        l1 = await c.fetchrow("""
+            SELECT
+              COUNT(*) FILTER (WHERE status='ok')          AS ok,
+              COUNT(*) FILTER (WHERE status='minor')       AS minor,
+              COUNT(*) FILTER (WHERE status='mismatch')    AS mismatch,
+              COUNT(*) FILTER (WHERE status='approximate') AS approximate,
+              COUNT(*)                                     AS total
+            FROM mart.daily_totals
+            WHERE transaction_date >= current_date - $1::int
+        """, window_days)
+        l2 = await c.fetchrow("""
+            SELECT
+              COUNT(*) FILTER (WHERE kind='l2_phantom_refund')      AS phantom,
+              COUNT(*) FILTER (WHERE kind='l2_unlinked_refund')     AS unlinked,
+              COUNT(*) FILTER (WHERE kind='l2_elevated_risk_mode')  AS elevated,
+              COUNT(*) FILTER (WHERE kind='l2_outsized_amount')     AS outsized
+            FROM mart.exceptions
+            WHERE kind LIKE 'l2_%' AND status='open'
+              AND transaction_date >= current_date - $1::int
+        """, window_days)
+        l3 = await c.fetchrow("""
+            SELECT
+              COUNT(*) FILTER (WHERE status='settled_clean')    AS clean,
+              COUNT(*) FILTER (WHERE status='settled_short')    AS short,
+              COUNT(*) FILTER (WHERE status='unsettled_5d')     AS unsettled_5d,
+              COUNT(*) FILTER (WHERE status='unsettled_open')   AS open,
+              (SUM(expected_amount_minor) FILTER (WHERE status='unsettled_5d') / 100.0)::numeric(12,2)
+                                                                AS unsettled_gbp
+            FROM mart.expected_settlements
+            WHERE batch_date >= current_date - $1::int
+        """, window_days)
+        cv = await c.fetchrow("""
+            SELECT (SUM(variance_minor)/100.0)::numeric(12,2)   AS sum_variance_gbp,
+                   COUNT(*) FILTER (WHERE variance_minor < -500) AS days_short_over_5
+            FROM mart.cash_variance
+            WHERE operator_id='_aggregate_day'
+              AND transaction_date >= current_date - $1::int
+        """, window_days)
+    return {
+        "window_days": window_days,
+        "l1": _isoify(dict(l1) if l1 else {}),
+        "l2": _isoify(dict(l2) if l2 else {}),
+        "l3": _isoify(dict(l3) if l3 else {}),
+        "cash_variance": _isoify(dict(cv) if cv else {}),
+    }
+
+
+@app.get("/api/recon/exceptions")
+async def api_recon_exceptions(window_days: int = 30, status: str = "open"):
+    """U69 T3: mart.exceptions filtered + sorted for Tabulator."""
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SELECT set_config('app.current_entity','all',false)")
+        await c.execute("SELECT set_config('app.current_realm','owner',false)")
+        rows = await c.fetch("""
+            SELECT id, raised_at, severity, kind, source, site, transaction_date,
+                   summary, status
+              FROM mart.exceptions
+             WHERE status = $1
+               AND raised_at >= now() - ($2::int || ' days')::interval
+             ORDER BY severity DESC, raised_at DESC LIMIT 500
+        """, status, window_days)
+    return {"rows": [_isoify(dict(r)) for r in rows], "window_days": window_days, "status": status}
 
 
 @app.get("/api/recipes/sales-vs-consumption")

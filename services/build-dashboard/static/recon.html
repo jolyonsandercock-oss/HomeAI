@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recon — Home AI</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tabulator-tables@5.6.1/dist/css/tabulator_midnight.min.css">
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tabulator-tables@5.6.1/dist/js/tabulator.min.js"></script>
+<style>
+  body { background: #0f172a; color: #e2e8f0; font-family: ui-sans-serif, system-ui; }
+  .tile { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px; }
+  .num { font-variant-numeric: tabular-nums; }
+  .red { color: #f87171; } .amber { color: #fbbf24; } .green { color: #34d399; }
+</style>
+</head>
+<body>
+<div x-data="recon()" x-init="boot()" class="max-w-7xl mx-auto p-4 space-y-4">
+
+<div class="flex items-center justify-between">
+  <h1 class="text-2xl font-semibold">Reconciliation</h1>
+  <div class="flex items-center gap-2 text-xs text-slate-400">
+    <a class="text-emerald-400 hover:underline" href="/">Home</a> ·
+    <a class="text-emerald-400 hover:underline" href="/finance">Finance</a> ·
+    <a class="text-emerald-400 hover:underline" href="/economics">Economics</a> ·
+    <span>window:</span>
+    <select x-model.number="windowDays" @change="refresh()" class="bg-slate-800 border border-slate-700 rounded p-1">
+      <option :value="7">7d</option><option :value="14">14d</option>
+      <option :value="30">30d</option><option :value="90">90d</option>
+    </select>
+  </div>
+</div>
+
+<!-- Summary tiles -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+  <div class="tile">
+    <div class="text-xs text-slate-400 uppercase">L1 daily totals</div>
+    <div class="text-3xl num"><span class="green" x-text="s.l1?.ok ?? 0"></span><span class="text-slate-500 text-base">/</span><span x-text="s.l1?.total ?? 0"></span></div>
+    <div class="text-xs mt-1"><span class="red num" x-text="s.l1?.mismatch ?? 0"></span> mismatch · <span class="amber num" x-text="s.l1?.minor ?? 0"></span> minor</div>
+  </div>
+  <div class="tile">
+    <div class="text-xs text-slate-400 uppercase">L2 surveillance (open)</div>
+    <div class="text-3xl num">
+      <span class="red"   x-text="s.l2?.phantom ?? 0"></span> /
+      <span class="amber" x-text="s.l2?.unlinked ?? 0"></span> /
+      <span class="text-slate-300" x-text="s.l2?.outsized ?? 0"></span>
+    </div>
+    <div class="text-xs mt-1 text-slate-400">phantom · unlinked · outsized</div>
+  </div>
+  <div class="tile">
+    <div class="text-xs text-slate-400 uppercase">L3 settlements</div>
+    <div class="text-3xl num"><span class="red" x-text="s.l3?.unsettled_5d ?? 0"></span><span class="text-slate-500 text-base"> unsettled</span></div>
+    <div class="text-xs mt-1">£<span class="num red" x-text="(s.l3?.unsettled_gbp ?? 0).toLocaleString()"></span> expected</div>
+  </div>
+  <div class="tile">
+    <div class="text-xs text-slate-400 uppercase">Cash variance (window total)</div>
+    <div class="text-3xl num"><span :class="(s.cash_variance?.sum_variance_gbp ?? 0) < 0 ? 'red' : 'green'">£<span x-text="(s.cash_variance?.sum_variance_gbp ?? 0).toLocaleString()"></span></span></div>
+    <div class="text-xs mt-1"><span class="num red" x-text="s.cash_variance?.days_short_over_5 ?? 0"></span> days short &gt; £5</div>
+  </div>
+</div>
+
+<!-- Exceptions table -->
+<div class="tile">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-lg">Open exceptions</h2>
+    <select x-model="status" @change="refresh()" class="bg-slate-800 border border-slate-700 rounded p-1 text-xs">
+      <option value="open">open</option>
+      <option value="reviewing">reviewing</option>
+      <option value="resolved">resolved</option>
+      <option value="suppressed">suppressed</option>
+    </select>
+  </div>
+  <div id="exc-table"></div>
+</div>
+
+</div>
+
+<script>
+function recon() {
+  return {
+    s: {}, windowDays: 30, status: 'open', table: null,
+    async boot() { await this.refresh(); },
+    async refresh() {
+      const sumR = await fetch(`/api/recon/summary?window_days=${this.windowDays}`);
+      this.s = sumR.ok ? await sumR.json() : {};
+      const excR = await fetch(`/api/recon/exceptions?window_days=${this.windowDays}&status=${this.status}`);
+      const exc = excR.ok ? (await excR.json()).rows : [];
+      if (this.table) { this.table.replaceData(exc); }
+      else {
+        this.table = new Tabulator('#exc-table', {
+          data: exc, layout: 'fitDataStretch', height: 540, pagination: 'local', paginationSize: 25,
+          columns: [
+            { title:'When',       field:'raised_at',        formatter: c => (c.getValue() || '').slice(0,16).replace('T',' '), width: 130 },
+            { title:'Sev',        field:'severity',         width: 80,
+              formatter: c => { const v=c.getValue(); return `<span class="${v==='critical'||v==='high'?'red':v==='medium'?'amber':'text-slate-400'}">${v}</span>`; } },
+            { title:'Kind',       field:'kind',             width: 180 },
+            { title:'Source',     field:'source',           width: 110 },
+            { title:'Site',       field:'site',             width: 80 },
+            { title:'Tx date',    field:'transaction_date', width: 100 },
+            { title:'Summary',    field:'summary',          formatter: 'plaintext' },
+          ],
+        });
+      }
+    },
+  };
+}
+</script>
+</body>
+</html>
