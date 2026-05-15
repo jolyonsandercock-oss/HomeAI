@@ -1269,6 +1269,22 @@ async def private_today_page():
     return FileResponse(str(STATIC / "private-today.html"))
 
 
+# ── U84 Phase 5 — Build hub ───────────────────────────────────────
+@app.get("/build/pipelines")
+async def build_pipelines_page():
+    return FileResponse(str(STATIC / "build-pipelines.html"))
+
+
+@app.get("/build/models")
+async def build_models_page():
+    return FileResponse(str(STATIC / "build-models.html"))
+
+
+@app.get("/build/forensics")
+async def build_forensics_page():
+    return FileResponse(str(STATIC / "build-forensics.html"))
+
+
 # ── U84 Phase 6 — /all sitemap ────────────────────────────────────
 @app.get("/all")
 async def all_sitemap_page():
@@ -5054,7 +5070,10 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         'mortgages_summary','mortgages_all','capital_summary',
                         'net_worth_summary','mortgage_coverage',
                         -- U84 Phase 2 additions
-                        'today_kpis_work','today_kpis_private','action_queue')
+                        'today_kpis_work','today_kpis_private','action_queue',
+                        -- U84 Phase 5 additions (build hub)
+                        'build_pipeline_status','build_model_spend_30d',
+                        'build_forensic_summary')
          ORDER BY slug
     """)
     out = []
