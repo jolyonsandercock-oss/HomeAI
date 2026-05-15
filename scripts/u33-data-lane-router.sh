@@ -18,7 +18,7 @@ VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}
 # Attachments are written under /home_ai/data — must be bind-mounted in the
 # homeai-playwright container. The router will mkdir its subdirs on first run.
 docker exec -i -e VAULT_TOKEN="$VAULT_TOKEN" homeai-playwright python << 'PYEOF'
-import os, asyncio, json, urllib.request, urllib.parse, base64, re, hashlib, pathlib
+import os, asyncio, json, urllib.request, urllib.parse, urllib.error, base64, re, hashlib, pathlib
 from datetime import datetime, timezone
 import asyncpg
 
@@ -129,7 +129,19 @@ async def main():
         subject = row["raw_subject"] or ""
         received = row["received_at"]
 
-        msg = gmail_message("bot", mid)
+        try:
+            msg = gmail_message("bot", mid)
+        except urllib.error.HTTPError as e:
+            # 4xx from google-fetch usually means the message_id isn't in the
+            # 'bot' inbox (Gmail-API 400/404). Mark as 'rejected' so the cron
+            # loop doesn't keep failing on it (status_check disallows 'failed').
+            await conn.execute("""
+              UPDATE bot_instructions
+                 SET status='rejected', resolution=$2, resolved_at=now(), picked_up_by='u33-data-lane-router'
+               WHERE id=$1
+            """, bi_id, f"gmail fetch HTTP {e.code}: message_id not retrievable")
+            print(f"  bi#{bi_id} marked rejected: gmail HTTP {e.code} on mid={mid}")
+            continue
         payload = msg.get("payload", {})
         attachments = list(iter_attachments(payload))
         if not attachments:
