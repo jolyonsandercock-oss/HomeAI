@@ -36,3 +36,15 @@ Generated outputs from the U86 audit sprint (and successors). Files are dated
 | T5 entropy pre-commit hook | (`.git/hooks/pre-commit` installed) | Blocks commit on staged content with high-entropy strings. Synthetic test confirmed working. |
 | T6 sprint-number guard | (`scripts/next-sprint-number.sh`) | Returns next free U-number (currently `U91`) by scanning git + sprints/ + decisions/ |
 | T7 selftest expansion | — | DEFERRED. selftest.sh untouched; standalone follow-up |
+
+## 2026-05-15 — U88 fix-and-forget
+
+| Track | Disposition | Outcome |
+|---|---|---|
+| T1 Gmail Ingest workflow | RETIRED | n8n workflow `QMKzaCFrKBS4ewWm` renamed `_archive_Gmail Ingest`. Superseded by `gmail-ingest-v1` (active) + `gmail-poll-driver-v1`. |
+| T2 n8n Dreaming workflow | DISABLED | `dreaming-v1` set `active=false`. Python `scripts/u36-dreaming-nightly.sh` is canonical (cron `15 2 * * *`). |
+| T3 5 Anthropic n8n nodes → tool-use | DEFERRED | Too risky overnight without per-node smoke. Tracked for U91. |
+| T4 OCR watcher restoration | SKIPPED | Conflicts with U75 archival decision (moved to `_archive/` after Paperless deemed canonical). |
+| T5 Dead-letter replay | NO-OP | U86 audit showed 0 buckets. Nothing to replay. |
+| T6 Cron exit-code audit | DONE | `2026-05-15-cron-health.md`. 43 cron scripts mapped; new scripts logged "no log yet" (waiting for next scheduled run). |
+| T7 TODO/FIXME sweep | DONE | `2026-05-15-todo-sweep.md`. 7 markers found; 6 false positives (my own search pattern), 1 in `restore.sh` is mktemp template — functionally zero real TODOs. |
