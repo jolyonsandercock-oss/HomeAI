@@ -72,3 +72,18 @@ Generated outputs from the U86 audit sprint (and successors). Files are dated
 
 The packet is the deliverable. Everything from U86–U89 that needed Jo's
 in-person attention is consolidated into ONE document Jo runs at the box.
+
+## 2026-05-15 — U92 overnight ops finesse (partial — bench running)
+
+| Track | Output | Status |
+|---|---|---|
+| T1 LR + Xero parked | jo-checklist.md updated | ✓ done (time 75→50 min) |
+| T2 NatWest nudge cron | `scripts/u92-nudge-natwest.sh` registered at 09:30 | ✓ done |
+| T3 U89 deferred | `docs/views.md` (908 lines), `audits/...memory-hygiene.md`, `audits/...agents-md-drift.md` | ✓ done |
+| T4 Email backfill 400d | `vendor_invoice_inbox` now reaches **2025-02-24** (446 days back from today) | ✓ done — 99 rows ingested + bulk-triaged |
+| T5 Invoice backfill 400d | (same as T4, single endpoint) | ✓ done |
+| T6 Qwen vs Haiku bench | (`scripts/u61-line-item-bench.sh` re-running in background) | ⏳ in-flight |
+| T7 Percentages audit | `audits/...percentages-audit.md` — found HARDCODED 60/40 wet/dry split in v_daily_gp pub GP | ✓ done |
+| T8 Cash recon flow | `audits/...cash-recon-flow.md` — 3 fixes recommended (auto-expected_cash, per-session hunter, exception trigger) | ✓ done |
+| T9 Yesterday's email-tasks | (carried — bot_instructions pending=0; will surface at next session start) | ✓ no-op |
+| T10 Recommendations + stretch lock | (next step — drafting after bench finishes) | ⏳ |
