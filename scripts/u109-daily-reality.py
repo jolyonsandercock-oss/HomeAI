@@ -431,6 +431,23 @@ async def main():
     # U111 — revenue forecast for tomorrow
     forecast_rows = await conn.fetch("SELECT * FROM v_revenue_forecast_tomorrow")
 
+    # U114 — AI usage last 24h (cost + cache hit rate per service)
+    ai_usage_rows = await conn.fetch("""
+        SELECT
+          service,
+          model_used,
+          COUNT(*)                                AS calls,
+          SUM(prompt_tokens)                      AS in_fresh,
+          SUM(completion_tokens)                  AS out_tok,
+          SUM(COALESCE(cache_creation_tokens,0))  AS cache_w,
+          SUM(COALESCE(cache_read_tokens,0))      AS cache_r
+        FROM ai_usage
+        WHERE timestamp >= NOW() - INTERVAL '24 hours'
+          AND service IS NOT NULL
+        GROUP BY service, model_used
+        ORDER BY SUM(prompt_tokens) DESC NULLS LAST
+    """)
+
     # ── Room state today ────────────────────────────────────────────────
     # occupied_tonight: someone is in the room tonight (arrival or stay-through)
     # departing_today: someone left this morning — needs turnover
@@ -953,6 +970,78 @@ async def main():
     else:
         body = f'<p style="{STY["empty"]}">No arrivals booked for tomorrow yet.</p>'
     out.append(section(f'Tomorrow — {fmt_day(tomorrow)}', len(tom_arrivals), body))
+
+    # AI usage rollup (U114)
+    if ai_usage_rows:
+        # Anthropic public pricing (USD/MTok). GBP = USD × 0.79 approx.
+        # Cache write = 25% premium on base input; cache read = 10% of base.
+        PRICES = {
+            'claude-sonnet-4-6':            {'in': 3.0,  'out': 15.0},
+            'claude-haiku-4-5-20251001':    {'in': 0.80, 'out': 4.0},
+            'claude-opus-4-7':              {'in': 15.0, 'out': 75.0},
+        }
+        GBP = 0.79
+
+        def cost_for(model, in_fresh, out_tok, cache_w, cache_r):
+            p = PRICES.get(model, {'in': 1.0, 'out': 5.0})
+            cents = (
+                (in_fresh / 1e6) * p['in']                +
+                (cache_w  / 1e6) * p['in'] * 1.25         +
+                (cache_r  / 1e6) * p['in'] * 0.10         +
+                (out_tok  / 1e6) * p['out']
+            ) * GBP * 100  # → pence
+            return cents
+
+        rows = []
+        total_p = 0
+        total_in = total_w = total_r = total_out = total_calls = 0
+        for r in ai_usage_rows:
+            in_f = int(r['in_fresh'] or 0)
+            cw = int(r['cache_w'] or 0)
+            cr = int(r['cache_r'] or 0)
+            o  = int(r['out_tok'] or 0)
+            calls = int(r['calls'])
+            c_p = cost_for(r['model_used'], in_f, o, cw, cr)
+            input_total = in_f + cw + cr
+            hit_pct = (cr / input_total * 100) if input_total else 0
+            hit_html = (f'<span style="color:#16a34a;font-weight:bold">{hit_pct:.0f}%</span>'
+                        if hit_pct >= 30 else f'<span style="color:#777">{hit_pct:.0f}%</span>')
+            rows.append(
+                f'<tr>'
+                f'<td style="{STY["td"]}"><strong>{h(r["service"])}</strong><br>'
+                f'<span style="color:#888;font-size:12px">{h(r["model_used"])}</span></td>'
+                f'<td style="{STY["td"]};text-align:right">{calls}</td>'
+                f'<td style="{STY["td"]};text-align:right">{in_f + cw:,}</td>'
+                f'<td style="{STY["td"]};text-align:right">{cr:,}</td>'
+                f'<td style="{STY["td"]};text-align:center">{hit_html}</td>'
+                f'<td style="{STY["td"]};text-align:right">{c_p:.1f}p</td>'
+                f'</tr>')
+            total_p += c_p; total_in += in_f; total_w += cw; total_r += cr
+            total_out += o; total_calls += calls
+        total_input = total_in + total_w + total_r
+        overall_hit = (total_r / total_input * 100) if total_input else 0
+        rows.append(
+            f'<tr style="background:#f8f8f8">'
+            f'<td style="{STY["td"]}"><strong>Total</strong></td>'
+            f'<td style="{STY["td"]};text-align:right"><strong>{total_calls}</strong></td>'
+            f'<td style="{STY["td"]};text-align:right"><strong>{total_in + total_w:,}</strong></td>'
+            f'<td style="{STY["td"]};text-align:right"><strong>{total_r:,}</strong></td>'
+            f'<td style="{STY["td"]};text-align:center"><strong>{overall_hit:.0f}%</strong></td>'
+            f'<td style="{STY["td"]};text-align:right"><strong>£{total_p/100:.2f}</strong></td>'
+            f'</tr>')
+        body = (f'<p style="color:#666;font-size:13px;margin:0 0 6px 0">'
+                f'Anthropic spend last 24h. Cache reads cost 10% of base input; '
+                f'high hit-rate ≈ small spend. Effective Sonnet input ≈ '
+                f'£{(3.0 * GBP * 0.10):.2f}/MTok on cache hit.</p>'
+                f'<table style="{STY["tbl"]}">'
+                f'<tr><th style="{STY["th"]}">Service</th>'
+                f'<th style="{STY["th"]};text-align:right">Calls</th>'
+                f'<th style="{STY["th"]};text-align:right">In (fresh + write)</th>'
+                f'<th style="{STY["th"]};text-align:right">Cache reads</th>'
+                f'<th style="{STY["th"]};text-align:center">Hit</th>'
+                f'<th style="{STY["th"]};text-align:right">Cost</th></tr>'
+                + '\n'.join(rows) + '</table>')
+        out.append(section('AI usage — last 24h', None, body))
 
     out.append(f'<p style="{STY["foot"]}">All workflows in TEST mode. '
                'No guest-facing emails fired. Tonight bookings on the book: '
