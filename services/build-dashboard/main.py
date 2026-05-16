@@ -5726,7 +5726,9 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         'children','email_tasks_open','bot_instructions_pending',
                         'labour_recent_14d','ghost_shifts_recent','daily_gp_recent',
                         -- U98 source breakdown
-                        'today_bookings_by_source')
+                        'today_bookings_by_source',
+                        -- U101 restaurant reservations
+                        'today_restaurant')
          ORDER BY slug
     """)
     out = []
