@@ -1,0 +1,16 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "installCommand": "npm install --no-audit --no-fund",
+  "outputDirectory": ".next",
+  "regions": ["lhr1"],
+  "env": {
+    "POSTGRES_READONLY_URL": "@postgres_readonly_url"
+  },
+  "build": {
+    "env": {
+      "POSTGRES_READONLY_URL": "@postgres_readonly_url"
+    }
+  }
+}

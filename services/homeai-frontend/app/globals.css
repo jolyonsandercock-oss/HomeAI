@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html, body {
+  background: #0f0f0f;
+  color: #d4d4d4;
+  font-feature-settings: 'tnum' 1;  /* tabular numerals for data alignment */
+}
+
+/* Industrial-hospitality basics */
+.panel {
+  @apply bg-ink-50 rounded-lg shadow-panel;
+}
+.panel-raised {
+  @apply bg-ink-100 rounded-lg shadow-panel;
+}
+.tile {
+  @apply panel p-4 hover:shadow-panel-hover transition-shadow;
+}
+.label {
+  @apply text-xs uppercase tracking-wider text-ink-500 font-medium;
+}
+.data-value {
+  @apply font-mono text-ink-900;
+}
+.delta-pos { @apply text-good; }
+.delta-neg { @apply text-warn; }
+
+/* KPI text scale */
+.kpi-xl { @apply text-kpi-xl font-mono text-ink-900 tracking-tight; }
+.kpi    { @apply text-kpi    font-mono text-ink-900 tracking-tight; }
+
+/* Sandbox edit-mode visuals */
+.sandbox-on .sandbox-target {
+  outline: 1px dashed rgba(245, 158, 11, 0.45);
+  outline-offset: 6px;
+  cursor: grab;
+}
+.sandbox-on .sandbox-target:hover {
+  outline-color: rgba(245, 158, 11, 0.85);
+}

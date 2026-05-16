@@ -218,7 +218,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD}"
       GF_USERS_ALLOW_SIGN_UP: "false"
     depends_on: [prometheus]
-    ports: ["3001:3000"]
+    ports: ["3003:3000"]
     restart: unless-stopped
 
   prometheus:
@@ -449,6 +449,17 @@ services:
   # Long-running idle container; host cron invokes responder.py every 5 min.
   # ai-internal: vault, postgres, google-fetch.
   # ai-egress:  api.anthropic.com, api.telegram.org.
+  homeai-frontend:
+    build: ./services/homeai-frontend
+    container_name: homeai-frontend
+    networks: [ai-internal, ai-egress]
+    ports: ["3003:3000"]
+    environment:
+      POSTGRES_READONLY_URL: "postgresql://homeai_readonly:${HOMEAI_READONLY_PASSWORD}@homeai-postgres:5432/homeai"
+      NEXT_TELEMETRY_DISABLED: "1"
+      NODE_ENV: "production"
+    restart: unless-stopped
+
   wa-bridge:
     build: ./services/wa-bridge
     container_name: homeai-wa-bridge
