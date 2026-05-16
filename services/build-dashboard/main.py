@@ -529,6 +529,7 @@ _REALM_EXEMPT_PREFIXES = (
     "/api/healthz",
     "/static",
     "/api/documents/ingest-from-paperless",  # U70 — webhook from Paperless, auth'd by shared secret
+    "/api/breakfast/submit",                  # U106 — public form-submit from guest email; auth'd by signed token
 )
 
 _UI_TO_DB_REALM = {
@@ -1322,6 +1323,111 @@ async def economics_page():
 @app.get("/m")
 async def mobile_page():
     return FileResponse(str(STATIC / "m.html"))
+
+
+# ── U106 — Breakfast order public-form endpoint ───────────────────
+import hmac as _hmac, hashlib as _hashlib
+_BREAKFAST_SECRET = os.environ.get("BREAKFAST_TOKEN_SECRET", "u106-rotate-me-please-1234567890")
+
+
+def _make_breakfast_token(booking_id: int, service_date: str) -> str:
+    """Signed token tying a submission back to (booking, service_date).
+    Format: <booking_id>.<service_date>.<8-hex-sig>."""
+    msg = f"{booking_id}.{service_date}".encode()
+    sig = _hmac.new(_BREAKFAST_SECRET.encode(), msg, _hashlib.sha256).hexdigest()[:16]
+    return f"{booking_id}.{service_date}.{sig}"
+
+
+def _verify_breakfast_token(tok: str):
+    try:
+        parts = tok.split(".")
+        if len(parts) != 3: return None
+        b_id, svc_date, sig = parts
+        expected = _make_breakfast_token(int(b_id), svc_date)
+        if _hmac.compare_digest(expected.split(".")[-1], sig):
+            return int(b_id), svc_date
+    except Exception:
+        return None
+    return None
+
+
+@app.post("/api/breakfast/submit")
+async def breakfast_submit(request: Request):
+    """Public endpoint — receives form-POST from the breakfast email.
+    Token-signed so we trust the row mapping."""
+    # Accept either form-encoded or JSON
+    ctype = (request.headers.get("content-type") or "").lower()
+    if "application/json" in ctype:
+        body = await request.json()
+    else:
+        form = await request.form()
+        body = dict(form)
+    tok = body.get("t") or body.get("token") or ""
+    verified = _verify_breakfast_token(tok)
+    if not verified:
+        return JSONResponse({"error": "invalid token"}, status_code=400)
+    booking_id, service_date = verified
+
+    # Form may carry per-guest fields g1_dish / g1_drink / g1_notes,
+    # g2_dish / g2_drink / g2_notes, etc.
+    rows = []
+    for g_idx in range(1, 10):
+        prefix = f"g{g_idx}_"
+        dish = (body.get(prefix + "dish") or "").strip()
+        drink = (body.get(prefix + "drink") or "").strip()
+        notes = (body.get(prefix + "notes") or "").strip()
+        allergies = (body.get(prefix + "allergies") or "").strip()
+        if not dish and not drink:
+            continue
+        rows.append({
+            "guest_index": g_idx, "dish": dish, "hot_drink": drink,
+            "notes": notes, "allergies": allergies,
+        })
+
+    service_time = (body.get("service_time") or "").strip()
+
+    if not rows:
+        return JSONResponse({"error": "no selections"}, status_code=400)
+
+    submitter_ip = request.client.host if request.client else None
+
+    p_ = await pool()
+    async with p_.acquire() as c:
+        async with c.transaction():
+            await c.execute("SELECT home_ai.set_realm('owner')")
+            # service_date arrives as a 'YYYY-MM-DD' string from the form; parse to date.
+            from datetime import date as _d
+            svc_date_obj = _d.fromisoformat(service_date)
+            for r in rows:
+                await c.execute("""
+                    INSERT INTO breakfast_orders
+                        (accommodation_booking_id, email_token, guest_index,
+                         service_date, service_time, hot_drink, dish,
+                         allergies, notes, submitter_ip, realm)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::inet, 'work')
+                    ON CONFLICT (email_token, guest_index) DO UPDATE
+                      SET service_time = EXCLUDED.service_time,
+                          hot_drink    = EXCLUDED.hot_drink,
+                          dish         = EXCLUDED.dish,
+                          allergies    = EXCLUDED.allergies,
+                          notes        = EXCLUDED.notes,
+                          submitted_at = now()
+                """, booking_id, tok, r["guest_index"], svc_date_obj,
+                     service_time, r["hot_drink"], r["dish"],
+                     r["allergies"], r["notes"], submitter_ip)
+            await c.execute("""
+                UPDATE breakfast_email_sends
+                   SET responded_at = now()
+                 WHERE email_token = $1 AND responded_at IS NULL
+            """, tok)
+    return HTMLResponse(
+        "<html><body style='font-family:system-ui;padding:40px;max-width:560px;margin:auto;background:#fafafa'>"
+        "<h2 style='color:#0a0a0b'>Thanks — we've got your breakfast order.</h2>"
+        "<p>See you in the morning between 8 and 9am.</p>"
+        "<p style='color:#71717a;font-size:14px'>The Olde Malthouse Inn</p>"
+        "</body></html>",
+        status_code=200,
+    )
 
 
 # ── U85 Phase D1 — Desktop view (canary) ──────────────────────────
@@ -5728,7 +5834,9 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         -- U98 source breakdown
                         'today_bookings_by_source',
                         -- U101 restaurant reservations
-                        'today_restaurant')
+                        'today_restaurant',
+                        -- U106 breakfast orders
+                        'breakfast_tomorrow')
          ORDER BY slug
     """)
     out = []
