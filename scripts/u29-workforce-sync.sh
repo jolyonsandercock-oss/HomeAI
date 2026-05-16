@@ -16,9 +16,10 @@
 
 set -uo pipefail
 DAYS="${1:-90}"
+DAYS_FORWARD="${2:-21}"
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 
-docker exec -i -e DAYS="$DAYS" -e VAULT_TOKEN="$VAULT_TOKEN" homeai-playwright python << 'PYEOF'
+docker exec -i -e DAYS="$DAYS" -e DAYS_FORWARD="$DAYS_FORWARD" -e VAULT_TOKEN="$VAULT_TOKEN" homeai-playwright python << 'PYEOF'
 import os, asyncio, json, time, urllib.request, urllib.parse, urllib.error
 from datetime import date as _date, datetime as _dt, timedelta
 import asyncpg
@@ -41,6 +42,7 @@ def to_dt(v):
         except Exception: return None
 
 DAYS = int(os.environ["DAYS"])
+DAYS_FORWARD = int(os.environ.get("DAYS_FORWARD", "21"))
 VAULT_TOKEN = os.environ["VAULT_TOKEN"]
 PG_DSN = os.environ["PG_DSN"]
 
@@ -171,7 +173,9 @@ async def main():
 
     today = _date.today()
     from_date = today - timedelta(days=DAYS)
-    print(f"── workforce.com sync: {from_date} → {today} ({DAYS}d) ──")
+    to_date_window = today + timedelta(days=DAYS_FORWARD)
+    print(f"── workforce.com sync: {from_date} → {to_date_window} "
+          f"({DAYS}d back, {DAYS_FORWARD}d forward) ──")
 
     conn = await asyncpg.connect(PG_DSN)
 
@@ -197,8 +201,8 @@ async def main():
     total_seen = total_ins = total_upd = 0
     last_status = None
     window_start = from_date
-    while window_start <= today:
-        window_end = min(window_start + timedelta(days=30), today)
+    while window_start <= to_date_window:
+        window_end = min(window_start + timedelta(days=30), to_date_window)
         status, body, ms, err = wf_call(base, tok, "/api/v2/shifts",
             {"from": window_start.isoformat(), "to": window_end.isoformat(),
              "page": 1, "page_size": 100})

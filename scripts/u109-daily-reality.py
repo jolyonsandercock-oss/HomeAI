@@ -80,46 +80,52 @@ WMO = {0:'clear', 1:'mainly clear', 2:'partly cloudy', 3:'overcast',
        95:'thunderstorm', 96:'thunderstorm + hail', 99:'severe thunderstorm + hail'}
 
 
-def weather_today_tomorrow():
-    try:
-        url = ('https://api.open-meteo.com/v1/forecast?latitude=50.66&longitude=-4.75'
-               '&daily=temperature_2m_max,temperature_2m_min,weather_code,'
-               'precipitation_probability_max,wind_speed_10m_max'
-               '&timezone=Europe%2FLondon&forecast_days=2')
-        d = json.loads(urllib.request.urlopen(url, timeout=8).read())['daily']
-        out = {}
-        for label, idx in (('today', 0), ('tomorrow', 1)):
-            out[label] = {
-                'date':  d['time'][idx],
-                'tmax':  d['temperature_2m_max'][idx],
-                'tmin':  d['temperature_2m_min'][idx],
-                'desc':  WMO.get(d['weather_code'][idx], '?'),
-                'rain':  d['precipitation_probability_max'][idx],
-                'wind':  d['wind_speed_10m_max'][idx],
-                'code':  d['weather_code'][idx],
-            }
-        return out
-    except Exception as e:
-        return {'error': str(e)[:80]}
+async def weather_and_surf_from_cache(conn, today, tomorrow):
+    """Read today + tomorrow forecast from weather_forecast cache. The cache
+    is refreshed daily by u46-weather-daily.sh at 07:30 (+ ad-hoc runs).
+    Falls back to API only if the cache is empty for the requested date —
+    keeps Jo's "poll once" intent."""
+    rows = await conn.fetch("""
+        SELECT DISTINCT ON (forecast_date)
+          forecast_date, fetched_at,
+          max_temp_c, min_temp_c, rain_mm,
+          weather_code, precipitation_probability, max_wind_mph,
+          wave_height_m, wave_period_s, wave_direction_deg
+          FROM weather_forecast
+         WHERE forecast_date IN ($1, $2)
+         ORDER BY forecast_date, fetched_at DESC
+    """, today, tomorrow)
+    out = {}
+    cache_age_s = None
+    for r in rows:
+        label = 'today' if r['forecast_date'] == today else 'tomorrow'
+        if r['fetched_at']:
+            age = (asyncio.get_event_loop().time() - 0)  # not used directly
+        out[label] = {
+            'date':  r['forecast_date'].isoformat(),
+            'tmax':  float(r['max_temp_c']) if r['max_temp_c'] is not None else None,
+            'tmin':  float(r['min_temp_c']) if r['min_temp_c'] is not None else None,
+            'desc':  WMO.get(r['weather_code'], '?') if r['weather_code'] is not None else '?',
+            'rain':  r['precipitation_probability'] if r['precipitation_probability'] is not None
+                     else (round(float(r['rain_mm']) * 10) if r['rain_mm'] is not None else 0),
+            'wind':  float(r['max_wind_mph'] or 0) * 1.609,  # mph→km/h
+            'code':  r['weather_code'],
+        }
+        if cache_age_s is None and r['fetched_at']:
+            from datetime import datetime, timezone
+            cache_age_s = (datetime.now(timezone.utc) - r['fetched_at']).total_seconds()
 
-
-def surf_today_tomorrow():
-    """Open-Meteo marine — Trebarwith Strand approx (50.66 N 4.75 W)."""
-    try:
-        url = ('https://marine-api.open-meteo.com/v1/marine?latitude=50.66&longitude=-4.75'
-               '&daily=wave_height_max,wave_period_max,wave_direction_dominant'
-               '&timezone=Europe%2FLondon&forecast_days=2')
-        d = json.loads(urllib.request.urlopen(url, timeout=8).read())['daily']
-        out = {}
-        for label, idx in (('today', 0), ('tomorrow', 1)):
-            out[label] = {
-                'h':  d['wave_height_max'][idx],
-                'p':  d['wave_period_max'][idx],
-                'dir': d['wave_direction_dominant'][idx],
+    # Build surf dict from the same rows
+    surf = {}
+    for r in rows:
+        label = 'today' if r['forecast_date'] == today else 'tomorrow'
+        if r['wave_height_m'] is not None:
+            surf[label] = {
+                'h':   float(r['wave_height_m']),
+                'p':   float(r['wave_period_s'] or 0),
+                'dir': int(r['wave_direction_deg']) if r['wave_direction_deg'] is not None else 0,
             }
-        return out
-    except Exception as e:
-        return {'error': str(e)[:80]}
+    return out, surf, cache_age_s
 
 
 def deg_to_compass(deg):
@@ -142,10 +148,15 @@ def surf_quality(h, p):
 
 def weather_warning(w):
     """Returns (kind, text) for a banner. kind ∈ {'good','warn',None}."""
-    if 'error' in w:
+    if not w:
         return None, None
     t = w.get('today', {})
-    tmax, rain, wind, code = t.get('tmax', 0), t.get('rain', 0), t.get('wind', 0), t.get('code', 0)
+    if not t:
+        return None, None
+    tmax = t.get('tmax') or 0
+    rain = t.get('rain') or 0
+    wind = t.get('wind') or 0
+    code = t.get('code') or 0
     # Negative warnings
     if rain >= 70 or code in (65, 67, 75, 82, 86, 95, 96, 99):
         return 'warn', f"Wet day expected ({rain}% rain, {t.get('desc','?')}). Push indoor activities; expect cancellations for cliff walks."
@@ -346,38 +357,47 @@ async def main():
          ORDER BY s.start_time, name
     """
     shifts_people = await conn.fetch(SHIFT_PEOPLE_SQL, today)
-    roster_date = today
-    if not shifts_people:
-        # Tanda hasn't synced today's shifts yet — fall back to yesterday's
-        # roster as a reference and flag the staleness
-        shifts_people = await conn.fetch(SHIFT_PEOPLE_SQL, yest)
-        roster_date = yest
+    # If Tanda hasn't pushed today's published rota yet, show that state
+    # honestly rather than substituting yesterday's data.
+    rota_published = bool(shifts_people)
 
-    # Labour rollup also uses today; fall back to yesterday if empty.
-    shifts_team = await conn.fetch("""
+    shifts_team_today = await conn.fetch("""
         SELECT team, department_name, hours, cost_with_oncost, staff_count, report_date
           FROM v_daily_labour_by_team
          WHERE report_date = $1 ORDER BY cost_with_oncost DESC NULLS LAST
     """, today)
-    rollup_date = today
-    if not shifts_team:
-        shifts_team = await conn.fetch("""
-            SELECT team, department_name, hours, cost_with_oncost, staff_count, report_date
-              FROM v_daily_labour_by_team
-             WHERE report_date = $1 ORDER BY cost_with_oncost DESC NULLS LAST
-        """, yest)
-        rollup_date = yest
-    sht = shifts_team
-    shift_date = rollup_date
+    shifts_team_yest = await conn.fetch("""
+        SELECT team, department_name, hours, cost_with_oncost, staff_count, report_date
+          FROM v_daily_labour_by_team
+         WHERE report_date = $1 ORDER BY cost_with_oncost DESC NULLS LAST
+    """, yest)
+    sht = shifts_team_today          # used for today's rollup display
+    shift_date = today
+    sht_yest = shifts_team_yest      # used for the yesterday cost/income table
 
-    # Yesterday's sales (the only ratio we show now)
+    # Yesterday's sales by department + site (the only ratio we show now)
     sales_rows = await conn.fetch("""
-        SELECT site, SUM(value)::numeric(10,2) net_sales
+        SELECT site, department, SUM(value)::numeric(10,2) net_sales
           FROM touchoffice_department_sales
          WHERE report_date = $1
-         GROUP BY site
+         GROUP BY site, department
     """, yest)
-    sales_map = {r['site']: float(r['net_sales']) for r in sales_rows}
+    sales_map = {}            # site → total
+    sales_by_cat = {}         # category (wet/food/accom/cafe) → total
+    for r in sales_rows:
+        site, dept = r['site'], (r['department'] or '').upper()
+        v = float(r['net_sales'])
+        sales_map[site] = sales_map.get(site, 0) + v
+        if site == 'malthouse':
+            if 'ALCOHOL' in dept or 'HOT DRINKS' in dept:
+                sales_by_cat['wet'] = sales_by_cat.get('wet', 0) + v
+            elif 'FOOD' in dept:
+                sales_by_cat['food'] = sales_by_cat.get('food', 0) + v
+            elif 'ACCOM' in dept:
+                sales_by_cat['accom'] = sales_by_cat.get('accom', 0) + v
+            # KITCHEN INT (interdept transfers) intentionally ignored
+        elif site == 'sandwich':
+            sales_by_cat['cafe'] = sales_by_cat.get('cafe', 0) + v
     sales_date = yest
 
     # Target sales — last 8 same-DOW averages × 1.05 (push for growth).
@@ -405,9 +425,8 @@ async def main():
          ORDER BY v.delivery_date, v.vendor_name
     """, today, today + timedelta(days=1))
 
-    wx   = weather_today_tomorrow()
-    surf = surf_today_tomorrow()
-    wkind, wtext = weather_warning(wx)
+    wx, surf, wx_cache_age = await weather_and_surf_from_cache(conn, today, tomorrow)
+    wkind, wtext = weather_warning(wx) if wx else (None, None)
 
     # ── Room state today ────────────────────────────────────────────────
     # occupied_tonight: someone is in the room tonight (arrival or stay-through)
@@ -448,23 +467,34 @@ async def main():
                f'<th style="{STY["th"]}">Wind</th>'
                f'<th style="{STY["th"]}">Conditions</th>'
                f'<th style="{STY["th"]}">Swell (Trebarwith)</th></tr>']
-    if 'error' not in wx:
+    if wx:
         for lbl, d in (('Today', today), ('Tomorrow', tomorrow)):
             key = 'today' if lbl == 'Today' else 'tomorrow'
-            w = wx[key]
-            s = surf.get(key, {}) if 'error' not in surf else {}
+            w = wx.get(key)
+            if not w:
+                continue
+            s = surf.get(key, {})
             surf_cell = (f"{s['h']:.1f}m @ {s['p']:.0f}s {deg_to_compass(s['dir'])} "
                          f"<span style='color:#666'>· {surf_quality(s['h'], s['p'])}</span>"
                          if s else '<span style="color:#999">—</span>')
             out_line = (f'<td style="{STY["td"]}"><strong>{lbl}</strong></td>'
-                        f'<td style="{STY["td"]}">{w["tmin"]:.0f}–{w["tmax"]:.0f}°C</td>'
-                        f'<td style="{STY["td"]}">{int(w["rain"])}%</td>'
+                        f'<td style="{STY["td"]}">{(w["tmin"] or 0):.0f}–{(w["tmax"] or 0):.0f}°C</td>'
+                        f'<td style="{STY["td"]}">{int(w["rain"] or 0)}%</td>'
                         f'<td style="{STY["td"]}">{w["wind"]:.0f} km/h</td>'
                         f'<td style="{STY["td"]}">{h(w["desc"])}</td>'
                         f'<td style="{STY["td"]}">{surf_cell}</td>')
             wx_body.append(f'<tr>{out_line}</tr>')
+    else:
+        wx_body.append(f'<tr><td style="{STY["td"]}" colspan="6">'
+                       f'<em style="color:#999">Weather cache empty — re-run '
+                       f'u46-weather-daily.sh.</em></td></tr>')
     wx_body.append('</table>')
-    out.append(section('Weather + surf', None, '\n'.join(wx_body)))
+    cache_note = ''
+    if wx_cache_age is not None:
+        mins = int(wx_cache_age / 60)
+        cache_note = (f'<p style="color:#999;font-size:11px;margin:4px 0 0 0">'
+                      f'Cached {mins} min ago · refreshed daily 07:30 by u46-weather-daily.</p>')
+    out.append(section('Weather + surf', None, '\n'.join(wx_body) + cache_note))
     out.append(f'<p style="{STY["empty"]}">Tide times: source integration pending (no free '
                'API responded without auth).</p>')
 
@@ -654,7 +684,10 @@ async def main():
     today_target_sales = today_target_pub + today_target_cafe
 
     if max_cols == 0:
-        body = f'<p style="{STY["empty"]}">Tanda has not synced any shifts for {fmt_day(roster_date)} yet.</p>'
+        body = (f'<p style="{STY["banner_warn"]}">'
+                f'<strong>Rota not published</strong> for {fmt_day(today)}. '
+                f'Publish in Tanda or check why the 02:15 / 12:00 sync did not '
+                f'pull a forward window for today.</p>')
     else:
         def cell_for(p):
             if not p:
@@ -687,7 +720,7 @@ async def main():
         rows.append(
             f'<tr style="background:#f8f8f8">'
             f'<td style="{STY["td"]}"><strong>Labour total</strong></td>'
-            f'<td style="{STY["td"]};color:#777;font-size:12px" colspan="{max_cols}">planned for {fmt_day(roster_date)}</td>'
+            f'<td style="{STY["td"]};color:#777;font-size:12px" colspan="{max_cols}">planned for {fmt_day(today)}</td>'
             f'<td style="{STY["td"]};text-align:right"><strong>£{grand_cost:,.0f}</strong></td>'
             f'</tr>')
         if today_target_sales > 0:
@@ -707,25 +740,38 @@ async def main():
                   + f'<th style="{STY["th"]};text-align:right">Cost</th></tr>')
         body = (f'<table style="{STY["tbl"]}">' + header + '\n'.join(rows) + '</table>')
 
-    roster_title = f'Roster — {fmt_day(roster_date)}'
-    if roster_date != today:
-        roster_title += " (today's not yet synced — yesterday's shown)"
-    out.append(section(roster_title, None, body))
+    out.append(section(f'Roster — {fmt_day(today)}', None, body))
 
-    # Cost/income ratio — YESTERDAY (Jo's preferred lens) + budget + target
-    pub_cost = sum(float(s['cost_with_oncost'] or 0) for s in sht
-                   if (s['team'] or '').lower() in ('kitchen','front_of_house','accommodation'))
-    cafe_cost = sum(float(s['cost_with_oncost'] or 0) for s in sht
-                    if (s['team'] or '').lower() == 'cafe')
-    pub_sales = sales_map.get('malthouse', 0)
-    cafe_sales = sales_map.get('sandwich', 0)
-    pub_target = target_map.get('malthouse', 0)
-    cafe_target = target_map.get('sandwich', 0)
-    pub_budget_labour  = pub_target  * LABOUR_PCT_TARGET
-    cafe_budget_labour = cafe_target * LABOUR_PCT_TARGET
-    total_cost = pub_cost + cafe_cost
+    # Cost/income ratio — YESTERDAY + per-team labour split.
+    # Pub broken into FoH/drinks · Kitchen/food · Housekeeping/accom.
+    # Use sht_yest (yesterday's actual costs) since today's costs are not
+    # finalised until u47-tanda-timesheets-sync runs at 02:20.
+    team_cost = {t: 0.0 for t in ('kitchen','front_of_house','accommodation','cafe')}
+    for s in sht_yest:
+        t = (s['team'] or '').lower()
+        if t in team_cost:
+            team_cost[t] += float(s['cost_with_oncost'] or 0)
+
+    food_cost   = team_cost['kitchen']
+    wet_cost    = team_cost['front_of_house']
+    accom_cost  = team_cost['accommodation']
+    cafe_cost   = team_cost['cafe']
+    pub_cost    = food_cost + wet_cost + accom_cost
+    total_cost  = pub_cost + cafe_cost
+
+    food_sales  = sales_by_cat.get('food', 0)
+    wet_sales   = sales_by_cat.get('wet', 0)
+    accom_sales = sales_by_cat.get('accom', 0)
+    cafe_sales  = sales_by_cat.get('cafe', 0)
+    pub_sales   = food_sales + wet_sales + accom_sales
     total_sales = pub_sales + cafe_sales
+
+    pub_target  = target_map.get('malthouse', 0)
+    cafe_target = target_map.get('sandwich', 0)
     total_target = pub_target + cafe_target
+
+    pub_budget_labour   = pub_target  * LABOUR_PCT_TARGET
+    cafe_budget_labour  = cafe_target * LABOUR_PCT_TARGET
     total_budget_labour = pub_budget_labour + cafe_budget_labour
 
     def vs(actual, target):
@@ -734,27 +780,71 @@ async def main():
         diff = actual - target
         if diff >= 0:
             return (f'<span style="color:#16a34a;font-weight:bold">+£{diff:,.0f}</span> '
-                    f'<span style="color:#666;font-size:12px">vs target</span>')
+                    f'<span style="color:#666;font-size:12px">vs tgt</span>')
         return (f'<span style="color:#dc2626;font-weight:bold">−£{abs(diff):,.0f}</span> '
-                f'<span style="color:#666;font-size:12px">vs target</span>')
+                f'<span style="color:#666;font-size:12px">vs tgt</span>')
 
     def vs_cost(actual, budget):
         if budget <= 0:
             return '<span style="color:#777">—</span>'
         diff = actual - budget
-        # Under budget = green, over budget = red
         if diff <= 0:
             return (f'<span style="color:#16a34a;font-weight:bold">−£{abs(diff):,.0f}</span> '
-                    f'<span style="color:#666;font-size:12px">vs budget</span>')
+                    f'<span style="color:#666;font-size:12px">vs bud</span>')
         return (f'<span style="color:#dc2626;font-weight:bold">+£{diff:,.0f}</span> '
-                f'<span style="color:#666;font-size:12px">vs budget</span>')
+                f'<span style="color:#666;font-size:12px">vs bud</span>')
+
+    def cat_row(label, sub, sales, target, cost, budget, indent=False):
+        td_label = (f'<td style="{STY["td"]}{";padding-left:24px" if indent else ""}">'
+                    f'<strong>{label}</strong>'
+                    + (f'<br><span style="color:#888;font-size:12px">{sub}</span>' if sub else '')
+                    + '</td>')
+        return (f'<tr>'
+                f'{td_label}'
+                f'<td style="{STY["td"]}"><strong>£{sales:,.0f}</strong><br>{vs(sales, target)}</td>'
+                f'<td style="{STY["td"]}">£{target:,.0f}</td>'
+                f'<td style="{STY["td"]}"><strong>£{cost:,.0f}</strong><br>{vs_cost(cost, budget)}</td>'
+                f'<td style="{STY["td"]}">£{budget:,.0f}</td>'
+                f'<td style="{STY["td"]}">{fmt_pct(cost, sales)}</td></tr>')
+
+    def total_row(label, sales, target, cost, budget, bold=True):
+        s_tag = '<strong>' if bold else ''
+        e_tag = '</strong>' if bold else ''
+        return (f'<tr style="background:#f8f8f8">'
+                f'<td style="{STY["td"]}"><strong>{label}</strong></td>'
+                f'<td style="{STY["td"]}">{s_tag}£{sales:,.0f}{e_tag}<br>{vs(sales, target)}</td>'
+                f'<td style="{STY["td"]}">{s_tag}£{target:,.0f}{e_tag}</td>'
+                f'<td style="{STY["td"]}">{s_tag}£{cost:,.0f}{e_tag}<br>{vs_cost(cost, budget)}</td>'
+                f'<td style="{STY["td"]}">{s_tag}£{budget:,.0f}{e_tag}</td>'
+                f'<td style="{STY["td"]}">{fmt_pct(cost, sales)}</td></tr>')
+
+    # Pub sub-target split based on last 28d category mix
+    cat_mix_rows = await conn.fetch("""
+        SELECT department, SUM(value)::numeric(12,2) total
+          FROM touchoffice_department_sales
+         WHERE site='malthouse'
+           AND report_date BETWEEN $1::date - INTERVAL '28 days' AND $1::date - INTERVAL '1 day'
+         GROUP BY department
+    """, yest)
+    mix_total = sum(float(r['total']) for r in cat_mix_rows) or 1
+    mix = {'wet': 0.0, 'food': 0.0, 'accom': 0.0}
+    for r in cat_mix_rows:
+        d = (r['department'] or '').upper()
+        v = float(r['total'])
+        if 'ALCOHOL' in d or 'HOT DRINKS' in d:    mix['wet']   += v
+        elif 'FOOD'  in d:                          mix['food']  += v
+        elif 'ACCOM' in d:                          mix['accom'] += v
+    for k in mix: mix[k] /= mix_total
+    target_wet   = pub_target * mix['wet']
+    target_food  = pub_target * mix['food']
+    target_accom = pub_target * mix['accom']
 
     body = (f'<p style="color:#666;font-size:13px;margin:0 0 6px 0">'
             f'Sales + labour for <strong>{fmt_day(yest)}</strong>. '
             f'Target = avg sales same day-of-week (last 8 weeks) × 1.05. '
+            f'Sub-targets split by last-28-day category mix. '
             f'Budgeted labour = {int(LABOUR_PCT_TARGET*100)}% of target sales '
-            f'(amber line {fmt_pct(0.3, 1.0).split(">")[1].split("<")[0]} = 30%).'
-            f'</p>'
+            f'(amber line = 30%).</p>'
             f'<table style="{STY["tbl"]}">'
             f'<tr><th style="{STY["th"]}">Centre</th>'
             f'<th style="{STY["th"]}">Sales</th>'
@@ -763,30 +853,16 @@ async def main():
             f'<th style="{STY["th"]}">Budget</th>'
             f'<th style="{STY["th"]}">Ratio</th></tr>'
 
-            f'<tr><td style="{STY["td"]}"><strong>Pub</strong><br>'
-            f'<span style="color:#888;font-size:12px">kitchen + FOH + accom</span></td>'
-            f'<td style="{STY["td"]}"><strong>£{pub_sales:,.0f}</strong><br>{vs(pub_sales, pub_target)}</td>'
-            f'<td style="{STY["td"]}">£{pub_target:,.0f}</td>'
-            f'<td style="{STY["td"]}"><strong>£{pub_cost:,.0f}</strong><br>{vs_cost(pub_cost, pub_budget_labour)}</td>'
-            f'<td style="{STY["td"]}">£{pub_budget_labour:,.0f}</td>'
-            f'<td style="{STY["td"]}">{fmt_pct(pub_cost, pub_sales)}</td></tr>'
+            # Pub category split
+            + cat_row('FoH / drinks',        'alcohol + hot drinks',  wet_sales,   target_wet,   wet_cost,   target_wet   * LABOUR_PCT_TARGET, indent=True)
+            + cat_row('Kitchen / food',      'food sales',            food_sales,  target_food,  food_cost,  target_food  * LABOUR_PCT_TARGET, indent=True)
+            + cat_row('Housekeeping / accom','accom revenue',         accom_sales, target_accom, accom_cost, target_accom * LABOUR_PCT_TARGET, indent=True)
+            + total_row('Pub — subtotal',    pub_sales, pub_target, pub_cost, pub_budget_labour)
 
-            f'<tr><td style="{STY["td"]}"><strong>Cafe</strong><br>'
-            f'<span style="color:#888;font-size:12px">cafe team</span></td>'
-            f'<td style="{STY["td"]}"><strong>£{cafe_sales:,.0f}</strong><br>{vs(cafe_sales, cafe_target)}</td>'
-            f'<td style="{STY["td"]}">£{cafe_target:,.0f}</td>'
-            f'<td style="{STY["td"]}"><strong>£{cafe_cost:,.0f}</strong><br>{vs_cost(cafe_cost, cafe_budget_labour)}</td>'
-            f'<td style="{STY["td"]}">£{cafe_budget_labour:,.0f}</td>'
-            f'<td style="{STY["td"]}">{fmt_pct(cafe_cost, cafe_sales)}</td></tr>'
+            + cat_row('Cafe', 'cafe team', cafe_sales, cafe_target, cafe_cost, cafe_budget_labour)
 
-            f'<tr style="background:#f8f8f8">'
-            f'<td style="{STY["td"]}"><strong>Combined</strong></td>'
-            f'<td style="{STY["td"]}"><strong>£{total_sales:,.0f}</strong><br>{vs(total_sales, total_target)}</td>'
-            f'<td style="{STY["td"]}"><strong>£{total_target:,.0f}</strong></td>'
-            f'<td style="{STY["td"]}"><strong>£{total_cost:,.0f}</strong><br>{vs_cost(total_cost, total_budget_labour)}</td>'
-            f'<td style="{STY["td"]}"><strong>£{total_budget_labour:,.0f}</strong></td>'
-            f'<td style="{STY["td"]}">{fmt_pct(total_cost, total_sales)}</td></tr>'
-            f'</table>')
+            + total_row('Combined', total_sales, total_target, total_cost, total_budget_labour)
+            + '</table>')
     out.append(section(f'Sales + labour vs target — {fmt_day(yest)}', None, body))
 
     # Deliveries

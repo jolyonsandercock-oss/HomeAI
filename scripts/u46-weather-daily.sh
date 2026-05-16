@@ -26,6 +26,7 @@ LON = -4.7530
 
 BASE = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE = "https://archive-api.open-meteo.com/v1/archive"
+MARINE = "https://marine-api.open-meteo.com/v1/marine"
 
 DAILY_FIELDS = [
     "rain_sum",
@@ -36,12 +37,18 @@ DAILY_FIELDS = [
     "sunshine_duration",
 ]
 
+# Forecast-only extras u109 needs: WMO code + rain probability
+FORECAST_EXTRA_FIELDS = ["weather_code", "precipitation_probability_max"]
 
-def fetch_daily(start, end, base=BASE):
+MARINE_FIELDS = ["wave_height_max", "wave_period_max", "wave_direction_dominant"]
+
+
+def fetch_daily(start, end, base=BASE, extra_fields=None):
+    fields = list(DAILY_FIELDS) + list(extra_fields or [])
     qs = urllib.parse.urlencode({
         "latitude": LAT, "longitude": LON,
         "start_date": start.isoformat(), "end_date": end.isoformat(),
-        "daily": ",".join(DAILY_FIELDS),
+        "daily": ",".join(fields),
         "timezone": "Europe/London",
         "wind_speed_unit": "mph",
         "temperature_unit": "celsius",
@@ -49,6 +56,21 @@ def fetch_daily(start, end, base=BASE):
     })
     r = urllib.request.urlopen(f"{base}?{qs}", timeout=15)
     return json.loads(r.read())
+
+
+def fetch_marine(start, end):
+    qs = urllib.parse.urlencode({
+        "latitude": LAT, "longitude": LON,
+        "start_date": start.isoformat(), "end_date": end.isoformat(),
+        "daily": ",".join(MARINE_FIELDS),
+        "timezone": "Europe/London",
+    })
+    try:
+        r = urllib.request.urlopen(f"{MARINE}?{qs}", timeout=15)
+        return json.loads(r.read())
+    except Exception as e:
+        print(f"  marine fetch failed: {e}")
+        return {}
 
 
 def severity_categories(rain_mm, max_temp, max_wind):
@@ -109,12 +131,25 @@ async def main():
                  json.dumps(day_payload))
         print(f"  upserted {len(dates)} actuals")
 
-    # ── 5-day forecast ──
+    # ── 5-day forecast (+marine) ──
     fc_end = today + timedelta(days=5)
     print(f"fetching forecast {today} → {fc_end}")
-    fc_data = fetch_daily(today, fc_end, base=BASE)
+    fc_data = fetch_daily(today, fc_end, base=BASE, extra_fields=FORECAST_EXTRA_FIELDS)
     days   = fc_data.get("daily", {})
     dates  = days.get("time", [])
+
+    # Marine — Trebarwith Strand approximation (same lat/lon as weather)
+    marine_data = fetch_marine(today, fc_end)
+    m_days = marine_data.get("daily", {}) if marine_data else {}
+    m_dates = m_days.get("time", []) if m_days else []
+    marine_by_date = {}
+    for i, d in enumerate(m_dates):
+        marine_by_date[d] = {
+            "h": m_days.get("wave_height_max",      [None]*len(m_dates))[i],
+            "p": m_days.get("wave_period_max",      [None]*len(m_dates))[i],
+            "dir": m_days.get("wave_direction_dominant", [None]*len(m_dates))[i],
+        }
+
     alerts = []
     for i, d in enumerate(dates):
         fd = date.fromisoformat(d)
@@ -122,20 +157,35 @@ async def main():
         tmax = days.get("temperature_2m_max", [None]*len(dates))[i]
         tmin = days.get("temperature_2m_min", [None]*len(dates))[i]
         wmax = days.get("wind_speed_10m_max", [None]*len(dates))[i]
+        wcode = days.get("weather_code", [None]*len(dates))[i]
+        pp   = days.get("precipitation_probability_max", [None]*len(dates))[i]
+        m    = marine_by_date.get(d, {})
         cats = severity_categories(rain, tmax, wmax)
         await conn.execute("""
           INSERT INTO weather_forecast
-            (forecast_date, rain_mm, max_temp_c, min_temp_c, max_wind_mph, alert_categories, raw_payload)
-          VALUES ($1, $2, $3, $4, $5, $6::text[], $7::jsonb)
+            (forecast_date, rain_mm, max_temp_c, min_temp_c, max_wind_mph,
+             alert_categories, raw_payload,
+             weather_code, precipitation_probability,
+             wave_height_m, wave_period_s, wave_direction_deg)
+          VALUES ($1, $2, $3, $4, $5, $6::text[], $7::jsonb,
+                  $8, $9, $10, $11, $12)
           ON CONFLICT (forecast_date, fetched_at) DO NOTHING
         """, fd, rain, tmax, tmin,
              int(wmax) if wmax is not None else None,
              cats,
-             json.dumps({"rain": rain, "tmax": tmax, "tmin": tmin, "wmax_mph": wmax}))
+             json.dumps({"rain": rain, "tmax": tmax, "tmin": tmin,
+                         "wmax_mph": wmax, "code": wcode, "rain_prob": pp,
+                         "wave_h": m.get("h"), "wave_p": m.get("p"),
+                         "wave_dir": m.get("dir")}),
+             int(wcode) if wcode is not None else None,
+             int(pp)    if pp    is not None else None,
+             m.get("h"), m.get("p"),
+             int(m["dir"]) if m.get("dir") is not None else None)
         if cats:
             alerts.append((fd, cats, rain, tmax, wmax))
 
-    print(f"forecast: {len(dates)} days, {len(alerts)} alerts")
+    print(f"forecast: {len(dates)} days, {len(alerts)} alerts, "
+          f"marine: {len(marine_by_date)} days")
 
     # Telegram alert summary if anything severe in forecast
     if alerts:
