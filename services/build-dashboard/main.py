@@ -537,6 +537,37 @@ _UI_TO_DB_REALM = {
     "family": "family",
 }
 
+# U84 Phase 7: page-view telemetry. We log every nav hit to /work/*, /private/*,
+# /build/*, /all, /m, /index, and the legacy detail pages we're considering
+# decommissioning. Lets us answer "is anyone still hitting /playground?"
+# without guessing.
+#
+# Skipped: /api/*, /static/*, /healthz/* (high-volume, no decom signal).
+_TELEMETRY_LOG_PREFIXES = (
+    "/work/", "/private/", "/build/", "/all",
+    "/m", "/index", "/finance", "/workforce", "/vehicles", "/dojo",
+    "/touchoffice", "/caterbook", "/agents-ops", "/forensics",
+    "/reconciliation", "/recon", "/economics", "/invoices", "/tasks",
+    "/coverage", "/playground", "/landing", "/pub", "/ask", "/search",
+)
+
+
+async def _log_pageview(path: str, realm: str, status: int, user_agent: str | None):
+    """Fire-and-forget page-view log. Failures are swallowed; we never
+    block the request on telemetry."""
+    try:
+        async with db_session() as conn:
+            await conn.execute("""
+                INSERT INTO audit_log (pipeline, action, record_type, record_id,
+                                       result, ai_parsed, realm)
+                VALUES ('dashboard-ui', 'page_view', 'route', NULL,
+                        $1, $2::jsonb, $3)
+            """, str(status),
+                 json.dumps({"path": path, "ua": (user_agent or "")[:160]}),
+                 _current_realm.get())
+    except Exception:
+        pass  # Never break the request on telemetry
+
 @app.middleware("http")
 async def realm_middleware(request, call_next):
     if not REALM_ENFORCE or any(request.url.path.startswith(p) for p in _REALM_EXEMPT_PREFIXES):
@@ -565,7 +596,19 @@ async def realm_middleware(request, call_next):
     # request — per U84 §4 G3 fix; each endpoint acquires + sets realm
     # micro-transactionally inside its own block).
     _current_realm.set(realm)
-    return await call_next(request)
+    response = await call_next(request)
+
+    # U84 Phase 7: page-view telemetry. Skip API + static; only log nav
+    # routes. Fire-and-forget so we never add latency to the response.
+    path = request.url.path
+    if (any(path.startswith(p) for p in _TELEMETRY_LOG_PREFIXES)
+            and not path.startswith("/api/")):
+        ua = request.headers.get("user-agent")
+        try:
+            asyncio.create_task(_log_pageview(path, realm, response.status_code, ua))
+        except Exception:
+            pass
+    return response
 
 @app.get("/")
 async def root(request: Request):
@@ -3030,11 +3073,43 @@ from fastapi import UploadFile, File
 import hashlib as _hashlib
 
 _DOCS_ROOT = "/home_ai/storage/documents"
-_PLATE_RE = re.compile(r"\b([A-Z]{2}\s?\d{2}\s?[A-Z]{3})\b")
+# OCR-tolerant plate match. Position 3-4 expects digits — but OCR commonly
+# reads `1`→`I`, `0`→`O`, `5`→`S`, `8`→`B`. After capturing, _norm_plate
+# rewrites those before the DB lookup. Also covers the old-format
+# `\d{3}[A-Z]{3}` (e.g. 131JOM sunbeam) and `[A-Z]{3}\d{3}[A-Z]?` (3-letter prefix).
+_PLATE_RE = re.compile(
+    r"\b("
+    r"[A-Z]{2}[\dIOSBLZ]{2}\s?[A-Z]{3}"     # WF14 FNP / WFI4FNP after fix
+    r"|\d{3}[A-Z]{3}"                        # 131JOM
+    r"|[A-Z]{3}\s?\d{1,3}[A-Z]?"             # ABC 123, ABC1234
+    r")\b"
+)
+
+# OCR-confusable digit map (common Tesseract mis-reads)
+_OCR_DIGIT_FIX = str.maketrans({"I": "1", "O": "0", "S": "5", "B": "8",
+                                "L": "1", "Z": "2"})
 
 
 def _norm_plate(s: str) -> str:
-    return re.sub(r"\s+", "", (s or "").upper())
+    raw = re.sub(r"\s+", "", (s or "").upper())
+    return raw
+
+
+def _plate_candidates(raw: str) -> list[str]:
+    """Return the plate plus OCR-tolerant variants. For 'WFI4FNP' we want
+    ['WFI4FNP', 'WF14FNP'] so the DB lookup finds the registered 'WF14FNP'."""
+    raw = _norm_plate(raw)
+    candidates = {raw}
+    # Fix digit-confusables ONLY in positions where we'd expect digits.
+    # Current UK format: AB12 CDE — positions 2-3 (0-indexed) are digits.
+    if len(raw) >= 7 and raw[:2].isalpha() and raw[5:].isalpha():
+        fixed = raw[:2] + raw[2:4].translate(_OCR_DIGIT_FIX) + raw[4:]
+        candidates.add(fixed)
+    # Old format 123ABC — positions 0-2 digits
+    if len(raw) >= 6 and raw[:3].isdigit() is False:
+        fixed = raw[:3].translate(_OCR_DIGIT_FIX) + raw[3:]
+        candidates.add(fixed)
+    return list(candidates)
 
 
 async def _extract_ocr_text(content: bytes, mime_type: str) -> str:
@@ -3057,17 +3132,17 @@ async def _link_to_entity(conn, ocr_text: str, title: str) -> tuple[str | None, 
     """Return (linked_table, linked_id, linked_by, entity_id) or all-None."""
     haystack = (ocr_text or "") + " " + (title or "")
 
-    # 1. Plate regex → vehicles.registration
+    # 1. Plate regex → vehicles.registration (OCR-tolerant)
     for m in _PLATE_RE.finditer(haystack.upper()):
-        plate = _norm_plate(m.group(1))
-        veh = await conn.fetchrow("""
-            SELECT id, entity_id, registration, make_model
-              FROM vehicles
-             WHERE upper(replace(registration, ' ', '')) = $1
-             LIMIT 1
-        """, plate)
-        if veh:
-            return ("vehicles", veh["id"], "auto:plate_regex", veh["entity_id"])
+        for plate in _plate_candidates(m.group(1)):
+            veh = await conn.fetchrow("""
+                SELECT id, entity_id, registration, make_model
+                  FROM vehicles
+                 WHERE upper(replace(registration, ' ', '')) = $1
+                 LIMIT 1
+            """, plate)
+            if veh:
+                return ("vehicles", veh["id"], "auto:plate_regex", veh["entity_id"])
 
     # 2. Postcode → properties.postcode_full (if such column / table exists)
     postcode_re = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b", re.I)
@@ -3089,6 +3164,150 @@ async def _link_to_entity(conn, ocr_text: str, title: str) -> tuple[str | None, 
     for k in kids:
         if k["name"] and k["name"].lower() in haystack.lower():
             return ("children", k["id"], "auto:name", None)
+
+    # 4. Bank sort code + account number → bank_accounts (NatWest current /
+    #    savings). UK sort code format `\d{2}-\d{2}-\d{2}` (or run-together
+    #    via OCR), account number 8 digits within 200 chars of the sort code.
+    sc_re = re.compile(r"\b(\d{2}[-\s]?\d{2}[-\s]?\d{2})\b")
+    acct_re = re.compile(r"\b(\d{8})\b")
+    for sc_m in sc_re.finditer(haystack):
+        sc = re.sub(r"\D", "", sc_m.group(1))
+        if len(sc) != 6:
+            continue
+        # Look for an 8-digit acct number near this sort code (±200 chars)
+        start = max(0, sc_m.start() - 200)
+        end = min(len(haystack), sc_m.end() + 200)
+        window = haystack[start:end]
+        for acct_m in acct_re.finditer(window):
+            acct = acct_m.group(1)
+            ba = await conn.fetchrow("""
+                SELECT id, entity_id FROM bank_accounts
+                 WHERE replace(coalesce(sort_code,''), '-', '') = $1
+                   AND replace(coalesce(account_number,''), ' ', '') = $2
+                 LIMIT 1
+            """, sc, acct)
+            if ba:
+                return ("bank_accounts", ba["id"], "auto:sort_code+account",
+                        ba["entity_id"])
+
+    # 5. Credit-card masked PAN `\d{4}\s?\*{4,}\s?\d{4}` or `\*{4,}\d{4}`
+    #    → bank_accounts.account_number containing the last-4 (CCs stored
+    #    with masked account_number like '4929********1234').
+    last4_re = re.compile(r"(?:\*{4,}|x{4,}|·{4,})\s?(\d{4})\b", re.I)
+    last4s = set(last4_re.findall(haystack))
+    # Also catch the unmasked-but-clearly-card "ending 1234" or "last 4 1234"
+    end_re = re.compile(r"(?:ending|last\s*4\s*digits?[: ]*|card\s*ending)\s*[: ]*\*?(\d{4})\b", re.I)
+    for m in end_re.finditer(haystack):
+        last4s.add(m.group(1))
+    for last4 in last4s:
+        ba = await conn.fetchrow("""
+            SELECT id, entity_id FROM bank_accounts
+             WHERE account_type = 'credit_card'
+               AND right(replace(coalesce(account_number,''), ' ', ''), 4) = $1
+             LIMIT 1
+        """, last4)
+        if ba:
+            return ("bank_accounts", ba["id"], "auto:card_last4",
+                    ba["entity_id"])
+
+    # 6. Mortgage lender + account_ref → mortgage_accounts
+    #    Match well-known UK lender names and a nearby account_ref.
+    lender_patterns = {
+        "Principality":  r"\bPRINCIPALITY\b",
+        "Halifax":       r"\bHALIFAX\b",
+        "NatWest":       r"\bNATWEST\b",
+        "Nationwide":    r"\bNATIONWIDE\b",
+        "Santander":     r"\bSANTANDER\b",
+        "Barclays":      r"\bBARCLAYS\b",
+        "HSBC":          r"\bHSBC\b",
+        "Lloyds":        r"\bLLOYDS\b",
+        "TSB":           r"\bTSB\b",
+        "RBS":           r"\bROYAL\s+BANK\s+OF\s+SCOTLAND\b|\bRBS\b",
+        "Virgin Money":  r"\bVIRGIN\s+MONEY\b",
+        "Coventry":      r"\bCOVENTRY\s+BUILDING\s+SOCIETY\b|\bCOVENTRY\b",
+        "Skipton":       r"\bSKIPTON\b",
+        "Yorkshire":     r"\bYORKSHIRE\s+BUILDING\s+SOCIETY\b",
+    }
+    H_UPPER = haystack.upper()
+    for lender_name, pat in lender_patterns.items():
+        if re.search(pat, H_UPPER):
+            # Look for a plausible account ref: 6-12 digits, optionally with -
+            for ref_m in re.finditer(r"\b(\d[\d-]{5,15}\d)\b", haystack):
+                ref = re.sub(r"\D", "", ref_m.group(1))
+                if len(ref) < 6 or len(ref) > 14:
+                    continue
+                ma = await conn.fetchrow("""
+                    SELECT id, borrower_entity_id FROM mortgage_accounts
+                     WHERE lender ILIKE $1
+                       AND replace(coalesce(account_ref,''),'-','') = $2
+                     LIMIT 1
+                """, f"%{lender_name}%", ref)
+                if ma:
+                    return ("mortgage_accounts", ma["id"],
+                            f"auto:lender+ref:{lender_name}",
+                            ma["borrower_entity_id"])
+            # Lender matched but no ref hit — fall through to confidence-low link
+            ma = await conn.fetchrow("""
+                SELECT id, borrower_entity_id FROM mortgage_accounts
+                 WHERE lender ILIKE $1
+                 ORDER BY id DESC
+                 LIMIT 1
+            """, f"%{lender_name}%")
+            if ma:
+                return ("mortgage_accounts", ma["id"],
+                        f"auto:lender_only:{lender_name}",
+                        ma["borrower_entity_id"])
+            break  # lender matched but no mortgage on file
+
+    # 7. Utility provider + account number → property_utilities → property
+    utility_patterns = [
+        ("electricity", r"\bBRITISH\s+GAS\b|\bOCTOPUS\s+ENERGY\b|\bEDF\s+ENERGY\b|\bE\.ON\b|\bEON\b|\bOVO\s+ENERGY\b|\bSCOTTISH\s+POWER\b|\bSO\s+ENERGY\b|\bBULB\b|\bN POWER\b"),
+        ("gas",         r"\bCALOR\s+GAS\b|\bFLOGAS\b"),
+        ("water",       r"\bSOUTH\s+WEST\s+WATER\b|\bTHAMES\s+WATER\b|\bSEVERN\s+TRENT\b|\bANGLIAN\s+WATER\b|\bYORKSHIRE\s+WATER\b|\bWESSEX\s+WATER\b|\bAFFINITY\s+WATER\b"),
+        ("broadband",   r"\bBT\s+(?:GROUP|BUSINESS|BROADBAND)\b|\bVIRGIN\s+MEDIA\b|\bSKY\s+BROADBAND\b|\bPLUSNET\b|\bTALKTALK\b|\bZEN\s+INTERNET\b"),
+        ("council_tax", r"\bCORNWALL\s+COUNCIL\b|\bCOUNCIL\s+TAX\b"),
+        ("oil",         r"\bMITCHELL\s+&\s+WEBBER\b|\bWATSON\s+(?:FUELS|PETROLEUM)\b|\bCERTAS\b|\bRIX\s+PETROLEUM\b"),
+    ]
+    for kind, pat in utility_patterns:
+        if re.search(pat, H_UPPER):
+            # Try account_number match in property_utilities
+            for ref_m in re.finditer(r"\b(\d[\d/-]{5,18}\d)\b", haystack):
+                ref = re.sub(r"\D", "", ref_m.group(1))
+                if len(ref) < 6:
+                    continue
+                pu = await conn.fetchrow("""
+                    SELECT pu.property_id, p.entity_id
+                      FROM property_utilities pu
+                      JOIN properties p ON p.id = pu.property_id
+                     WHERE replace(coalesce(pu.account_number,''),'-','') = $1
+                        OR replace(coalesce(pu.mpan_or_mprn,''),' ','') = $1
+                     LIMIT 1
+                """, ref)
+                if pu:
+                    return ("properties", pu["property_id"],
+                            f"auto:utility:{kind}", pu["entity_id"])
+            # Lender-only: fall through to Layer 3 (Haiku) — don't guess
+            break
+
+    # 8. HMRC UTR / VAT no → entities
+    utr_m = re.search(r"\b(\d{10})\b(?:\s*(?:UTR|TAXPAYER))", H_UPPER) \
+            or re.search(r"(?:UTR|TAXPAYER|Unique\s+Tax)[\s:]+(\d{10})\b", haystack, re.I)
+    if utr_m:
+        utr = utr_m.group(1)
+        e = await conn.fetchrow("SELECT id FROM entities WHERE utr = $1", utr)
+        if e:
+            return ("entities", e["id"], "auto:hmrc_utr", e["id"])
+
+    vat_m = re.search(r"\b(?:GB)?\s*(\d{9,11})\b(?:\s*VAT)|VAT\s*(?:no|number)[\s:]+(?:GB)?\s*(\d{9,11})",
+                       haystack, re.I)
+    if vat_m:
+        vat = (vat_m.group(1) or vat_m.group(2) or "").strip()
+        if vat:
+            e = await conn.fetchrow(
+                "SELECT id FROM entities WHERE replace(coalesce(vat_number,''),' ','') LIKE $1",
+                f"%{vat}")
+            if e:
+                return ("entities", e["id"], "auto:hmrc_vat", e["id"])
 
     return (None, None, None, None)
 
