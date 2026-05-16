@@ -1269,6 +1269,130 @@ async def private_today_page():
     return FileResponse(str(STATIC / "private-today.html"))
 
 
+# ── U84 Phase 3 — Work · Actions (page + resolve/snooze API) ──────
+@app.get("/work/actions")
+async def work_actions_page():
+    return FileResponse(str(STATIC / "work-actions.html"))
+
+
+_ACTION_SOURCES = ("exception", "invoice_review", "bot_instruction", "document_expiry")
+
+
+@app.post("/api/actions/{source}/{ref}/resolve")
+async def actions_resolve(source: str, ref: str, request: Request,
+                          body: dict = Body(default={})):
+    """Mark an action-queue item resolved. Polymorphic by source.
+    Body: {note: '...'}  (note is optional)."""
+    if source not in _ACTION_SOURCES:
+        return JSONResponse({"error": f"unknown source {source!r}"}, status_code=400)
+    note = (body.get("note") or "").strip()[:500]
+    resolver = (request.headers.get("Remote-User") or "jo").strip()[:60]
+
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+
+            if source == "exception":
+                try:
+                    rid = int(ref)
+                except ValueError:
+                    return JSONResponse({"error": "exception ref must be int"}, status_code=400)
+                row = await c.fetchrow("""
+                    UPDATE mart.exceptions
+                       SET status = 'resolved',
+                           resolved_at = now(),
+                           resolved_by = $2,
+                           resolution_note = COALESCE($3, resolution_note)
+                     WHERE id = $1 AND status = 'open'
+                     RETURNING id, kind, severity
+                """, rid, resolver, note or None)
+                if not row:
+                    return JSONResponse({"error": "exception not found or already resolved"},
+                                        status_code=404)
+                return {"resolved": True, "source": source, "ref": ref,
+                        "kind": row["kind"], "severity": row["severity"]}
+
+            if source == "invoice_review":
+                try:
+                    rid = int(ref)
+                except ValueError:
+                    return JSONResponse({"error": "invoice_review ref must be int"}, status_code=400)
+                row = await c.fetchrow("""
+                    UPDATE vendor_invoice_inbox
+                       SET status = 'extracted'
+                     WHERE id = $1 AND status = 'needs_review'
+                     RETURNING id, vendor_name, subject
+                """, rid)
+                if not row:
+                    return JSONResponse({"error": "invoice not found or not in needs_review"},
+                                        status_code=404)
+                return {"resolved": True, "source": source, "ref": ref,
+                        "vendor": row["vendor_name"]}
+
+            if source == "bot_instruction":
+                try:
+                    rid = int(ref)
+                except ValueError:
+                    return JSONResponse({"error": "bot_instruction ref must be int"}, status_code=400)
+                row = await c.fetchrow("""
+                    UPDATE bot_instructions
+                       SET status = 'done'
+                     WHERE id = $1 AND status = 'pending'
+                     RETURNING id, raw_subject
+                """, rid)
+                if not row:
+                    return JSONResponse({"error": "instruction not found or not pending"},
+                                        status_code=404)
+                return {"resolved": True, "source": source, "ref": ref}
+
+            if source == "document_expiry":
+                return JSONResponse(
+                    {"error": "document_expiry resolves on renewal — update the document directly"},
+                    status_code=400)
+
+    return JSONResponse({"error": "unreachable"}, status_code=500)
+
+
+@app.post("/api/actions/{source}/{ref}/snooze")
+async def actions_snooze(source: str, ref: str, request: Request,
+                         body: dict = Body(default={})):
+    """Snooze an action until a given date. For mart.exceptions only at first
+    (other sources don't have a snooze field). Body: {until: 'YYYY-MM-DD'}."""
+    if source != "exception":
+        return JSONResponse({"error": f"snooze not supported for source {source!r}"},
+                            status_code=400)
+    until_raw = (body.get("until") or "").strip()
+    if not until_raw:
+        return JSONResponse({"error": "until date required (YYYY-MM-DD)"}, status_code=400)
+    try:
+        from datetime import date as _date
+        until = _date.fromisoformat(until_raw)
+    except ValueError:
+        return JSONResponse({"error": "until must be ISO date"}, status_code=400)
+    try:
+        rid = int(ref)
+    except ValueError:
+        return JSONResponse({"error": "exception ref must be int"}, status_code=400)
+
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+            row = await c.fetchrow("""
+                UPDATE mart.exceptions
+                   SET status = 'suppressed',
+                       resolution_note = COALESCE(resolution_note,'') ||
+                                         E'\nsnoozed to ' || $2::text
+                 WHERE id = $1 AND status = 'open'
+                 RETURNING id
+            """, rid, until.isoformat())
+            if not row:
+                return JSONResponse({"error": "exception not found or already closed"},
+                                    status_code=404)
+            return {"snoozed": True, "source": source, "ref": ref, "until": until.isoformat()}
+
+
 # ── U84 Phase 5 — Build hub ───────────────────────────────────────
 @app.get("/build/pipelines")
 async def build_pipelines_page():

@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0a0a0b">
+<title>Work · Actions — Home AI</title>
+
+<script src="/static/vendor/tailwind-3.4.min.js"></script>
+<script defer src="/static/vendor/alpine-3.14.min.js"></script>
+<script src="/static/_components/realm-toggle.js"></script>
+
+<style>
+  :root { color-scheme: dark; }
+  body { background: linear-gradient(180deg, #0f172a 0%, #020617 100%); min-height: 100vh; color: #e2e8f0;
+         font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  .glass { background: rgba(15,23,42,0.7); border: 1px solid rgba(148,163,184,0.15); }
+  .mono  { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  .tl{display:inline-block;width:10px;height:10px;border-radius:999px;margin-right:6px;vertical-align:middle;box-shadow:0 0 8px currentColor}
+  .tl-red{background:#f43f5e;color:#f43f5e;animation:pulse 1.4s infinite}.tl-amber{background:#f59e0b;color:#f59e0b}.tl-green{background:#10b981;color:#10b981}.tl-grey{background:#64748b;color:#64748b}
+  @keyframes pulse{50%{opacity:0.55}}
+  .skel{background:linear-gradient(90deg,rgba(148,163,184,0.06) 0%,rgba(148,163,184,0.12) 50%,rgba(148,163,184,0.06) 100%);background-size:200% 100%;animation:shimmer 1.4s ease-in-out infinite;border-radius:6px}
+  @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+  [x-cloak]{display:none!important}
+</style>
+</head>
+<body x-data="workActions()" x-init="boot()">
+
+<header class="sticky top-0 z-40 backdrop-blur-md bg-slate-950/80 border-b border-white/5"
+        x-data="homeaiHeader()" x-init="boot()">
+  <div class="max-w-3xl mx-auto px-3 py-2 flex items-center gap-2">
+    <a href="/" class="flex items-center gap-2 text-zinc-100 min-h-[44px]" aria-label="Home AI">
+      <span class="text-xl leading-none">⌂</span>
+      <span class="font-semibold text-sm">Home AI</span>
+    </a>
+    <div class="ml-2 flex bg-white/5 rounded-lg p-0.5 text-sm min-h-[44px] items-center" role="tablist" aria-label="Realm filter">
+      <button type="button" role="tab" :aria-selected="realm === 'work'" :tabindex="realm === 'work' ? 0 : -1"
+              class="px-3 min-h-[44px] min-w-[44px] rounded-md transition focus-visible:ring-2 focus-visible:ring-amber-400/60"
+              :class="realm === 'work' ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-500/40' : 'text-zinc-400 hover:text-zinc-200'"
+              @click="setRealm('work')" @keydown.right.prevent="setRealm('all')" @keydown.left.prevent="setRealm('work')">Work</button>
+      <button type="button" role="tab" :aria-selected="realm === 'all'" :tabindex="realm === 'all' ? 0 : -1"
+              class="px-3 min-h-[44px] min-w-[44px] rounded-md transition focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+              :class="realm === 'all' ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/40' : 'text-zinc-400 hover:text-zinc-200'"
+              @click="setRealm('all')" @keydown.right.prevent="setRealm('all')" @keydown.left.prevent="setRealm('work')">All</button>
+    </div>
+    <nav class="ml-auto flex items-center gap-1 text-sm text-zinc-400" aria-label="Primary">
+      <a href="/work/today" class="px-2 min-h-[44px] flex items-center rounded-md hover:text-zinc-100 hover:bg-white/5">Today</a>
+      <a href="/build/pipelines" class="px-2 min-h-[44px] flex items-center rounded-md hover:text-zinc-100 hover:bg-white/5">Build</a>
+      <a href="/all" class="px-2 min-h-[44px] flex items-center rounded-md hover:text-zinc-100 hover:bg-white/5">All</a>
+    </nav>
+  </div>
+</header>
+
+<script>
+  window.homeaiHeader = function () {
+    return {
+      realm: 'work',
+      boot() {
+        this.realm = (window.HomeAI && window.HomeAI.getRealm()) || 'work';
+        window.addEventListener('realm-changed', (e) => { this.realm = e.detail.realm; });
+      },
+      setRealm(next) { if (window.HomeAI && window.HomeAI.setRealm) window.HomeAI.setRealm(next); }
+    };
+  };
+</script>
+
+<!-- Toast region (aria-live for screen readers) -->
+<div class="fixed bottom-3 right-3 z-50 space-y-2 max-w-xs" aria-live="polite" aria-atomic="false">
+  <template x-for="t in toasts" :key="t.id">
+    <div class="glass rounded-lg p-3 text-sm border"
+         :class="{ 'border-emerald-500/40 text-emerald-200': t.kind === 'success',
+                   'border-red-500/40 text-red-200': t.kind === 'error',
+                   'border-amber-500/40 text-amber-200': t.kind === 'info' }"
+         x-text="t.message"></div>
+  </template>
+</div>
+
+<main class="max-w-3xl mx-auto p-3 space-y-3">
+
+  <div class="flex items-baseline justify-between mb-1">
+    <h1 class="text-base font-semibold">Actions</h1>
+    <span class="mono text-xs text-slate-500" x-text="lastRefresh"></span>
+  </div>
+
+  <!-- Severity filter chips -->
+  <div class="flex flex-wrap gap-1 text-sm" role="group" aria-label="Severity filter">
+    <button type="button"
+            class="px-3 min-h-[44px] rounded-md focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none"
+            :aria-pressed="filter === 'all'"
+            :class="filter === 'all' ? 'bg-white/10 text-zinc-100' : 'text-zinc-400 bg-white/5 hover:text-zinc-200'"
+            @click="filter = 'all'">All (<span x-text="counts.all"></span>)</button>
+    <button type="button"
+            class="px-3 min-h-[44px] rounded-md focus-visible:ring-2 focus-visible:ring-red-400/60 focus-visible:outline-none"
+            :aria-pressed="filter === 'critical'"
+            :class="filter === 'critical' ? 'bg-red-500/20 text-red-200 ring-1 ring-red-500/40' : 'text-zinc-400 bg-white/5 hover:text-red-200'"
+            @click="filter = 'critical'">Critical (<span x-text="counts.critical"></span>)</button>
+    <button type="button"
+            class="px-3 min-h-[44px] rounded-md focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none"
+            :aria-pressed="filter === 'high'"
+            :class="filter === 'high' ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-500/40' : 'text-zinc-400 bg-white/5 hover:text-amber-200'"
+            @click="filter = 'high'">High (<span x-text="counts.high"></span>)</button>
+    <button type="button"
+            class="px-3 min-h-[44px] rounded-md focus-visible:ring-2 focus-visible:ring-yellow-400/60 focus-visible:outline-none"
+            :aria-pressed="filter === 'medium'"
+            :class="filter === 'medium' ? 'bg-yellow-500/20 text-yellow-200 ring-1 ring-yellow-500/40' : 'text-zinc-400 bg-white/5 hover:text-yellow-200'"
+            @click="filter = 'medium'">Medium (<span x-text="counts.medium"></span>)</button>
+  </div>
+
+  <!-- Error banner -->
+  <div x-show="error" x-cloak class="glass border-red-500/30 rounded-lg p-3" aria-live="assertive">
+    <p class="text-red-300 text-sm font-medium" x-text="error"></p>
+    <button class="mt-2 min-h-[44px] px-3 text-amber-300 underline text-sm" @click="load()">Retry</button>
+  </div>
+
+  <!-- Loading skeleton -->
+  <template x-if="loading">
+    <div class="space-y-2">
+      <div class="glass rounded-lg p-3 h-16 skel"></div>
+      <div class="glass rounded-lg p-3 h-16 skel"></div>
+      <div class="glass rounded-lg p-3 h-16 skel"></div>
+    </div>
+  </template>
+
+  <!-- Empty -->
+  <template x-if="!loading && visible.length === 0">
+    <div class="glass rounded-lg p-6 text-center text-emerald-300 border-emerald-500/20">
+      <div class="text-3xl mb-1">✓</div>
+      <div class="text-sm">No <span x-text="filter === 'all' ? '' : filter + ' '"></span>actions outstanding.</div>
+      <div class="text-xs text-slate-500 mt-1">Last checked <span x-text="lastRefresh"></span></div>
+    </div>
+  </template>
+
+  <!-- Action list -->
+  <template x-if="!loading && visible.length > 0">
+    <ul class="space-y-1.5" role="list">
+      <template x-for="item in visible" :key="item.source + ':' + item.ref">
+        <li class="glass rounded-lg p-3"
+            :class="{ 'opacity-60': item.pending, 'border-red-500/40': item.error }">
+          <div class="flex items-start gap-2">
+            <span class="tl mt-1.5 shrink-0"
+                  :class="{ 'tl-red': item.severity === 'critical',
+                            'tl-amber': item.severity === 'high',
+                            'tl-green': item.severity === 'medium',
+                            'tl-grey': item.severity === 'low' }"
+                  :aria-label="`Severity ${item.severity}`"></span>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm text-slate-200" x-text="item.title"></div>
+              <div class="text-xs text-slate-500 mt-0.5">
+                <span x-text="item.source"></span> · <span x-text="item.kind"></span> ·
+                <span x-text="item.age_days + 'd'"></span> ·
+                <span class="mono" x-text="'#' + item.ref"></span>
+              </div>
+              <template x-if="item.error">
+                <div class="text-xs text-red-300 mt-1" aria-live="polite">
+                  Couldn't resolve: <span x-text="item.error"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- CTA row -->
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button type="button"
+                    class="min-h-[44px] px-3 rounded-md bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25
+                           focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:outline-none text-sm"
+                    @click="openResolve(item)"
+                    :disabled="item.pending"
+                    :aria-disabled="item.pending">
+              <span x-show="!item.pending">Resolve</span>
+              <span x-show="item.pending">…</span>
+            </button>
+            <template x-if="item.source === 'exception'">
+              <button type="button"
+                      class="min-h-[44px] px-3 rounded-md bg-amber-500/15 text-amber-200 hover:bg-amber-500/25
+                             focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none text-sm"
+                      @click="openSnooze(item)"
+                      :disabled="item.pending">Snooze</button>
+            </template>
+            <template x-if="item.source === 'invoice_review'">
+              <a :href="`/invoices/needs-review?id=${item.ref}`"
+                 class="min-h-[44px] px-3 rounded-md text-amber-300 hover:text-amber-200 inline-flex items-center text-sm">
+                Triage →
+              </a>
+            </template>
+            <template x-if="item.error">
+              <button type="button"
+                      class="min-h-[44px] px-3 rounded-md text-zinc-400 hover:text-zinc-200 text-sm"
+                      @click="clearError(item)">Dismiss</button>
+            </template>
+          </div>
+        </li>
+      </template>
+    </ul>
+  </template>
+
+  <!-- Resolve modal -->
+  <div x-show="modal.open" x-cloak
+       class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-3"
+       @click.self="closeModal()"
+       role="dialog" aria-modal="true" :aria-label="modal.kind === 'resolve' ? 'Resolve action' : 'Snooze action'">
+    <div class="glass rounded-lg p-4 w-full max-w-sm">
+      <h2 class="text-base font-semibold mb-2" x-text="modal.kind === 'resolve' ? 'Resolve' : 'Snooze'"></h2>
+      <p class="text-xs text-slate-400 mb-3" x-text="modal.item?.title || ''"></p>
+
+      <template x-if="modal.kind === 'resolve'">
+        <label class="block mb-3">
+          <span class="text-xs text-slate-400">Note (optional)</span>
+          <textarea x-model="modal.note" rows="3"
+                    class="mt-1 w-full bg-black/40 border border-white/10 rounded-md px-2 py-2 text-zinc-100
+                           focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:outline-none"
+                    placeholder="What happened?"></textarea>
+        </label>
+      </template>
+
+      <template x-if="modal.kind === 'snooze'">
+        <label class="block mb-3">
+          <span class="text-xs text-slate-400">Snooze until</span>
+          <input type="date" x-model="modal.until"
+                 class="mt-1 w-full bg-black/40 border border-white/10 rounded-md px-2 min-h-[44px] text-zinc-100
+                        focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none">
+        </label>
+      </template>
+
+      <div class="flex gap-2 justify-end">
+        <button type="button" @click="closeModal()"
+                class="min-h-[44px] px-3 rounded-md text-zinc-300 hover:text-zinc-100">Cancel</button>
+        <button type="button" @click="submitModal()" :disabled="modal.submitting"
+                class="min-h-[44px] px-4 rounded-md font-medium"
+                :class="modal.kind === 'resolve'
+                          ? 'bg-emerald-500/30 text-emerald-100 hover:bg-emerald-500/40'
+                          : 'bg-amber-500/30 text-amber-100 hover:bg-amber-500/40'">
+          <span x-show="!modal.submitting" x-text="modal.kind === 'resolve' ? 'Resolve' : 'Snooze'"></span>
+          <span x-show="modal.submitting">…</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+  window.workActions = () => ({
+    loading: true,
+    error: null,
+    items: [],
+    filter: 'all',
+    lastRefresh: '',
+    toasts: [],
+    toastSeq: 0,
+
+    modal: { open: false, kind: '', item: null, note: '', until: '', submitting: false },
+
+    get visible() {
+      if (this.filter === 'all') return this.items;
+      return this.items.filter(i => i.severity === this.filter);
+    },
+    get counts() {
+      const c = { all: this.items.length, critical: 0, high: 0, medium: 0, low: 0 };
+      for (const i of this.items) {
+        if (i.severity in c) c[i.severity]++;
+      }
+      return c;
+    },
+
+    async boot() {
+      if (window.HomeAI && window.HomeAI.registerRealmHandshake) {
+        window.HomeAI.registerRealmHandshake(async () => { await this.load(); });
+      }
+      await this.load();
+    },
+
+    async load() {
+      this.loading = true;
+      this.error = null;
+      try {
+        const r = await fetch('/api/finance/slug/action_queue');
+        if (!r.ok) throw new Error(`action_queue ${r.status}`);
+        const d = await r.json();
+        // Decorate with state machine fields
+        this.items = (d.rows || []).map(row => ({
+          ...row,
+          pending: false,
+          error: null,
+        }));
+        this.lastRefresh = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      } catch (e) {
+        this.error = e.message || String(e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    openResolve(item) {
+      this.modal = { open: true, kind: 'resolve', item, note: '', until: '', submitting: false };
+    },
+    openSnooze(item) {
+      // Default: 7 days from today
+      const d = new Date();
+      d.setDate(d.getDate() + 7);
+      this.modal = { open: true, kind: 'snooze', item, note: '', until: d.toISOString().slice(0, 10), submitting: false };
+    },
+    closeModal() {
+      if (this.modal.submitting) return;
+      this.modal = { open: false, kind: '', item: null, note: '', until: '', submitting: false };
+    },
+
+    async submitModal() {
+      const item = this.modal.item;
+      const kind = this.modal.kind;
+      if (!item) return;
+      this.modal.submitting = true;
+
+      // Optimistic UI — but keep the row in this.items with pending flag
+      // (G4 fix: don't strip from list until success).
+      item.pending = true;
+      item.error = null;
+
+      try {
+        let resp;
+        if (kind === 'resolve') {
+          resp = await fetch(`/api/actions/${item.source}/${item.ref}/resolve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ note: this.modal.note || '' })
+          });
+        } else if (kind === 'snooze') {
+          if (!this.modal.until) { throw new Error('pick a date'); }
+          resp = await fetch(`/api/actions/${item.source}/${item.ref}/snooze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ until: this.modal.until })
+          });
+        }
+        if (!resp.ok) {
+          const errBody = await resp.text();
+          let parsed;
+          try { parsed = JSON.parse(errBody); } catch (_) { parsed = { error: errBody.slice(0, 120) }; }
+          throw new Error(parsed.error || `HTTP ${resp.status}`);
+        }
+        // Success — remove from list and toast
+        this.items = this.items.filter(x => !(x.source === item.source && x.ref === item.ref));
+        this.toast('success', kind === 'resolve'
+          ? `Resolved · ${item.title.slice(0, 50)}`
+          : `Snoozed to ${this.modal.until}`);
+        this.closeModal();
+      } catch (e) {
+        // G4: rollback — re-render the row with the error badge, keep it in list
+        item.pending = false;
+        item.error = e.message || String(e);
+        this.toast('error', `Failed: ${e.message || e}`);
+        this.modal.submitting = false;
+        // Leave modal open so user can retry
+      }
+    },
+
+    clearError(item) {
+      item.error = null;
+    },
+
+    toast(kind, message) {
+      const id = ++this.toastSeq;
+      this.toasts.push({ id, kind, message });
+      setTimeout(() => {
+        this.toasts = this.toasts.filter(t => t.id !== id);
+      }, 4000);
+    }
+  });
+</script>
+</body>
+</html>
