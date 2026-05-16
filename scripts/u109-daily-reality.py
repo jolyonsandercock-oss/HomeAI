@@ -428,6 +428,9 @@ async def main():
     wx, surf, wx_cache_age = await weather_and_surf_from_cache(conn, today, tomorrow)
     wkind, wtext = weather_warning(wx) if wx else (None, None)
 
+    # U111 — revenue forecast for tomorrow
+    forecast_rows = await conn.fetch("SELECT * FROM v_revenue_forecast_tomorrow")
+
     # ── Room state today ────────────────────────────────────────────────
     # occupied_tonight: someone is in the room tonight (arrival or stay-through)
     # departing_today: someone left this morning — needs turnover
@@ -497,6 +500,49 @@ async def main():
     out.append(section('Weather + surf', None, '\n'.join(wx_body) + cache_note))
     out.append(f'<p style="{STY["empty"]}">Tide times: source integration pending (no free '
                'API responded without auth).</p>')
+
+    # ── Tomorrow revenue forecast (weather-conditioned) ─────────────────
+    if forecast_rows and any(r['forecast_avg'] for r in forecast_rows):
+        cat_labels = {
+            'food':       'Kitchen / food',
+            'wet':        'FoH / drinks',
+            'accom':      'Accommodation',
+            'icecream':   'Cafe — ice cream',
+            'cafe-other': 'Cafe — other',
+        }
+        rows_html = []
+        total = 0.0
+        for r in forecast_rows:
+            label = cat_labels.get(r['category'], r['category'])
+            avg = float(r['forecast_avg']) if r['forecast_avg'] else 0
+            med = float(r['forecast_median']) if r['forecast_median'] else 0
+            total += avg
+            rows_html.append(
+                f'<tr>'
+                f'<td style="{STY["td"]}"><strong>{h(label)}</strong></td>'
+                f'<td style="{STY["td"]}">£{avg:,.0f}</td>'
+                f'<td style="{STY["td"]};color:#666">£{med:,.0f}</td>'
+                f'<td style="{STY["td"]};color:#888;font-size:12px">{r["sample_days"]} days</td>'
+                f'</tr>')
+        first = forecast_rows[0]
+        sub = (f'Based on tomorrow forecast: '
+               f'<strong>{(first["max_temp_c"] or 0):.0f}°C</strong>, '
+               f'<strong>{int(first["precipitation_probability"] or 0)}% rain</strong>, '
+               f'band <strong>{h(first["band"])}</strong>. '
+               f'Matched against last 90 days, same day-of-week.')
+        body = (f'<p style="color:#666;font-size:13px;margin:0 0 6px 0">{sub}</p>'
+                f'<table style="{STY["tbl"]}">'
+                f'<tr><th style="{STY["th"]}">Category</th>'
+                f'<th style="{STY["th"]}">Predicted (avg)</th>'
+                f'<th style="{STY["th"]}">Median</th>'
+                f'<th style="{STY["th"]}">Sample</th></tr>'
+                + '\n'.join(rows_html)
+                + f'<tr style="background:#f8f8f8">'
+                f'<td style="{STY["td"]}"><strong>Total predicted</strong></td>'
+                f'<td style="{STY["td"]}"><strong>£{total:,.0f}</strong></td>'
+                f'<td style="{STY["td"]}" colspan="2"></td></tr>'
+                + '</table>')
+        out.append(section(f'Forecast — {fmt_day(tomorrow)}', None, body))
 
     def nights_summary(rows, kind):
         """Bookings × total nights summary line."""
