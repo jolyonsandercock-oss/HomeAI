@@ -456,6 +456,7 @@ services:
     environment:
       VAULT_ADDR: "http://vault:8200"
       VAULT_TOKEN: "${VAULT_TOKEN}"
+      BOT_RESPONDER_MODEL: "${BOT_RESPONDER_MODEL:-claude-haiku-4-5-20251001}"
       PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
       # R2 realm gate (U52). Present for parity with build-dashboard. Bot is
       # realm-aware regardless because sender_realm is fetched from the
