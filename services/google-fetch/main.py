@@ -291,6 +291,28 @@ async def get_message(account: str, message_id: str):
     return r.json()
 
 
+@app.get("/thread/{account}/{thread_id}")
+async def get_thread(account: str, thread_id: str):
+    """Fetch the full thread — used by reply-polling pipelines (u112/u113).
+    Returns every message in the thread with payload included so the caller
+    can scan for replies, In-Reply-To headers, and reply bodies in a single
+    round-trip."""
+    acc = await find_account(account)
+    tok = await access_token(acc)
+    t0 = time.time()
+    r = await app.state.http.get(
+        f"https://gmail.googleapis.com/gmail/v1/users/me/threads/{thread_id}",
+        params={"format": "full"},
+        headers={"Authorization": f"Bearer {tok}"},
+    )
+    dur = int((time.time() - t0) * 1000)
+    await log_call(account, "gmail", "threads.get", r.status_code, dur,
+                   None if r.status_code == 200 else r.text[:200])
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, r.text)
+    return r.json()
+
+
 @app.get("/attachments/{account}/{message_id}")
 async def list_attachments(account: str, message_id: str):
     """List all attachments on a message — filename, mime_type, attachment_id, size."""
