@@ -1269,6 +1269,31 @@ async def private_today_page():
     return FileResponse(str(STATIC / "private-today.html"))
 
 
+@app.get("/private/family")
+async def private_family_page():
+    return FileResponse(str(STATIC / "private-family.html"))
+
+
+@app.get("/private/email")
+async def private_email_page():
+    return FileResponse(str(STATIC / "private-email.html"))
+
+
+@app.get("/private/docs")
+async def private_docs_page():
+    return FileResponse(str(STATIC / "private-docs.html"))
+
+
+@app.get("/private/actions")
+async def private_actions_page():
+    return FileResponse(str(STATIC / "private-actions.html"))
+
+
+@app.get("/private/more")
+async def private_more_page():
+    return FileResponse(str(STATIC / "private-more.html"))
+
+
 # ── U84 Phase 3 — Work · Actions / Docs (page + resolve/snooze API) ─
 @app.get("/work/actions")
 async def work_actions_page():
@@ -5238,7 +5263,9 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         'build_pipeline_status','build_model_spend_30d',
                         'build_forensic_summary',
                         -- U84 Phase 3 additions (work tabs)
-                        'work_docs_kpis','work_staff_kpis','work_email_kpis')
+                        'work_docs_kpis','work_staff_kpis','work_email_kpis',
+                        -- U84 Phase 4 additions (private tabs)
+                        'private_family_kpis','private_docs_kpis')
          ORDER BY slug
     """)
     out = []

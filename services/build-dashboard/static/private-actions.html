@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0a0a0b">
+<title>Private · Actions — Home AI</title>
+<script src="/static/vendor/tailwind-3.4.min.js"></script>
+<script defer src="/static/vendor/alpine-3.14.min.js"></script>
+<script src="/static/_components/realm-toggle.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: linear-gradient(180deg, #0f172a 0%, #020617 100%); min-height: 100vh; color: #e2e8f0;
+         font-family: ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .glass { background: rgba(15,23,42,0.7); border: 1px solid rgba(148,163,184,0.15); }
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .pos{color:#34d399}.neg{color:#f43f5e}
+  .tl{display:inline-block;width:10px;height:10px;border-radius:999px;margin-right:6px;vertical-align:middle;box-shadow:0 0 8px currentColor}
+  .tl-red{background:#f43f5e;color:#f43f5e;animation:pulse 1.4s infinite}.tl-amber{background:#f59e0b;color:#f59e0b}.tl-green{background:#10b981;color:#10b981}
+  @keyframes pulse{50%{opacity:0.55}}
+  .skel{background:linear-gradient(90deg,rgba(148,163,184,0.06) 0%,rgba(148,163,184,0.12) 50%,rgba(148,163,184,0.06) 100%);background-size:200% 100%;animation:shimmer 1.4s ease-in-out infinite;border-radius:6px}
+  @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+</style>
+</head>
+<body>
+
+<header class="sticky top-0 z-40 backdrop-blur-md bg-slate-950/80 border-b border-white/5"
+        x-data="homeaiHeader()" x-init="boot()">
+  <div class="max-w-3xl mx-auto px-3 py-2 flex items-center gap-2">
+    <a href="/" class="flex items-center gap-2 text-zinc-100 min-h-[44px]"><span class="text-xl leading-none">⌂</span><span class="font-semibold text-sm">Home AI</span></a>
+    <div class="ml-2 flex bg-white/5 rounded-lg p-0.5 text-sm min-h-[44px] items-center" role="tablist" aria-label="Realm filter">
+      <button type="button" role="tab" :aria-selected="realm === 'work'" :tabindex="realm === 'work' ? 0 : -1"
+              class="px-3 min-h-[44px] min-w-[44px] rounded-md transition focus-visible:ring-2 focus-visible:ring-amber-400/60"
+              :class="realm === 'work' ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-500/40' : 'text-zinc-400'"
+              @click="setRealm('work')" @keydown.right.prevent="setRealm('all')" @keydown.left.prevent="setRealm('work')">Work</button>
+      <button type="button" role="tab" :aria-selected="realm === 'all'" :tabindex="realm === 'all' ? 0 : -1"
+              class="px-3 min-h-[44px] min-w-[44px] rounded-md transition focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+              :class="realm === 'all' ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/40' : 'text-zinc-400'"
+              @click="setRealm('all')" @keydown.right.prevent="setRealm('all')" @keydown.left.prevent="setRealm('work')">All</button>
+    </div>
+    <nav class="ml-auto flex items-center gap-1 text-sm text-zinc-400">
+      <a href="/private/today" class="px-2 min-h-[44px] flex items-center rounded-md hover:text-zinc-100 hover:bg-white/5">Today</a>
+      <a href="/all" class="px-2 min-h-[44px] flex items-center rounded-md hover:text-zinc-100 hover:bg-white/5">All</a>
+    </nav>
+  </div>
+</header>
+<script>
+  window.homeaiHeader = function () { return {
+    realm: 'all',
+    boot() { this.realm = (window.HomeAI && window.HomeAI.getRealm()) || 'all';
+      window.addEventListener('realm-changed', (e) => { this.realm = e.detail.realm; }); },
+    setRealm(next) { if (window.HomeAI?.setRealm) window.HomeAI.setRealm(next); } }; };
+</script>
+
+<main class="max-w-3xl mx-auto p-3 space-y-3" x-data="privateActions()" x-init="boot()">
+  <div class="flex items-baseline justify-between mb-1">
+    <h1 class="text-base font-semibold">Actions · Private</h1>
+    <span class="mono text-xs text-slate-500" x-text="lastRefresh"></span>
+  </div>
+
+  <template x-if="loading">
+    <div class="space-y-2">
+      <div class="glass rounded-lg p-3 h-14 skel"></div>
+      <div class="glass rounded-lg p-3 h-14 skel"></div>
+    </div>
+  </template>
+
+  <template x-if="!loading && actions.length === 0">
+    <div class="glass rounded-lg p-6 text-center text-emerald-300 border-emerald-500/20">
+      <div class="text-3xl mb-1">✓</div>
+      <div class="text-sm">No private actions outstanding.</div>
+    </div>
+  </template>
+
+  <ul class="space-y-1.5" role="list">
+    <template x-for="a in actions" :key="a.source + ':' + a.ref">
+      <li class="glass rounded-lg p-3">
+        <div class="flex items-start gap-2">
+          <span class="tl mt-1.5 shrink-0"
+                :class="{ 'tl-red': a.severity === 'critical', 'tl-amber': a.severity === 'high', 'tl-green': a.severity === 'medium' }"></span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm text-slate-200" x-text="a.title"></div>
+            <div class="text-xs text-slate-500 mt-0.5"><span x-text="a.kind"></span> · <span x-text="a.age_days + 'd'"></span> · <span x-text="a.realm"></span></div>
+          </div>
+          <span class="mono text-xs text-slate-600" x-text="'#' + a.ref"></span>
+        </div>
+      </li>
+    </template>
+  </ul>
+
+  <a href="/work/actions" class="block text-center min-h-[44px] inline-flex items-center justify-center px-3 rounded-md
+     bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 text-sm
+     focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none">
+    Resolve from full /work/actions view →
+  </a>
+</main>
+
+<script>
+  window.privateActions = () => ({
+    loading: true, actions: [], lastRefresh: '',
+    async boot() {
+      if (window.HomeAI?.registerRealmHandshake) window.HomeAI.registerRealmHandshake(async () => { await this.load(); });
+      await this.load();
+    },
+    async load() {
+      this.loading = true;
+      try {
+        const r = await fetch('/api/finance/slug/action_queue');
+        if (r.ok) {
+          const d = await r.json();
+          this.actions = (d.rows || []).filter(x => x.realm === 'family' || x.realm === 'shared');
+        }
+        this.lastRefresh = new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
+      } finally { this.loading = false; }
+    }
+  });
+</script>
+
+</body>
+</html>

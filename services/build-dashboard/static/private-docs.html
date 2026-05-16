@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0a0a0b">
+<title>Private · Docs — Home AI</title>
+<script src="/static/vendor/tailwind-3.4.min.js"></script>
+<script defer src="/static/vendor/alpine-3.14.min.js"></script>
+<script src="/static/_components/realm-toggle.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: linear-gradient(180deg, #0f172a 0%, #020617 100%); min-height: 100vh; color: #e2e8f0;
+         font-family: ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .glass { background: rgba(15,23,42,0.7); border: 1px solid rgba(148,163,184,0.15); }
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .pos{color:#34d399}.neg{color:#f43f5e}
+  .tl{display:inline-block;width:10px;height:10px;border-radius:999px;margin-right:6px;vertical-align:middle;box-shadow:0 0 8px currentColor}
+  .tl-red{background:#f43f5e;color:#f43f5e;animation:pulse 1.4s infinite}.tl-amber{background:#f59e0b;color:#f59e0b}.tl-green{background:#10b981;color:#10b981}
+  @keyframes pulse{50%{opacity:0.55}}
+  .skel{background:linear-gradient(90deg,rgba(148,163,184,0.06) 0%,rgba(148,163,184,0.12) 50%,rgba(148,163,184,0.06) 100%);background-size:200% 100%;animation:shimmer 1.4s ease-in-out infinite;border-radius:6px}
+  @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+</style>
+</head>
+<body>
+
+<header class="sticky top-0 z-40 backdrop-blur-md bg-slate-950/80 border-b border-white/5"
+        x-data="homeaiHeader()" x-init="boot()">
+  <div class="max-w-3xl mx-auto px-3 py-2 flex items-center gap-2">
+    <a href="/" class="flex items-center gap-2 text-zinc-100 min-h-[44px]"><span class="text-xl leading-none">⌂</span><span class="font-semibold text-sm">Home AI</span></a>
+    <div class="ml-2 flex bg-white/5 rounded-lg p-0.5 text-sm min-h-[44px] items-center" role="tablist" aria-label="Realm filter">
+      <button type="button" role="tab" :aria-selected="realm === 'work'" :tabindex="realm === 'work' ? 0 : -1"
+              class="px-3 min-h-[44px] min-w-[44px] rounded-md transition focus-visible:ring-2 focus-visible:ring-amber-400/60"
+              :class="realm === 'work' ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-500/40' : 'text-zinc-400'"
+              @click="setRealm('work')" @keydown.right.prevent="setRealm('all')" @keydown.left.prevent="setRealm('work')">Work</button>
+      <button type="button" role="tab" :aria-selected="realm === 'all'" :tabindex="realm === 'all' ? 0 : -1"
+              class="px-3 min-h-[44px] min-w-[44px] rounded-md transition focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+              :class="realm === 'all' ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/40' : 'text-zinc-400'"
+              @click="setRealm('all')" @keydown.right.prevent="setRealm('all')" @keydown.left.prevent="setRealm('work')">All</button>
+    </div>
+    <nav class="ml-auto flex items-center gap-1 text-sm text-zinc-400">
+      <a href="/private/today" class="px-2 min-h-[44px] flex items-center rounded-md hover:text-zinc-100 hover:bg-white/5">Today</a>
+      <a href="/all" class="px-2 min-h-[44px] flex items-center rounded-md hover:text-zinc-100 hover:bg-white/5">All</a>
+    </nav>
+  </div>
+</header>
+<script>
+  window.homeaiHeader = function () { return {
+    realm: 'all',
+    boot() { this.realm = (window.HomeAI && window.HomeAI.getRealm()) || 'all';
+      window.addEventListener('realm-changed', (e) => { this.realm = e.detail.realm; }); },
+    setRealm(next) { if (window.HomeAI?.setRealm) window.HomeAI.setRealm(next); } }; };
+</script>
+
+<main class="max-w-3xl mx-auto p-3 space-y-3" x-data="privateDocs()" x-init="boot()">
+  <div class="flex items-baseline justify-between mb-1">
+    <h1 class="text-base font-semibold">Docs · Private</h1>
+    <span class="mono text-xs text-slate-500" x-text="lastRefresh"></span>
+  </div>
+
+  <section class="grid grid-cols-2 sm:grid-cols-4 gap-2" aria-label="Private docs KPIs">
+    <a href="/finance#mortgages" class="glass rounded-lg p-3 min-h-[80px] hover:bg-white/5 block
+       focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:outline-none transition">
+      <div class="text-xs uppercase tracking-wider text-emerald-300">Mortgages active</div>
+      <template x-if="loading"><div class="skel h-8 mt-2"></div></template>
+      <template x-if="!loading"><div class="text-2xl mono font-semibold mt-1" x-text="kpi.mortgages_active || 0"></div></template>
+    </a>
+    <div class="glass rounded-lg p-3 min-h-[80px]" :aria-busy="loading">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Mortgages closed</div>
+      <template x-if="loading"><div class="skel h-8 mt-2"></div></template>
+      <template x-if="!loading"><div class="text-2xl mono font-semibold mt-1 text-slate-400" x-text="kpi.mortgages_closed || 0"></div></template>
+    </div>
+    <a href="/vehicles" class="glass rounded-lg p-3 min-h-[80px] hover:bg-white/5 block
+       focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:outline-none transition">
+      <div class="text-xs uppercase tracking-wider text-emerald-300">Vehicles</div>
+      <template x-if="loading"><div class="skel h-8 mt-2"></div></template>
+      <template x-if="!loading"><div class="text-2xl mono font-semibold mt-1" x-text="kpi.vehicles_count || 0"></div></template>
+    </a>
+    <div class="glass rounded-lg p-3 min-h-[80px]" :aria-busy="loading">
+      <div class="text-xs uppercase tracking-wider text-slate-500">Expiring 60d</div>
+      <template x-if="loading"><div class="skel h-8 mt-2"></div></template>
+      <template x-if="!loading">
+        <div class="text-2xl mono font-semibold mt-1">
+          <span class="tl" :class="kpi.docs_expiring_60d > 0 ? 'tl-amber' : 'tl-green'"></span>
+          <span x-text="kpi.docs_expiring_60d || 0"></span>
+        </div>
+      </template>
+    </div>
+  </section>
+
+  <section class="glass rounded-lg p-4">
+    <h2 class="text-sm font-semibold mb-1">Detailed views</h2>
+    <ul class="space-y-1">
+      <li><a class="text-emerald-300 hover:text-emerald-200 min-h-[44px] inline-flex items-center" href="/finance">Finance — mortgages, capital, cash →</a></li>
+      <li><a class="text-emerald-300 hover:text-emerald-200 min-h-[44px] inline-flex items-center" href="/vehicles">Vehicles — MOT, insurance, road tax →</a></li>
+    </ul>
+  </section>
+</main>
+
+<script>
+  window.privateDocs = () => ({
+    loading: true, kpi: {}, lastRefresh: '',
+    async boot() {
+      if (window.HomeAI?.registerRealmHandshake) window.HomeAI.registerRealmHandshake(async () => { await this.load(); });
+      await this.load();
+    },
+    async load() {
+      this.loading = true;
+      try {
+        const r = await fetch('/api/finance/slug/private_docs_kpis');
+        if (r.ok) { const d = await r.json(); this.kpi = (d.rows && d.rows[0]) || {}; }
+        this.lastRefresh = new Date().toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
+      } finally { this.loading = false; }
+    }
+  });
+</script>
+
+</body>
+</html>
