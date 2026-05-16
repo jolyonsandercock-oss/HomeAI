@@ -1269,10 +1269,15 @@ async def private_today_page():
     return FileResponse(str(STATIC / "private-today.html"))
 
 
-# ── U84 Phase 3 — Work · Actions (page + resolve/snooze API) ──────
+# ── U84 Phase 3 — Work · Actions / Docs (page + resolve/snooze API) ─
 @app.get("/work/actions")
 async def work_actions_page():
     return FileResponse(str(STATIC / "work-actions.html"))
+
+
+@app.get("/work/docs")
+async def work_docs_page():
+    return FileResponse(str(STATIC / "work-docs.html"))
 
 
 _ACTION_SOURCES = ("exception", "invoice_review", "bot_instruction", "document_expiry")
@@ -5211,7 +5216,9 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         'today_kpis_work','today_kpis_private','action_queue',
                         -- U84 Phase 5 additions (build hub)
                         'build_pipeline_status','build_model_spend_30d',
-                        'build_forensic_summary')
+                        'build_forensic_summary',
+                        -- U84 Phase 3 additions (work tabs)
+                        'work_docs_kpis')
          ORDER BY slug
     """)
     out = []
