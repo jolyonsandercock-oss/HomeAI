@@ -26,7 +26,7 @@ import asyncpg
 import httpx
 import yaml
 from fastapi import FastAPI, Query, Request, Body
-from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).parent
@@ -568,7 +568,29 @@ async def realm_middleware(request, call_next):
     return await call_next(request)
 
 @app.get("/")
-async def root():
+async def root(request: Request):
+    """U84 Phase 7: route the unprefixed root to the new IA based on the
+    user's persisted realm. Falls back to /work/today if no realm cookie
+    is present (the most common entry-point for Jo).
+    Old /index Mission Control page is still reachable at /index for
+    nostalgia + scripts that depend on it."""
+    # Read the cookie set by realm-toggle.js. localStorage is the
+    # client-side source of truth but the cookie mirrors it.
+    cookie_realm = (request.cookies.get("X-Realm") or "").strip().lower()
+    if cookie_realm == "all":
+        # 'all' realm: send to /work/today as the primary daily surface.
+        # Jo can navigate to /private/today via the IA.
+        return RedirectResponse(url="/work/today", status_code=302)
+    if cookie_realm == "family":
+        return RedirectResponse(url="/private/today", status_code=302)
+    # Default: work realm
+    return RedirectResponse(url="/work/today", status_code=302)
+
+
+@app.get("/index")
+async def legacy_index():
+    """Old Mission Control page. Preserved at /index so existing
+    bookmarks and the occasional cron job that hits it still work."""
     return FileResponse(str(STATIC / "index.html"))
 
 @app.get("/api/healthz")

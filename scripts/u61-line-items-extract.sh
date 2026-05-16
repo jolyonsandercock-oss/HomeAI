@@ -178,8 +178,12 @@ async def main():
     await conn.fetchval("SELECT set_config('app.current_entity', 'all',   false)")
     await conn.fetchval("SELECT set_config('app.current_realm',  'owner', false)")
 
-    # Pick targets.
-    where = "WHERE vii.has_pdf=true"
+    # Pick targets. has_pdf=true alone is too loose — u95 harvested 8k+ rows
+    # tagged has_pdf=true but only the ~1.8k where u49 has actually downloaded
+    # the attachment have a file on disk. Restrict to rows with pdf_local_path
+    # set; the 404 storm in earlier runs was wasting cycles on rows where
+    # the PDF was never fetched.
+    where = "WHERE vii.has_pdf=true AND vii.pdf_local_path IS NOT NULL"
     args = []
     if INVOICE_IDS:
         ids = [int(x) for x in re.split(r"[\s,]+", INVOICE_IDS) if x]
@@ -275,7 +279,16 @@ async def main():
             else:
                 stats["haiku_ok"] += 1
 
-            n = await insert_lines(conn, inv_id, realm, extracted["lines"],
+            # Defensive: extracted may be None (e.g. Haiku returned a malformed
+            # JSON envelope) or lack a 'lines' key when both passes failed
+            # validation but we still want to record a 0-line attempt rather
+            # than crash. Use .get with a fallback.
+            lines_arr = (extracted or {}).get("lines") or []
+            if not lines_arr:
+                print(f"  #{inv_id}: skipping insert — no lines in extracted payload (model={model_used})")
+                stats["fail"] += 1
+                continue
+            n = await insert_lines(conn, inv_id, realm, lines_arr,
                                    model_used, confidence)
             stats["total_lines"] += n
             tot = float(inv_total) if inv_total else 0.0
