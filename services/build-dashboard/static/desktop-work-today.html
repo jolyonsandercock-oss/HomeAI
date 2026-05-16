@@ -296,18 +296,226 @@
         </template>
       </section>
 
-      <!-- Placeholder note: more sections (T03, T04, A01) will join in Phase D2 -->
-      <section id="_meta" class="glass rounded-lg p-4 mb-4 border-amber-500/20">
-        <h2 class="text-sm font-semibold text-amber-200">Phase D1 canary</h2>
-        <p class="text-xs text-slate-400 mt-2">
-          This is the desktop chrome shell. One section (§T01) is wired up to prove
-          the top bar, side rail, breadcrumbs, IntersectionObserver active-section
-          highlight, and the realm + date-window pickers all work together.
-        </p>
-        <p class="text-xs text-slate-400 mt-2">
-          Phase D2 will add §T03 (today's bookings detail), §T04 (today's pub sales),
-          and §A01 (action queue) to this page.
-        </p>
+      <!-- ── §T03 — Today's accommodation bookings ─────────────────── -->
+      <section id="T03" data-section-code="T03"
+               class="glass rounded-lg p-4 mb-4"
+               x-data="desktopSection({ code: 'T03', name: 'Today bookings', slug: 'today_bookings' })"
+               x-init="init()" aria-labelledby="T03-h">
+        <header class="flex items-baseline justify-between mb-3">
+          <h2 id="T03-h" class="text-base font-semibold">
+            <span class="mono text-xs text-amber-300">§T03</span>
+            Today bookings
+          </h2>
+          <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
+        </header>
+
+        <template x-if="loading">
+          <div class="space-y-2">
+            <div class="skel h-10"></div><div class="skel h-10"></div>
+          </div>
+        </template>
+
+        <template x-if="error">
+          <div class="text-red-300 text-sm">Couldn't load: <span x-text="error"></span></div>
+        </template>
+
+        <template x-if="!loading && !error && data && data.rows && data.rows.length === 0">
+          <div class="text-slate-400 text-sm py-2">No check-ins today.</div>
+        </template>
+
+        <template x-if="!loading && !error && data && data.rows && data.rows.length > 0">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-xs uppercase tracking-wider text-slate-500">
+                <tr>
+                  <th class="text-left px-2 py-2">Guest</th>
+                  <th class="text-left px-2 py-2">Room</th>
+                  <th class="text-left px-2 py-2">Out</th>
+                  <th class="text-left px-2 py-2">Source</th>
+                  <th class="text-left px-2 py-2">Payment</th>
+                  <th class="text-right px-2 py-2">Gross</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="b in data.rows" :key="b.id">
+                  <tr class="border-t border-white/5">
+                    <td class="px-2 py-2 text-zinc-100" x-text="b.guest_name || '—'"></td>
+                    <td class="px-2 py-2 text-slate-300" x-text="b.room || '—'"></td>
+                    <td class="px-2 py-2 mono text-slate-400" x-text="b.checkout_date || '—'"></td>
+                    <td class="px-2 py-2 text-slate-400">
+                      <span class="mono text-xs" x-text="b.source"></span>
+                      <span class="text-slate-600 ml-1" x-text="'#' + b.source_ref"></span>
+                    </td>
+                    <td class="px-2 py-2 text-xs">
+                      <span class="px-2 py-0.5 rounded"
+                            :class="{
+                              'bg-emerald-500/20 text-emerald-200': b.payment_status === 'paid',
+                              'bg-amber-500/20 text-amber-200': b.payment_status === 'deposit_paid',
+                              'bg-rose-500/15 text-rose-300': b.payment_status === 'unpaid'
+                            }"
+                            x-text="b.payment_status || '—'"></span>
+                    </td>
+                    <td class="px-2 py-2 mono text-right">£<span x-text="(+b.gross_amount || 0).toFixed(2)"></span></td>
+                  </tr>
+                </template>
+                <tr class="border-t-2 border-white/10 font-medium">
+                  <td class="px-2 py-2" colspan="5">Total · <span x-text="data.rows.length"></span> booking(s)</td>
+                  <td class="px-2 py-2 mono text-right pos">
+                    £<span x-text="data.rows.reduce((s, r) => s + (+r.gross_amount || 0), 0).toFixed(2)"></span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </section>
+
+      <!-- ── §T04 — Today's TouchOffice pub sales ────────────────────── -->
+      <section id="T04" data-section-code="T04"
+               class="glass rounded-lg p-4 mb-4"
+               x-data="desktopSection({ code: 'T04', name: 'Today pub sales', slug: 'today_pub_sales' })"
+               x-init="init()" aria-labelledby="T04-h">
+        <header class="flex items-baseline justify-between mb-3">
+          <h2 id="T04-h" class="text-base font-semibold">
+            <span class="mono text-xs text-amber-300">§T04</span>
+            Today pub sales (TouchOffice)
+          </h2>
+          <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
+        </header>
+
+        <template x-if="loading">
+          <div class="skel h-24"></div>
+        </template>
+
+        <template x-if="error">
+          <div class="text-red-300 text-sm">Couldn't load: <span x-text="error"></span></div>
+        </template>
+
+        <template x-if="!loading && !error && data && data.rows && data.rows.length === 0">
+          <div class="text-slate-400 text-sm py-2">
+            No TouchOffice sales scraped yet for today
+            <span class="text-xs">(scrape usually lands late evening)</span>.
+          </div>
+        </template>
+
+        <template x-if="!loading && !error && data && data.rows && data.rows.length > 0">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="text-xs uppercase tracking-wider text-slate-500">
+                <tr>
+                  <th class="text-left px-2 py-2">Site</th>
+                  <th class="text-left px-2 py-2">Department</th>
+                  <th class="text-right px-2 py-2">Qty</th>
+                  <th class="text-right px-2 py-2">Net</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="row in data.rows" :key="row.site + '|' + row.department">
+                  <tr class="border-t border-white/5">
+                    <td class="px-2 py-2">
+                      <span class="px-2 py-0.5 rounded text-xs"
+                            :class="row.site === 'malthouse' ? 'bg-amber-500/15 text-amber-200' : 'bg-emerald-500/15 text-emerald-200'"
+                            x-text="row.site === 'malthouse' ? 'Pub' : 'Cafe'"></span>
+                    </td>
+                    <td class="px-2 py-2 text-zinc-200" x-text="row.department"></td>
+                    <td class="px-2 py-2 mono text-right text-slate-400" x-text="(+row.quantity || 0).toFixed(0)"></td>
+                    <td class="px-2 py-2 mono text-right" :class="(+row.net_value || 0) > 0 ? 'pos' : 'text-slate-500'">
+                      £<span x-text="(+row.net_value || 0).toFixed(2)"></span>
+                    </td>
+                  </tr>
+                </template>
+                <tr class="border-t-2 border-white/10 font-medium">
+                  <td class="px-2 py-2" colspan="3">Total</td>
+                  <td class="px-2 py-2 mono text-right pos">
+                    £<span x-text="data.rows.reduce((s, r) => s + (+r.net_value || 0), 0).toFixed(2)"></span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </section>
+
+      <!-- ── §A01 — Action queue ──────────────────────────────────────── -->
+      <section id="A01" data-section-code="A01"
+               class="glass rounded-lg p-4 mb-4"
+               x-data="desktopSection({ code: 'A01', name: 'Action queue', slug: 'action_queue' })"
+               x-init="init()" aria-labelledby="A01-h">
+        <header class="flex items-baseline justify-between mb-3">
+          <h2 id="A01-h" class="text-base font-semibold">
+            <span class="mono text-xs text-amber-300">§A01</span>
+            Action queue
+          </h2>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
+            <a href="/work/actions" class="text-xs text-amber-300 hover:text-amber-200">Resolve →</a>
+          </div>
+        </header>
+
+        <!-- Filter chips inside the section -->
+        <div x-data="{ filter: 'all' }" class="flex flex-wrap gap-1 mb-3 text-xs">
+          <button @click="filter = 'all'" :aria-pressed="filter === 'all'"
+                  class="px-2 py-1 min-h-[32px] rounded"
+                  :class="filter === 'all' ? 'bg-white/10 text-zinc-100' : 'bg-white/5 text-zinc-400'">All</button>
+          <button @click="filter = 'critical'" :aria-pressed="filter === 'critical'"
+                  class="px-2 py-1 min-h-[32px] rounded"
+                  :class="filter === 'critical' ? 'bg-red-500/20 text-red-200' : 'bg-white/5 text-zinc-400'">Critical</button>
+          <button @click="filter = 'high'" :aria-pressed="filter === 'high'"
+                  class="px-2 py-1 min-h-[32px] rounded"
+                  :class="filter === 'high' ? 'bg-amber-500/20 text-amber-200' : 'bg-white/5 text-zinc-400'">High</button>
+          <button @click="filter = 'medium'" :aria-pressed="filter === 'medium'"
+                  class="px-2 py-1 min-h-[32px] rounded"
+                  :class="filter === 'medium' ? 'bg-yellow-500/20 text-yellow-200' : 'bg-white/5 text-zinc-400'">Medium</button>
+
+          <template x-if="loading">
+            <div class="skel h-40 w-full mt-1"></div>
+          </template>
+
+          <template x-if="!loading && data && data.rows">
+            <div class="overflow-x-auto w-full">
+              <table class="w-full text-sm">
+                <thead class="text-xs uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th class="text-left px-2 py-2 w-6"></th>
+                    <th class="text-left px-2 py-2">Title</th>
+                    <th class="text-left px-2 py-2">Kind</th>
+                    <th class="text-left px-2 py-2">Source</th>
+                    <th class="text-left px-2 py-2">Realm</th>
+                    <th class="text-right px-2 py-2">Age</th>
+                    <th class="text-right px-2 py-2">Ref</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="a in (filter === 'all' ? data.rows : data.rows.filter(r => r.severity === filter)).slice(0, 50)" :key="a.source + ':' + a.ref">
+                    <tr class="border-t border-white/5 hover:bg-white/5">
+                      <td class="px-2 py-2">
+                        <span class="tl"
+                              :class="{ 'tl-red': a.severity === 'critical', 'tl-amber': a.severity === 'high',
+                                        'tl-green': a.severity === 'medium', 'tl-grey': a.severity === 'low' }"></span>
+                      </td>
+                      <td class="px-2 py-2 text-zinc-100">
+                        <span class="block max-w-md truncate" :title="a.title" x-text="a.title"></span>
+                      </td>
+                      <td class="px-2 py-2 text-xs mono text-slate-400" x-text="a.kind"></td>
+                      <td class="px-2 py-2 text-xs mono text-slate-400" x-text="a.source"></td>
+                      <td class="px-2 py-2 text-xs">
+                        <span class="px-1.5 py-0.5 rounded"
+                              :class="a.realm === 'work' ? 'bg-amber-500/15 text-amber-200' :
+                                       a.realm === 'family' ? 'bg-emerald-500/15 text-emerald-200' :
+                                       'bg-slate-500/15 text-slate-300'"
+                              x-text="a.realm"></span>
+                      </td>
+                      <td class="px-2 py-2 mono text-right text-slate-400" x-text="a.age_days + 'd'"></td>
+                      <td class="px-2 py-2 mono text-right text-xs text-slate-600" x-text="'#' + a.ref"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <div class="text-xs text-slate-500 mt-2"
+                   x-text="`${(filter === 'all' ? data.rows : data.rows.filter(r => r.severity === filter)).length} item(s), showing first 50`"></div>
+            </div>
+          </template>
+        </div>
       </section>
 
     </main>

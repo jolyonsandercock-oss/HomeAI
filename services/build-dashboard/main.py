@@ -5656,7 +5656,9 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         -- U84 Phase 7 additions (telemetry)
                         'route_telemetry_7d',
                         -- U84 private docs detail lists
-                        'private_vehicles')
+                        'private_vehicles',
+                        -- U85 Phase D2 (desktop sections)
+                        'today_bookings','today_pub_sales')
          ORDER BY slug
     """)
     out = []
