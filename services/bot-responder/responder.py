@@ -238,6 +238,42 @@ async def main():
             await conn.execute("SET LOCAL app.current_entity = '3'")
             sender_realm = await conn.fetchval(
                 "SELECT realm FROM bot_sender_whitelist WHERE LOWER(email)=$1 AND active", sender)
+        # U119 — short-circuit approve/reject for WA outbound queue.
+        # Lets Jo flip wa_outbound_queue rows via Telegram or email without
+        # round-tripping through Claude.
+        import re
+        m_app = re.match(r'^\s*(approve|reject)\s+(\d+|all)\s*(.*)$', question, re.I)
+        if m_app and sender_realm == 'owner':
+            action = m_app.group(1).lower()
+            target = m_app.group(2).lower()
+            note   = m_app.group(3).strip() or None
+            new_status = 'approved' if action == 'approve' else 'cancelled'
+            async with conn.transaction():
+                await conn.execute("SET LOCAL app.current_entity = '3'")
+                if target == 'all':
+                    rows = await conn.fetch("""
+                        UPDATE wa_outbound_queue
+                           SET status = $1, approved_at = NOW(),
+                               approved_by = $2
+                         WHERE status = 'pending_approval'
+                       RETURNING id, target_label, body
+                    """, new_status, sender)
+                else:
+                    rows = await conn.fetch("""
+                        UPDATE wa_outbound_queue
+                           SET status = $1, approved_at = NOW(),
+                               approved_by = $2
+                         WHERE id = $3 AND status = 'pending_approval'
+                       RETURNING id, target_label, body
+                    """, new_status, sender, int(target))
+            count = len(rows)
+            verb = 'approved' if action == 'approve' else 'cancelled'
+            resolution = (f"{verb} {count} WA outbound row(s): " +
+                          ", ".join(f"#{r['id']} → {r['target_label']}" for r in rows))
+            await finalize(conn, bi_id, status='done', resolution=resolution)
+            print(resolution)
+            return
+
         if sender_realm is None:
             await log_rejection(conn, asked_by=sender or "unknown", channel="email",
                                 raw_question=question, reason="other",
