@@ -358,7 +358,8 @@ async def compute_dynamic_counts() -> dict:
           (SELECT count(*)
              FROM pg_inherits i
              JOIN pg_class p ON p.oid = i.inhparent
-            WHERE p.relname = 'events')                                     AS event_partitions
+            WHERE p.relname = 'events')                                     AS event_partitions,
+          (SELECT count(*) FROM v_documents_needing_review)                 AS docs_needing_review
     """)
     return dict(rows[0]) if rows else {}
 
@@ -3627,12 +3628,146 @@ async def api_documents_file(doc_id: int):
     if not row or not row["file_path"]:
         return JSONResponse({"error": "not found"}, status_code=404)
     real = _os.path.realpath(row["file_path"])
+    # Paperless-ingested docs live under /usr/src/paperless/media but we only
+    # have /home_ai/storage/documents on disk for direct-uploads. For paperless
+    # rows, redirect to the Paperless API instead.
     if not real.startswith(_os.path.realpath(_DOCS_ROOT) + "/"):
         return JSONResponse({"error": "path traversal blocked"}, status_code=403)
     if not _os.path.exists(real):
         return JSONResponse({"error": "file missing on disk"}, status_code=404)
     return FileResponse(real, media_type=row["mime_type"] or "application/octet-stream",
                         filename=row["title"] or _os.path.basename(real))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# U68 T4 — review queue + manual link endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/documents/review-queue")
+async def api_documents_review_queue():
+    """Docs that the linker couldn't auto-attach OR the Haiku classifier
+    rated below 0.85 confidence. Drives the 'Needs your eye' tab on /documents."""
+    rows = await db_all("""
+        SELECT v.*,
+               -- Resolve human-readable label for the suggested link
+               CASE v.suggested_link_table
+                 WHEN 'vehicles' THEN
+                   (SELECT registration || ' (' || make_model || ')'
+                      FROM vehicles WHERE id = v.suggested_link_id)
+                 WHEN 'properties' THEN
+                   (SELECT address_line1 || ' ' || coalesce(postcode,'')
+                      FROM properties WHERE id = v.suggested_link_id)
+                 WHEN 'bank_accounts' THEN
+                   (SELECT bank_name || ' ' || account_name
+                      FROM bank_accounts WHERE id = v.suggested_link_id)
+                 WHEN 'mortgage_accounts' THEN
+                   (SELECT lender || ' ' || coalesce(account_ref,'')
+                      FROM mortgage_accounts WHERE id = v.suggested_link_id)
+                 WHEN 'entities' THEN
+                   (SELECT name FROM entities WHERE id = v.suggested_link_id)
+                 WHEN 'children' THEN
+                   (SELECT name FROM children WHERE id = v.suggested_link_id)
+                 ELSE NULL
+               END AS suggested_link_label
+          FROM v_documents_needing_review v
+         ORDER BY confidence DESC NULLS LAST, created_at DESC
+         LIMIT 200
+    """)
+    return {"n": len(rows), "rows": [_isoify(dict(r)) for r in rows]}
+
+
+@app.get("/api/documents/link-options")
+async def api_documents_link_options(table: str = Query(...)):
+    """List candidate rows for the manual-link picker on /documents."""
+    if table == "vehicles":
+        rows = await db_all(
+            "SELECT id, registration || ' — ' || make_model AS label FROM vehicles ORDER BY registration")
+    elif table == "properties":
+        rows = await db_all(
+            "SELECT id, COALESCE(address_line1, 'property #' || id) || ' ' || COALESCE(postcode,'') AS label FROM properties ORDER BY address_line1")
+    elif table == "bank_accounts":
+        rows = await db_all(
+            "SELECT id, bank_name || ' — ' || account_name AS label FROM bank_accounts ORDER BY bank_name, account_name")
+    elif table == "mortgage_accounts":
+        rows = await db_all(
+            "SELECT id, lender || ' — ' || COALESCE(account_ref,'(no ref)') AS label FROM mortgage_accounts ORDER BY lender")
+    elif table == "entities":
+        rows = await db_all(
+            "SELECT id, name AS label FROM entities ORDER BY id")
+    elif table == "children":
+        rows = await db_all(
+            "SELECT id, name AS label FROM children ORDER BY name")
+    else:
+        return JSONResponse({"error": f"unknown table {table!r}"}, status_code=400)
+    return {"table": table, "rows": [_isoify(dict(r)) for r in rows]}
+
+
+@app.post("/api/documents/{doc_id}/link")
+async def api_documents_link(doc_id: int, payload: dict = Body(...)):
+    """Manually attach a document to a record. Also marks the classification
+    queue row as 'manual_applied'."""
+    table = (payload.get("table") or "").strip()
+    linked_id = payload.get("linked_id")
+    if table and table not in ("vehicles","properties","bank_accounts",
+                                "mortgage_accounts","entities","children"):
+        return JSONResponse({"error":"invalid table"}, status_code=400)
+    if not table:
+        # Clear the link
+        table = None
+        linked_id = None
+    elif linked_id is None:
+        return JSONResponse({"error":"linked_id required when setting table"}, status_code=400)
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await c.execute("SET LOCAL app.current_entity = 'all'")
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+            ok = await c.fetchval("""
+                UPDATE documents
+                   SET linked_table = $2,
+                       linked_id    = $3,
+                       linked_by    = COALESCE($4, 'manual:jo'),
+                       updated_at   = NOW()
+                 WHERE id = $1
+                RETURNING id
+            """, doc_id, table, int(linked_id) if linked_id else None,
+                 'manual:jo')
+            if ok:
+                await c.execute("""
+                    UPDATE documents_classification_queue
+                       SET status='manual_applied',
+                           review_resolution='manual_confirmed',
+                           reviewed_by='jo',
+                           reviewed_at=NOW()
+                     WHERE document_id=$1
+                """, doc_id)
+    if not ok:
+        return JSONResponse({"error":"doc not found"}, status_code=404)
+    return {"ok": True, "id": doc_id, "linked_table": table, "linked_id": linked_id}
+
+
+@app.post("/api/documents/{doc_id}/reject")
+async def api_documents_reject(doc_id: int, payload: dict = Body(default={})):
+    """Reject the suggested classification — leaves doc unlinked but marked
+    so it doesn't keep appearing in the review queue."""
+    reason = (payload.get("reason") or "").strip()[:500]
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await c.execute("SET LOCAL app.current_entity = 'all'")
+            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+            await c.execute("""
+                INSERT INTO documents_classification_queue
+                    (document_id, status, review_resolution, reviewed_by,
+                     reviewed_at, summary)
+                VALUES ($1, 'rejected', 'rejected', 'jo', NOW(), $2)
+                ON CONFLICT (document_id) DO UPDATE
+                   SET status='rejected', review_resolution='rejected',
+                       reviewed_by='jo', reviewed_at=NOW(),
+                       summary=COALESCE(EXCLUDED.summary,
+                                         documents_classification_queue.summary)
+            """, doc_id, reason or None)
+    return {"ok": True}
 
 
 @app.get("/api/emails/search")
@@ -5508,7 +5643,9 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         -- U84 Phase 4 additions (private tabs)
                         'private_family_kpis','private_docs_kpis',
                         -- U84 Phase 7 additions (telemetry)
-                        'route_telemetry_7d')
+                        'route_telemetry_7d',
+                        -- U84 private docs detail lists
+                        'private_vehicles')
          ORDER BY slug
     """)
     out = []
