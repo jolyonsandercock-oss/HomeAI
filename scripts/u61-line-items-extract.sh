@@ -28,7 +28,7 @@ DRY_RUN="${DRY_RUN:-0}"
 
 docker exec -i -e PG_DSN="$PG_DSN" -e ANTHROPIC_API_KEY="$ANTH_KEY" \
     -e INVOICE_IDS="$INVOICE_IDS" -e DRY_RUN="$DRY_RUN" \
-    homeai-bot-responder python <<'PYEOF'
+    homeai-bot-responder python -u <<'PYEOF'
 import os, json, asyncio, hashlib, re
 from pathlib import Path
 import asyncpg, httpx
@@ -241,6 +241,25 @@ async def main():
                     timeout=60)
                 up.raise_for_status()
                 text = up.json()["text"]
+
+                # U84 V108: cache the OCR text on the invoice row so the
+                # body-aware site classifier (MAL125 → cafe / TOM106 → pub)
+                # can fire on the trigger. Without this, every new u61 run
+                # leaves pdf_text_extracted NULL and new invoices never get
+                # auto-classified beyond what email body + vendor rules can do.
+                # Truncate to 100KB to be safe against giant statements.
+                try:
+                    await conn.execute("""
+                        UPDATE vendor_invoice_inbox
+                           SET pdf_text_extracted = $1,
+                               pdf_text_extracted_at = now()
+                         WHERE id = $2
+                           AND (pdf_text_extracted IS NULL
+                                OR pdf_text_extracted_at < now() - INTERVAL '30 days')
+                    """, (text or "")[:100_000], inv_id)
+                except Exception as _e:
+                    # Cache failure must not break extraction.
+                    print(f"  #{inv_id}: pdf_text cache write failed: {_e}")
             except Exception as e:
                 print(f"  #{inv_id}: text fetch failed: {e}")
                 stats["fail"] += 1
