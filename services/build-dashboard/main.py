@@ -5724,7 +5724,9 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         'noise_senders','cost_centre_breakdown',
                         -- U85 Phase D9 (placeholder slugs wired)
                         'children','email_tasks_open','bot_instructions_pending',
-                        'labour_recent_14d','ghost_shifts_recent','daily_gp_recent')
+                        'labour_recent_14d','ghost_shifts_recent','daily_gp_recent',
+                        -- U98 source breakdown
+                        'today_bookings_by_source')
          ORDER BY slug
     """)
     out = []
