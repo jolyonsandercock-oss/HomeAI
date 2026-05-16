@@ -431,6 +431,14 @@ async def main():
     # U111 — revenue forecast for tomorrow
     forecast_rows = await conn.fetch("SELECT * FROM v_revenue_forecast_tomorrow")
 
+    # U121 — obligations next 14 days
+    obligations = await conn.fetch("""
+        SELECT due_date::date AS due_date, source, label, kind
+          FROM v_obligations
+         WHERE due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 14
+         ORDER BY due_date, source LIMIT 20
+    """)
+
     # U114 — AI usage last 24h (cost + cache hit rate per service)
     ai_usage_rows = await conn.fetch("""
         SELECT
@@ -970,6 +978,29 @@ async def main():
     else:
         body = f'<p style="{STY["empty"]}">No arrivals booked for tomorrow yet.</p>'
     out.append(section(f'Tomorrow — {fmt_day(tomorrow)}', len(tom_arrivals), body))
+
+    # Obligations next 14 days (U121)
+    if obligations:
+        rows_html = []
+        for r in obligations:
+            delta = (r['due_date'] - today).days
+            day_label = ('Today' if delta == 0 else
+                         'Tomorrow' if delta == 1 else
+                         f'{fmt_day(r["due_date"])}')
+            colour = ('#dc2626' if delta <= 3 else
+                      '#d97706' if delta <= 7 else '#666')
+            rows_html.append(
+                f'<tr>'
+                f'<td style="{STY["td"]};white-space:nowrap;color:{colour};font-weight:bold">{h(day_label)}</td>'
+                f'<td style="{STY["td"]}"><strong>{h(r["label"])}</strong></td>'
+                f'<td style="{STY["td"]};color:#666;font-size:12px">{h(r["kind"])}</td>'
+                f'</tr>')
+        body = (f'<table style="{STY["tbl"]}">'
+                f'<tr><th style="{STY["th"]}">When</th>'
+                f'<th style="{STY["th"]}">What</th>'
+                f'<th style="{STY["th"]}">Type</th></tr>'
+                + '\n'.join(rows_html) + '</table>')
+        out.append(section('Obligations — next 14 days', None, body))
 
     # AI usage rollup (U114)
     if ai_usage_rows:
