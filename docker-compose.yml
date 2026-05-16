@@ -449,6 +449,18 @@ services:
   # Long-running idle container; host cron invokes responder.py every 5 min.
   # ai-internal: vault, postgres, google-fetch.
   # ai-egress:  api.anthropic.com, api.telegram.org.
+  homeai-mcp:
+    build: ./services/homeai-mcp
+    container_name: homeai-mcp
+    networks: [ai-internal, ai-egress]
+    ports: ["8765:8765"]
+    environment:
+      PG_DSN: "postgresql://homeai_readonly:${HOMEAI_READONLY_PASSWORD:-}@homeai-postgres:5432/homeai"
+      MCP_TRANSPORT: "sse"
+      HOMEAI_MCP_REALM: "owner"
+      HOMEAI_MCP_TOKEN: "${HOMEAI_MCP_TOKEN:-}"
+    restart: unless-stopped
+
   bot-responder:
     build: ./services/bot-responder
     container_name: homeai-bot-responder

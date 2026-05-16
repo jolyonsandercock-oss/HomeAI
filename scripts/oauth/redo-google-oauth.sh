@@ -23,8 +23,14 @@ set -uo pipefail
 ACTION="${1:-diagnose}"
 IDENTITY="${2:-}"
 
-VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
-[ -z "$VAULT_TOKEN" ] && { echo "VAULT_TOKEN not found"; exit 1; }
+# Find a live Vault token from ANY running container — google-fetch has
+# been seen empty after recreate (compose substitutes ${VAULT_TOKEN} with
+# blank if the shell env doesn't have it at that moment).
+for c in homeai-critical-listener homeai-n8n homeai-google-fetch homeai-bot-responder; do
+  VAULT_TOKEN=$(docker inspect "$c" --format='{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep '^VAULT_TOKEN=' | cut -d= -f2-)
+  [ -n "$VAULT_TOKEN" ] && break
+done
+[ -z "$VAULT_TOKEN" ] && { echo "VAULT_TOKEN not found in any container env"; exit 1; }
 export VAULT_TOKEN
 
 vault_kv() {
