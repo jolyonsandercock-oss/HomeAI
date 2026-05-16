@@ -183,7 +183,11 @@ async def main():
     # the attachment have a file on disk. Restrict to rows with pdf_local_path
     # set; the 404 storm in earlier runs was wasting cycles on rows where
     # the PDF was never fetched.
-    where = "WHERE vii.has_pdf=true AND vii.pdf_local_path IS NOT NULL"
+    # Skip rows we've already marked duplicate (V115 content dedupe) or
+    # ignored (V112 noise-sender filter). Without these, u61 wastes Haiku
+    # calls on rows that won't contribute to any downstream calculation.
+    where = ("WHERE vii.has_pdf=true AND vii.pdf_local_path IS NOT NULL "
+             "AND vii.status NOT IN ('duplicate', 'ignored')")
     args = []
     if INVOICE_IDS:
         ids = [int(x) for x in re.split(r"[\s,]+", INVOICE_IDS) if x]
