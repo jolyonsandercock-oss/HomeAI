@@ -4421,9 +4421,16 @@ async def api_invoices_list(
     async with p.acquire() as c:
         await c.execute("SET app.current_entity = 'all'")
         # Date window: explicit from/to wins; else fall back to `days`.
+        #
+        # U84 (2026-05-16): For an explicit from/to window the filter uses
+        # the INVOICE date (delivery_date preferred, else invoice_date) —
+        # NEVER received_at. Rows with no extracted invoice date are excluded
+        # so a Jan invoice imported in March doesn't pollute the Jan filter.
+        # For the rolling "last N days" view we keep received_at since the
+        # intent is "stuff that arrived recently."
         from datetime import date as _date
         if date_from and date_to:
-            date_clause = "COALESCE(delivery_date, invoice_date, received_at::date) BETWEEN $1::date AND $2::date"
+            date_clause = "COALESCE(delivery_date, invoice_date) BETWEEN $1::date AND $2::date"
             date_args = [_date.fromisoformat(date_from), _date.fromisoformat(date_to)]
             window_label = f"{date_from} → {date_to}"
         else:
@@ -4431,14 +4438,18 @@ async def api_invoices_list(
             date_args = [days]
             window_label = f"last {days} days"
 
-        # Site filter: pub = wet+dry+head_office (entity 1, excluding cafe_stock);
-        #              cafe = cafe_stock category only;
+        # Site filter: pub = pub-kitchen + wet/dry + head office;
+        #              cafe = anything tagged site='cafe' (incl. MAL125 rows
+        #              backfilled in V103) or category_canonical='cafe_stock';
         #              all  = everything.
         site_clause = ""
         if site == "cafe":
-            site_clause = " AND category_canonical = 'cafe_stock'"
+            site_clause = " AND (site = 'cafe' OR category_canonical = 'cafe_stock')"
         elif site == "pub":
-            site_clause = " AND (category_canonical <> 'cafe_stock' OR category_canonical IS NULL) AND entity_id = 1"
+            site_clause = (" AND (site = 'pub'"
+                           " OR (site IS NULL"
+                           "     AND (category_canonical <> 'cafe_stock' OR category_canonical IS NULL)"
+                           "     AND entity_id = 1))")
         # status filter
         status_clause = ""
         extra_args = []
@@ -4457,7 +4468,10 @@ async def api_invoices_list(
            WHERE {date_clause}
            {site_clause}
            {status_clause}
-           ORDER BY COALESCE(delivery_date, invoice_date, received_at::date) DESC,
+           -- U84: ORDER BY prefers invoice/delivery date; falls back to
+           -- received_at as a tiebreaker so undated rows still sort sanely
+           -- (display will say '—' for the date, so user knows the row lacks it).
+           ORDER BY COALESCE(delivery_date, invoice_date) DESC NULLS LAST,
                     received_at DESC
            LIMIT 500
         """, *date_args, *extra_args)

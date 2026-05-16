@@ -325,12 +325,26 @@ function inv() {
       const cfg = {
         persistenceID: 'invoices-inbox-v45',
         columns: [
-          { title: 'Date',     field: 'delivery_date',  formatter: 'date', width: 100,
-            // Show delivery_date, fallback to invoice_date, fallback to received_at
+          { title: 'Inv date', field: 'invoice_date',  formatter: 'date', width: 100,
+            // U84: show INVOICE date (delivery_date when present, else
+            // the extracted invoice_date). NEVER fall back to received_at —
+            // that's the import date and masquerading as invoice date misleads
+            // reconciliation. Show '—' if no invoice date is extracted yet.
             formatter: (c) => {
               const r = c.getRow().getData();
-              return (r.delivery_date || r.invoice_date || (r.received_at||'').slice(0,10) || '');
+              return (r.delivery_date || r.invoice_date || '—');
+            },
+            sorter: (a, b, aRow, bRow) => {
+              const ra = aRow.getData(), rb = bRow.getData();
+              const va = (ra.delivery_date || ra.invoice_date || '');
+              const vb = (rb.delivery_date || rb.invoice_date || '');
+              return va.localeCompare(vb);
             } },
+          { title: 'Imported', field: 'received_at',  width: 100,
+            // Separate column so the import date is visible but distinct from
+            // invoice date. Helps spot rows where OCR hasn't extracted
+            // invoice_date yet.
+            formatter: (c) => (c.getValue() || '').slice(0, 10) || '—' },
           { title: 'Category', field: 'vendor_category', width: 110 },
           { title: 'Vendor',   field: 'vendor_domain' },
           { title: 'Subject',  field: 'subject',  widthGrow: 3 },
