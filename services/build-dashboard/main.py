@@ -1280,6 +1280,26 @@ async def work_docs_page():
     return FileResponse(str(STATIC / "work-docs.html"))
 
 
+@app.get("/work/staff")
+async def work_staff_page():
+    return FileResponse(str(STATIC / "work-staff.html"))
+
+
+@app.get("/work/email")
+async def work_email_page():
+    return FileResponse(str(STATIC / "work-email.html"))
+
+
+@app.get("/work/finance")
+async def work_finance_page():
+    return FileResponse(str(STATIC / "work-finance.html"))
+
+
+@app.get("/work/more")
+async def work_more_page():
+    return FileResponse(str(STATIC / "work-more.html"))
+
+
 _ACTION_SOURCES = ("exception", "invoice_review", "bot_instruction", "document_expiry")
 
 
@@ -5218,7 +5238,7 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         'build_pipeline_status','build_model_spend_30d',
                         'build_forensic_summary',
                         -- U84 Phase 3 additions (work tabs)
-                        'work_docs_kpis')
+                        'work_docs_kpis','work_staff_kpis','work_email_kpis')
          ORDER BY slug
     """)
     out = []
