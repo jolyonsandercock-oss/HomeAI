@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0a0a0b">
-<title>Today · Work — Home AI</title>
+<title>Today · Private — Home AI</title>
 <script src="/static/vendor/tailwind-3.4.min.js"></script>
 <script defer src="/static/vendor/alpine-3.14.min.js"></script>
 <script src="/static/_components/realm-toggle.js"></script>
@@ -31,7 +31,7 @@
   [x-cloak]{display:none!important}
 </style>
 </head>
-<body x-data="desktopShell({ bucket: 'work', page: 'today', pageName: 'Today' })" x-init="init()">
+<body x-data="desktopShell({ bucket: 'private', page: 'today', pageName: 'Today' })" x-init="init()">
 
 <header class="sticky top-0 z-40 backdrop-blur-md bg-slate-950/85 border-b border-white/5"
         x-data="homeaiHeader()" x-init="boot()">
@@ -56,7 +56,7 @@
               @click="setRealm('all')" @keydown.right.prevent="setRealm('all')" @keydown.left.prevent="setRealm('work')">All</button>
     </div>
     <div class="ml-auto md:ml-4">
-      <div x-data="dateWindow({ pageKey: '/desktop/work/today', defaultPreset: '7d' })" x-init="init()"
+      <div x-data="dateWindow({ pageKey: '/desktop/private/today', defaultPreset: '7d' })" x-init="init()"
            class="flex bg-white/5 rounded-lg p-0.5 text-sm min-h-[44px] items-center" role="group" aria-label="Date window">
         <template x-for="p in presets" :key="p.id">
           <button type="button" :aria-pressed="isActive(p.id)"
@@ -114,20 +114,20 @@
       </ul></details>
     <div class="mt-3 pt-3 border-t border-white/5">
       <div class="px-2 py-1 text-xs uppercase tracking-wider text-zinc-500">On this page</div>
-      <ul class="space-y-0.5 ml-1"><li><a href="#T01" class="rail-link cursor-pointer" :class="{'active': isActive('T01')}" @click.prevent="scrollTo('T01')"><span class="rail-code">§T01</span><span>Today KPIs</span></a></li><li><a href="#T03" class="rail-link cursor-pointer" :class="{'active': isActive('T03')}" @click.prevent="scrollTo('T03')"><span class="rail-code">§T03</span><span>Today bookings</span></a></li><li><a href="#T04" class="rail-link cursor-pointer" :class="{'active': isActive('T04')}" @click.prevent="scrollTo('T04')"><span class="rail-code">§T04</span><span>Today pub sales</span></a></li><li><a href="#A01" class="rail-link cursor-pointer" :class="{'active': isActive('A01')}" @click.prevent="scrollTo('A01')"><span class="rail-code">§A01</span><span>Action queue</span></a></li></ul>
+      <ul class="space-y-0.5 ml-1"><li><a href="#T02" class="rail-link cursor-pointer" :class="{'active': isActive('T02')}" @click.prevent="scrollTo('T02')"><span class="rail-code">§T02</span><span>Private Today KPIs</span></a></li><li><a href="#D03" class="rail-link cursor-pointer" :class="{'active': isActive('D03')}" @click.prevent="scrollTo('D03')"><span class="rail-code">§D03</span><span>Vehicles</span></a></li><li><a href="#D01" class="rail-link cursor-pointer" :class="{'active': isActive('D01')}" @click.prevent="scrollTo('D01')"><span class="rail-code">§D01</span><span>Mortgages</span></a></li></ul>
     </div>
   </aside>
   <div x-show="railOpen && !isWide" x-cloak class="fixed inset-0 top-[88px] z-20 bg-black/40 lg:hidden" @click="closeRail()"></div>
   <main class="flex-1 min-w-0 lg:ml-0 px-4 py-4 max-w-5xl">
 
-<section id="T01" data-section-code="T01"
+<section id="T02" data-section-code="T02"
          class="glass rounded-lg p-4 mb-4"
-         x-data="desktopSection({ code: 'T01', name: 'Today KPIs', slug: 'today_kpis_work' })"
-         x-init="init()" aria-labelledby="T01-h">
+         x-data="desktopSection({ code: 'T02', name: 'Private Today KPIs', slug: 'today_kpis_private' })"
+         x-init="init()" aria-labelledby="T02-h">
   <header class="flex items-baseline justify-between mb-3">
-    <h2 id="T01-h" class="text-base font-semibold">
-      <span class="mono text-xs text-amber-300">§T01</span>
-      Today KPIs
+    <h2 id="T02-h" class="text-base font-semibold">
+      <span class="mono text-xs text-amber-300">§T02</span>
+      Private Today KPIs
     </h2>
     <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
   </header>
@@ -138,158 +138,91 @@
   <template x-if="!loading && data && data.rows && data.rows[0]">
     <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
       <div class="bg-black/30 rounded-md p-3">
-        <div class="text-xs uppercase tracking-wider text-slate-500">Cash on hand</div>
+        <div class="text-xs uppercase tracking-wider text-slate-500">Family cash</div>
         <div class="text-2xl mono font-semibold mt-1" :class="data.rows[0].cash_on_hand >= 0 ? 'pos' : 'neg'">
           <span x-text="(data.rows[0].cash_on_hand >= 0 ? '£' : '-£') + Math.abs(+data.rows[0].cash_on_hand || 0).toLocaleString('en-GB', {maximumFractionDigits:0})"></span>
         </div>
       </div>
-      <a href="/desktop/work/actions" class="bg-black/30 rounded-md p-3 hover:bg-black/40 block">
-        <div class="text-xs uppercase tracking-wider text-slate-500">Open actions</div>
-        <div class="text-2xl mono font-semibold mt-1">
-          <span class="tl" :class="data.rows[0].critical_actions_count > 0 ? 'tl-red' : data.rows[0].open_actions_count > 50 ? 'tl-amber' : 'tl-green'"></span>
-          <span x-text="data.rows[0].open_actions_count || 0"></span>
-        </div>
-      </a>
       <div class="bg-black/30 rounded-md p-3">
-        <div class="text-xs uppercase tracking-wider text-slate-500">Bookings tonight</div>
-        <div class="text-2xl mono font-semibold mt-1">
-          <span x-text="data.rows[0].bookings_today || 0"></span>
-          <span class="text-sm text-slate-500">in</span>
-        </div>
-        <div class="text-xs text-slate-500 mt-1">£<span class="mono pos" x-text="(+data.rows[0].bookings_today_revenue || 0).toLocaleString('en-GB', {maximumFractionDigits:0})"></span></div>
+        <div class="text-xs uppercase tracking-wider text-slate-500">Open actions</div>
+        <div class="text-2xl mono font-semibold mt-1" x-text="data.rows[0].open_actions_count || 0"></div>
       </div>
-      <a href="/desktop/work/docs" class="bg-black/30 rounded-md p-3 hover:bg-black/40 block">
-        <div class="text-xs uppercase tracking-wider text-slate-500">Docs expiring 30d</div>
-        <div class="text-2xl mono font-semibold mt-1">
-          <span class="tl" :class="data.rows[0].docs_expiring_30d > 0 ? 'tl-amber' : 'tl-green'"></span>
-          <span x-text="data.rows[0].docs_expiring_30d || 0"></span>
-        </div>
-      </a>
+      <div class="bg-black/30 rounded-md p-3">
+        <div class="text-xs uppercase tracking-wider text-slate-500">Docs expiring 60d</div>
+        <div class="text-2xl mono font-semibold mt-1" x-text="data.rows[0].docs_expiring_60d || 0"></div>
+      </div>
+      <div class="bg-black/30 rounded-md p-3">
+        <div class="text-xs uppercase tracking-wider text-slate-500">Calendar 7d</div>
+        <div class="text-2xl mono font-semibold mt-1" x-text="data.rows[0].calendar_7d || 0"></div>
+      </div>
     </div>
   </template>
 </section>
 
-<section id="T03" data-section-code="T03"
+<section id="D03" data-section-code="D03"
          class="glass rounded-lg p-4 mb-4"
-         x-data="desktopSection({ code: 'T03', name: 'Today bookings', slug: 'today_bookings' })"
-         x-init="init()" aria-labelledby="T03-h">
+         x-data="desktopSection({ code: 'D03', name: 'Vehicles', slug: 'private_vehicles' })"
+         x-init="init()" aria-labelledby="D03-h">
   <header class="flex items-baseline justify-between mb-3">
-    <h2 id="T03-h" class="text-base font-semibold">
-      <span class="mono text-xs text-amber-300">§T03</span>
-      Today bookings
+    <h2 id="D03-h" class="text-base font-semibold">
+      <span class="mono text-xs text-amber-300">§D03</span>
+      Vehicles
     </h2>
     <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
   </header>
 
-  <template x-if="loading"><div class="space-y-2"><div class="skel h-10"></div><div class="skel h-10"></div></div></template>
-  <template x-if="!loading && data && data.rows && data.rows.length === 0">
-    <div class="text-slate-400 text-sm py-2">No check-ins today.</div></template>
-  <template x-if="!loading && data && data.rows && data.rows.length > 0">
+  <template x-if="loading"><div class="skel h-32"></div></template>
+  <template x-if="error"><div class="text-red-300 text-sm">Couldn't load: <span x-text="error"></span></div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length === 0">
+    <div class="text-slate-400 text-sm py-2">No rows.</div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length > 0">
     <div class="overflow-x-auto"><table class="w-full text-sm">
       <thead class="text-xs uppercase tracking-wider text-slate-500">
-        <tr><th class="text-left px-2 py-2">Guest</th><th class="text-left px-2 py-2">Room</th>
-            <th class="text-left px-2 py-2">Out</th><th class="text-left px-2 py-2">Source</th>
-            <th class="text-right px-2 py-2">Gross</th></tr></thead>
-      <tbody>
-        <template x-for="b in data.rows" :key="b.id">
-          <tr class="border-t border-white/5">
-            <td class="px-2 py-2 text-zinc-100" x-text="b.guest_name || '—'"></td>
-            <td class="px-2 py-2 text-slate-300" x-text="b.room || '—'"></td>
-            <td class="px-2 py-2 mono text-slate-400" x-text="b.checkout_date || '—'"></td>
-            <td class="px-2 py-2 mono text-xs text-slate-400" x-text="b.source + ' #' + b.source_ref"></td>
-            <td class="px-2 py-2 mono text-right">£<span x-text="(+b.gross_amount || 0).toFixed(2)"></span></td>
-          </tr></template>
-        <tr class="border-t-2 border-white/10 font-medium">
-          <td class="px-2 py-2" colspan="4">Total · <span x-text="data.rows.length"></span> booking(s)</td>
-          <td class="px-2 py-2 mono text-right pos">£<span x-text="data.rows.reduce((s,r) => s + (+r.gross_amount || 0), 0).toFixed(2)"></span></td>
-        </tr></tbody></table></div></template>
-</section>
-
-<section id="T04" data-section-code="T04"
-         class="glass rounded-lg p-4 mb-4"
-         x-data="desktopSection({ code: 'T04', name: 'Today pub sales', slug: 'today_pub_sales' })"
-         x-init="init()" aria-labelledby="T04-h">
-  <header class="flex items-baseline justify-between mb-3">
-    <h2 id="T04-h" class="text-base font-semibold">
-      <span class="mono text-xs text-amber-300">§T04</span>
-      Today pub sales
-    </h2>
-    <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
-  </header>
-
-  <template x-if="loading"><div class="skel h-24"></div></template>
-  <template x-if="!loading && data && data.rows && data.rows.length === 0">
-    <div class="text-slate-400 text-sm py-2">No TouchOffice sales scraped yet for today.</div></template>
-  <template x-if="!loading && data && data.rows && data.rows.length > 0">
-    <div class="overflow-x-auto"><table class="w-full text-sm">
-      <thead class="text-xs uppercase tracking-wider text-slate-500">
-        <tr><th class="text-left px-2 py-2">Site</th><th class="text-left px-2 py-2">Department</th>
-            <th class="text-right px-2 py-2">Qty</th><th class="text-right px-2 py-2">Net</th></tr></thead>
-      <tbody><template x-for="row in data.rows" :key="row.site + '|' + row.department">
+        <tr><template x-for="k in Object.keys(data.rows[0])" :key="k">
+          <th class="text-left px-2 py-2" x-text="k"></th></template></tr></thead>
+      <tbody><template x-for="(r, i) in data.rows.slice(0, 100)" :key="i">
         <tr class="border-t border-white/5">
-          <td class="px-2 py-2"><span class="px-2 py-0.5 rounded text-xs"
-            :class="row.site === 'malthouse' ? 'bg-amber-500/15 text-amber-200' : 'bg-emerald-500/15 text-emerald-200'"
-            x-text="row.site === 'malthouse' ? 'Pub' : 'Cafe'"></span></td>
-          <td class="px-2 py-2 text-zinc-200" x-text="row.department"></td>
-          <td class="px-2 py-2 mono text-right text-slate-400" x-text="(+row.quantity || 0).toFixed(0)"></td>
-          <td class="px-2 py-2 mono text-right pos">£<span x-text="(+row.net_value || 0).toFixed(2)"></span></td>
-        </tr></template>
-        <tr class="border-t-2 border-white/10 font-medium">
-          <td class="px-2 py-2" colspan="3">Total</td>
-          <td class="px-2 py-2 mono text-right pos">£<span x-text="data.rows.reduce((s,r) => s + (+r.net_value || 0), 0).toFixed(2)"></span></td>
-        </tr></tbody></table></div></template>
+          <template x-for="k in Object.keys(data.rows[0])" :key="k">
+            <td class="px-2 py-2"
+                :class="typeof r[k] === 'number' ? 'mono text-right' : 'text-zinc-100'"
+                x-text="r[k] === null ? '—' : (typeof r[k] === 'object' ? JSON.stringify(r[k]) : r[k])"></td>
+          </template></tr></template></tbody></table>
+      <div class="text-xs text-slate-500 mt-2"
+           x-text="data.rows.length > 100 ? `${data.rows.length} rows, first 100 shown` : `${data.rows.length} row(s)`"></div>
+    </div></template>
 </section>
 
-<section id="A01" data-section-code="A01"
+<section id="D01" data-section-code="D01"
          class="glass rounded-lg p-4 mb-4"
-         x-data="desktopSection({ code: 'A01', name: 'Action queue', slug: 'action_queue' })"
-         x-init="init()" aria-labelledby="A01-h">
+         x-data="desktopSection({ code: 'D01', name: 'Mortgages', slug: 'mortgages_all' })"
+         x-init="init()" aria-labelledby="D01-h">
   <header class="flex items-baseline justify-between mb-3">
-    <h2 id="A01-h" class="text-base font-semibold">
-      <span class="mono text-xs text-amber-300">§A01</span>
-      Action queue
+    <h2 id="D01-h" class="text-base font-semibold">
+      <span class="mono text-xs text-amber-300">§D01</span>
+      Mortgages
     </h2>
     <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
   </header>
 
-  <div x-data="{ filter: 'all' }">
-    <div class="flex flex-wrap gap-1 mb-3 text-xs">
-      <button @click="filter = 'all'" :aria-pressed="filter === 'all'"
-              class="px-2 py-1 min-h-[32px] rounded"
-              :class="filter === 'all' ? 'bg-white/10 text-zinc-100' : 'bg-white/5 text-zinc-400'">All</button>
-      <button @click="filter = 'critical'" :aria-pressed="filter === 'critical'"
-              class="px-2 py-1 min-h-[32px] rounded"
-              :class="filter === 'critical' ? 'bg-red-500/20 text-red-200' : 'bg-white/5 text-zinc-400'">Critical</button>
-      <button @click="filter = 'high'" :aria-pressed="filter === 'high'"
-              class="px-2 py-1 min-h-[32px] rounded"
-              :class="filter === 'high' ? 'bg-amber-500/20 text-amber-200' : 'bg-white/5 text-zinc-400'">High</button>
-      <button @click="filter = 'medium'" :aria-pressed="filter === 'medium'"
-              class="px-2 py-1 min-h-[32px] rounded"
-              :class="filter === 'medium' ? 'bg-yellow-500/20 text-yellow-200' : 'bg-white/5 text-zinc-400'">Medium</button>
-    </div>
-    <template x-if="loading"><div class="skel h-40"></div></template>
-    <template x-if="!loading && data && data.rows">
-      <div class="overflow-x-auto"><table class="w-full text-sm">
-        <thead class="text-xs uppercase tracking-wider text-slate-500">
-          <tr><th class="text-left px-2 py-2 w-6"></th><th class="text-left px-2 py-2">Title</th>
-              <th class="text-left px-2 py-2">Kind</th><th class="text-left px-2 py-2">Source</th>
-              <th class="text-left px-2 py-2">Realm</th><th class="text-right px-2 py-2">Age</th></tr></thead>
-        <tbody><template x-for="a in (filter === 'all' ? data.rows : data.rows.filter(r => r.severity === filter)).slice(0, 50)" :key="a.source + ':' + a.ref">
-          <tr class="border-t border-white/5">
-            <td class="px-2 py-2"><span class="tl"
-              :class="{ 'tl-red': a.severity === 'critical', 'tl-amber': a.severity === 'high',
-                        'tl-green': a.severity === 'medium', 'tl-grey': a.severity === 'low' }"></span></td>
-            <td class="px-2 py-2 text-zinc-100"><span class="block max-w-md truncate" :title="a.title" x-text="a.title"></span></td>
-            <td class="px-2 py-2 text-xs mono text-slate-400" x-text="a.kind"></td>
-            <td class="px-2 py-2 text-xs mono text-slate-400" x-text="a.source"></td>
-            <td class="px-2 py-2 text-xs">
-              <span class="px-1.5 py-0.5 rounded"
-                    :class="a.realm === 'work' ? 'bg-amber-500/15 text-amber-200' :
-                             a.realm === 'family' ? 'bg-emerald-500/15 text-emerald-200' :
-                             'bg-slate-500/15 text-slate-300'" x-text="a.realm"></span></td>
-            <td class="px-2 py-2 mono text-right text-slate-400" x-text="a.age_days + 'd'"></td>
-          </tr></template></tbody></table></div></template>
-  </div>
+  <template x-if="loading"><div class="skel h-32"></div></template>
+  <template x-if="error"><div class="text-red-300 text-sm">Couldn't load: <span x-text="error"></span></div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length === 0">
+    <div class="text-slate-400 text-sm py-2">No rows.</div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length > 0">
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead class="text-xs uppercase tracking-wider text-slate-500">
+        <tr><template x-for="k in Object.keys(data.rows[0])" :key="k">
+          <th class="text-left px-2 py-2" x-text="k"></th></template></tr></thead>
+      <tbody><template x-for="(r, i) in data.rows.slice(0, 100)" :key="i">
+        <tr class="border-t border-white/5">
+          <template x-for="k in Object.keys(data.rows[0])" :key="k">
+            <td class="px-2 py-2"
+                :class="typeof r[k] === 'number' ? 'mono text-right' : 'text-zinc-100'"
+                x-text="r[k] === null ? '—' : (typeof r[k] === 'object' ? JSON.stringify(r[k]) : r[k])"></td>
+          </template></tr></template></tbody></table>
+      <div class="text-xs text-slate-500 mt-2"
+           x-text="data.rows.length > 100 ? `${data.rows.length} rows, first 100 shown` : `${data.rows.length} row(s)`"></div>
+    </div></template>
 </section>
   </main>
 </div>

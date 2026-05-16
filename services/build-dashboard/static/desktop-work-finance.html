@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0a0a0b">
+<title>Finance · Work — Home AI</title>
+<script src="/static/vendor/tailwind-3.4.min.js"></script>
+<script defer src="/static/vendor/alpine-3.14.min.js"></script>
+<script src="/static/_components/realm-toggle.js"></script>
+<script src="/static/_components/date-window.js"></script>
+<script src="/static/_components/desktop-chrome.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: linear-gradient(180deg, #0f172a 0%, #020617 100%); min-height: 100vh; color: #e2e8f0;
+         font-family: ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .glass { background: rgba(15,23,42,0.7); border: 1px solid rgba(148,163,184,0.15); }
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .pos{color:#34d399}.neg{color:#f43f5e}
+  .tl{display:inline-block;width:9px;height:9px;border-radius:999px;margin-right:6px;vertical-align:middle;box-shadow:0 0 6px currentColor}
+  .tl-red{background:#f43f5e;color:#f43f5e;animation:pulse 1.4s infinite}.tl-amber{background:#f59e0b;color:#f59e0b}.tl-green{background:#10b981;color:#10b981}.tl-grey{background:#64748b;color:#64748b}
+  @keyframes pulse{50%{opacity:0.55}}
+  .skel{background:linear-gradient(90deg,rgba(148,163,184,0.06) 0%,rgba(148,163,184,0.12) 50%,rgba(148,163,184,0.06) 100%);background-size:200% 100%;animation:shimmer 1.4s ease-in-out infinite;border-radius:6px}
+  @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+  section[data-section-code]{scroll-margin-top:72px}
+  .rail-link{display:flex;align-items:center;min-height:36px;padding:4px 10px;border-radius:6px;color:#a1a1aa}
+  .rail-link:hover{background:rgba(255,255,255,0.05);color:#e2e8f0}
+  .rail-link.active{background:rgba(245,158,11,0.15);color:#fcd34d}
+  .rail-code{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:0.75rem;color:#71717a;margin-right:8px}
+  .rail-link.active .rail-code{color:#fbbf24}
+  [x-cloak]{display:none!important}
+</style>
+</head>
+<body x-data="desktopShell({ bucket: 'work', page: 'finance', pageName: 'Finance' })" x-init="init()">
+
+<header class="sticky top-0 z-40 backdrop-blur-md bg-slate-950/85 border-b border-white/5"
+        x-data="homeaiHeader()" x-init="boot()">
+  <div class="px-3 py-2 flex items-center gap-2">
+    <button type="button"
+            class="min-h-[44px] min-w-[44px] rounded-md hover:bg-white/5
+                   focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none"
+            :aria-label="$root.railOpen ? 'Close menu' : 'Open menu'"
+            @click="$root.toggleRail()">
+      <svg xmlns="http://www.w3.org/2000/svg" class="inline w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <a href="/" class="flex items-center gap-2 text-zinc-100 min-h-[44px]" aria-label="Home AI">
+      <span class="text-xl leading-none">⌂</span><span class="font-semibold text-sm">Home AI</span></a>
+    <div class="ml-2 flex bg-white/5 rounded-lg p-0.5 text-sm min-h-[44px] items-center" role="tablist" aria-label="Realm filter">
+      <button type="button" role="tab" :aria-selected="realm === 'work'" :tabindex="realm === 'work' ? 0 : -1"
+              class="px-3 min-h-[44px] min-w-[44px] rounded-md transition focus-visible:ring-2 focus-visible:ring-amber-400/60"
+              :class="realm === 'work' ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-500/40' : 'text-zinc-400 hover:text-zinc-200'"
+              @click="setRealm('work')" @keydown.right.prevent="setRealm('all')" @keydown.left.prevent="setRealm('work')">Work</button>
+      <button type="button" role="tab" :aria-selected="realm === 'all'" :tabindex="realm === 'all' ? 0 : -1"
+              class="px-3 min-h-[44px] min-w-[44px] rounded-md transition focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+              :class="realm === 'all' ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/40' : 'text-zinc-400 hover:text-zinc-200'"
+              @click="setRealm('all')" @keydown.right.prevent="setRealm('all')" @keydown.left.prevent="setRealm('work')">All</button>
+    </div>
+    <div class="ml-auto md:ml-4">
+      <div x-data="dateWindow({ pageKey: '/desktop/work/finance', defaultPreset: '7d' })" x-init="init()"
+           class="flex bg-white/5 rounded-lg p-0.5 text-sm min-h-[44px] items-center" role="group" aria-label="Date window">
+        <template x-for="p in presets" :key="p.id">
+          <button type="button" :aria-pressed="isActive(p.id)"
+                  class="px-3 min-h-[36px] rounded-md text-xs transition focus-visible:ring-2 focus-visible:ring-amber-400/60 focus-visible:outline-none"
+                  :class="isActive(p.id) ? 'bg-amber-500/20 text-amber-200' : 'text-zinc-400 hover:text-zinc-200'"
+                  @click="setPreset(p.id)" x-text="p.label"></button>
+        </template></div></div>
+    <a href="/" class="px-2 min-h-[44px] flex items-center rounded-md text-zinc-400 hover:text-zinc-100 text-sm" title="Mobile view">📱</a>
+  </div>
+  <nav class="px-3 pb-2 text-xs text-zinc-400" aria-label="Breadcrumb" x-data="desktopBreadcrumbs()" x-init="init()">
+    <a :href="bucketUrl()" class="hover:text-zinc-200" x-text="bucket === 'work' ? 'Work' : bucket === 'private' ? 'Private' : bucket === 'build' ? 'Build' : 'All'"></a>
+    <span class="mx-1" aria-hidden="true">›</span>
+    <a :href="pageUrl()" class="hover:text-zinc-200" x-text="pageName"></a>
+    <template x-if="activeSectionLabel"><span><span class="mx-1" aria-hidden="true">›</span>
+      <span class="text-zinc-100" aria-current="page" x-text="activeSectionLabel"></span></span></template>
+  </nav>
+</header>
+<script>
+  window.homeaiHeader = function () { return {
+    realm: 'work',
+    boot() { this.realm = (window.HomeAI && window.HomeAI.getRealm()) || 'work';
+      window.addEventListener('realm-changed', (e) => { this.realm = e.detail.realm; }); },
+    setRealm(next) { if (window.HomeAI?.setRealm) window.HomeAI.setRealm(next); } }; };
+</script>
+
+<div class="flex">
+  <aside id="rail"
+         class="fixed lg:sticky top-[88px] z-30 w-64 h-[calc(100vh-88px)] overflow-y-auto
+                bg-slate-950/95 border-r border-white/5 px-2 py-3 transition-transform lg:translate-x-0"
+         :class="railOpen ? 'translate-x-0' : '-translate-x-full'" aria-label="Sections">
+    <details open class="mb-2"><summary class="cursor-pointer px-2 py-1 text-xs uppercase tracking-wider text-amber-300">Work</summary>
+      <ul class="space-y-0.5 ml-1">
+        <li><a href="/desktop/work/today" class="rail-link" :class="{'active': $root.bucket === 'work' && $root.page === 'today'}">Today</a></li>
+        <li><a href="/desktop/work/actions" class="rail-link" :class="{'active': $root.bucket === 'work' && $root.page === 'actions'}">Actions</a></li>
+        <li><a href="/desktop/work/docs" class="rail-link" :class="{'active': $root.bucket === 'work' && $root.page === 'docs'}">Docs</a></li>
+        <li><a href="/desktop/work/staff" class="rail-link" :class="{'active': $root.bucket === 'work' && $root.page === 'staff'}">Staff</a></li>
+        <li><a href="/desktop/work/email" class="rail-link" :class="{'active': $root.bucket === 'work' && $root.page === 'email'}">Email</a></li>
+        <li><a href="/desktop/work/finance" class="rail-link" :class="{'active': $root.bucket === 'work' && $root.page === 'finance'}">Finance</a></li>
+      </ul></details>
+    <details class="mb-2"><summary class="cursor-pointer px-2 py-1 text-xs uppercase tracking-wider text-emerald-300">Private</summary>
+      <ul class="space-y-0.5 ml-1">
+        <li><a href="/desktop/private/today" class="rail-link" :class="{'active': $root.bucket === 'private' && $root.page === 'today'}">Today</a></li>
+        <li><a href="/desktop/private/family" class="rail-link" :class="{'active': $root.bucket === 'private' && $root.page === 'family'}">Family</a></li>
+        <li><a href="/desktop/private/docs" class="rail-link" :class="{'active': $root.bucket === 'private' && $root.page === 'docs'}">Docs</a></li>
+      </ul></details>
+    <details class="mb-2"><summary class="cursor-pointer px-2 py-1 text-xs uppercase tracking-wider text-violet-300">Build</summary>
+      <ul class="space-y-0.5 ml-1">
+        <li><a href="/desktop/build/pipelines" class="rail-link" :class="{'active': $root.bucket === 'build' && $root.page === 'pipelines'}">Pipelines</a></li>
+        <li><a href="/desktop/build/models" class="rail-link" :class="{'active': $root.bucket === 'build' && $root.page === 'models'}">Models</a></li>
+        <li><a href="/desktop/build/forensics" class="rail-link" :class="{'active': $root.bucket === 'build' && $root.page === 'forensics'}">Forensics</a></li>
+      </ul></details>
+    <details class="mb-2"><summary class="cursor-pointer px-2 py-1 text-xs uppercase tracking-wider text-slate-300">All</summary>
+      <ul class="space-y-0.5 ml-1">
+        <li><a href="/desktop/all" class="rail-link" :class="{'active': $root.bucket === 'all'}">Sitemap</a></li>
+      </ul></details>
+    <div class="mt-3 pt-3 border-t border-white/5">
+      <div class="px-2 py-1 text-xs uppercase tracking-wider text-zinc-500">On this page</div>
+      <ul class="space-y-0.5 ml-1"><li><a href="#C01" class="rail-link cursor-pointer" :class="{'active': isActive('C01')}" @click.prevent="scrollTo('C01')"><span class="rail-code">§C01</span><span>Account balances</span></a></li><li><a href="#C02" class="rail-link cursor-pointer" :class="{'active': isActive('C02')}" @click.prevent="scrollTo('C02')"><span class="rail-code">§C02</span><span>Credit cards</span></a></li><li><a href="#C05" class="rail-link cursor-pointer" :class="{'active': isActive('C05')}" @click.prevent="scrollTo('C05')"><span class="rail-code">§C05</span><span>Inter-entity owings</span></a></li><li><a href="#S01" class="rail-link cursor-pointer" :class="{'active': isActive('S01')}" @click.prevent="scrollTo('S01')"><span class="rail-code">§S01</span><span>Daily GP</span></a></li></ul>
+    </div>
+  </aside>
+  <div x-show="railOpen && !isWide" x-cloak class="fixed inset-0 top-[88px] z-20 bg-black/40 lg:hidden" @click="closeRail()"></div>
+  <main class="flex-1 min-w-0 lg:ml-0 px-4 py-4 max-w-5xl">
+
+<section id="C01" data-section-code="C01"
+         class="glass rounded-lg p-4 mb-4"
+         x-data="desktopSection({ code: 'C01', name: 'Account balances', slug: 'account_balances' })"
+         x-init="init()" aria-labelledby="C01-h">
+  <header class="flex items-baseline justify-between mb-3">
+    <h2 id="C01-h" class="text-base font-semibold">
+      <span class="mono text-xs text-amber-300">§C01</span>
+      Account balances
+    </h2>
+    <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
+  </header>
+
+  <template x-if="loading"><div class="skel h-32"></div></template>
+  <template x-if="error"><div class="text-red-300 text-sm">Couldn't load: <span x-text="error"></span></div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length === 0">
+    <div class="text-slate-400 text-sm py-2">No rows.</div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length > 0">
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead class="text-xs uppercase tracking-wider text-slate-500">
+        <tr><template x-for="k in Object.keys(data.rows[0])" :key="k">
+          <th class="text-left px-2 py-2" x-text="k"></th></template></tr></thead>
+      <tbody><template x-for="(r, i) in data.rows.slice(0, 100)" :key="i">
+        <tr class="border-t border-white/5">
+          <template x-for="k in Object.keys(data.rows[0])" :key="k">
+            <td class="px-2 py-2"
+                :class="typeof r[k] === 'number' ? 'mono text-right' : 'text-zinc-100'"
+                x-text="r[k] === null ? '—' : (typeof r[k] === 'object' ? JSON.stringify(r[k]) : r[k])"></td>
+          </template></tr></template></tbody></table>
+      <div class="text-xs text-slate-500 mt-2"
+           x-text="data.rows.length > 100 ? `${data.rows.length} rows, first 100 shown` : `${data.rows.length} row(s)`"></div>
+    </div></template>
+</section>
+
+<section id="C02" data-section-code="C02"
+         class="glass rounded-lg p-4 mb-4"
+         x-data="desktopSection({ code: 'C02', name: 'Credit cards', slug: 'credit_card_status' })"
+         x-init="init()" aria-labelledby="C02-h">
+  <header class="flex items-baseline justify-between mb-3">
+    <h2 id="C02-h" class="text-base font-semibold">
+      <span class="mono text-xs text-amber-300">§C02</span>
+      Credit cards
+    </h2>
+    <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
+  </header>
+
+  <template x-if="loading"><div class="skel h-32"></div></template>
+  <template x-if="error"><div class="text-red-300 text-sm">Couldn't load: <span x-text="error"></span></div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length === 0">
+    <div class="text-slate-400 text-sm py-2">No rows.</div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length > 0">
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead class="text-xs uppercase tracking-wider text-slate-500">
+        <tr><template x-for="k in Object.keys(data.rows[0])" :key="k">
+          <th class="text-left px-2 py-2" x-text="k"></th></template></tr></thead>
+      <tbody><template x-for="(r, i) in data.rows.slice(0, 100)" :key="i">
+        <tr class="border-t border-white/5">
+          <template x-for="k in Object.keys(data.rows[0])" :key="k">
+            <td class="px-2 py-2"
+                :class="typeof r[k] === 'number' ? 'mono text-right' : 'text-zinc-100'"
+                x-text="r[k] === null ? '—' : (typeof r[k] === 'object' ? JSON.stringify(r[k]) : r[k])"></td>
+          </template></tr></template></tbody></table>
+      <div class="text-xs text-slate-500 mt-2"
+           x-text="data.rows.length > 100 ? `${data.rows.length} rows, first 100 shown` : `${data.rows.length} row(s)`"></div>
+    </div></template>
+</section>
+
+<section id="C05" data-section-code="C05"
+         class="glass rounded-lg p-4 mb-4"
+         x-data="desktopSection({ code: 'C05', name: 'Inter-entity owings', slug: 'owings_summary' })"
+         x-init="init()" aria-labelledby="C05-h">
+  <header class="flex items-baseline justify-between mb-3">
+    <h2 id="C05-h" class="text-base font-semibold">
+      <span class="mono text-xs text-amber-300">§C05</span>
+      Inter-entity owings
+    </h2>
+    <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
+  </header>
+
+  <template x-if="loading"><div class="skel h-32"></div></template>
+  <template x-if="error"><div class="text-red-300 text-sm">Couldn't load: <span x-text="error"></span></div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length === 0">
+    <div class="text-slate-400 text-sm py-2">No rows.</div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length > 0">
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead class="text-xs uppercase tracking-wider text-slate-500">
+        <tr><template x-for="k in Object.keys(data.rows[0])" :key="k">
+          <th class="text-left px-2 py-2" x-text="k"></th></template></tr></thead>
+      <tbody><template x-for="(r, i) in data.rows.slice(0, 100)" :key="i">
+        <tr class="border-t border-white/5">
+          <template x-for="k in Object.keys(data.rows[0])" :key="k">
+            <td class="px-2 py-2"
+                :class="typeof r[k] === 'number' ? 'mono text-right' : 'text-zinc-100'"
+                x-text="r[k] === null ? '—' : (typeof r[k] === 'object' ? JSON.stringify(r[k]) : r[k])"></td>
+          </template></tr></template></tbody></table>
+      <div class="text-xs text-slate-500 mt-2"
+           x-text="data.rows.length > 100 ? `${data.rows.length} rows, first 100 shown` : `${data.rows.length} row(s)`"></div>
+    </div></template>
+</section>
+
+<section id="S01" data-section-code="S01"
+         class="glass rounded-lg p-4 mb-4"
+         x-data="desktopSection({ code: 'S01', name: 'Daily GP',  })"
+         x-init="init()" aria-labelledby="S01-h">
+  <header class="flex items-baseline justify-between mb-3">
+    <h2 id="S01-h" class="text-base font-semibold">
+      <span class="mono text-xs text-amber-300">§S01</span>
+      Daily GP
+    </h2>
+    <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
+  </header>
+  <div class="text-sm text-slate-400 py-2">Daily GP slug TBD — wire v_daily_gp in next pass</div>
+</section>
+  </main>
+</div>
+</body></html>

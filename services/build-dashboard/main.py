@@ -1335,6 +1335,66 @@ async def desktop_work_today_page():
     return FileResponse(str(STATIC / "desktop-work-today.html"))
 
 
+@app.get("/desktop/work/docs")
+async def desktop_work_docs_page():
+    return FileResponse(str(STATIC / "desktop-work-docs.html"))
+
+
+@app.get("/desktop/work/actions")
+async def desktop_work_actions_page():
+    return FileResponse(str(STATIC / "desktop-work-actions.html"))
+
+
+@app.get("/desktop/work/staff")
+async def desktop_work_staff_page():
+    return FileResponse(str(STATIC / "desktop-work-staff.html"))
+
+
+@app.get("/desktop/work/email")
+async def desktop_work_email_page():
+    return FileResponse(str(STATIC / "desktop-work-email.html"))
+
+
+@app.get("/desktop/work/finance")
+async def desktop_work_finance_page():
+    return FileResponse(str(STATIC / "desktop-work-finance.html"))
+
+
+@app.get("/desktop/private/today")
+async def desktop_private_today_page():
+    return FileResponse(str(STATIC / "desktop-private-today.html"))
+
+
+@app.get("/desktop/private/docs")
+async def desktop_private_docs_page():
+    return FileResponse(str(STATIC / "desktop-private-docs.html"))
+
+
+@app.get("/desktop/private/family")
+async def desktop_private_family_page():
+    return FileResponse(str(STATIC / "desktop-private-family.html"))
+
+
+@app.get("/desktop/build/pipelines")
+async def desktop_build_pipelines_page():
+    return FileResponse(str(STATIC / "desktop-build-pipelines.html"))
+
+
+@app.get("/desktop/build/models")
+async def desktop_build_models_page():
+    return FileResponse(str(STATIC / "desktop-build-models.html"))
+
+
+@app.get("/desktop/build/forensics")
+async def desktop_build_forensics_page():
+    return FileResponse(str(STATIC / "desktop-build-forensics.html"))
+
+
+@app.get("/desktop/all")
+async def desktop_all_page():
+    return FileResponse(str(STATIC / "desktop-all.html"))
+
+
 # ── U84 Phase 2 — Today screens ───────────────────────────────────
 @app.get("/work/today")
 async def work_today_page():
@@ -5658,7 +5718,10 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         -- U84 private docs detail lists
                         'private_vehicles',
                         -- U85 Phase D2 (desktop sections)
-                        'today_bookings','today_pub_sales')
+                        'today_bookings','today_pub_sales',
+                        -- U85 Phase D3 (docs/vendors)
+                        'recent_invoices','vendor_site_rules',
+                        'noise_senders','cost_centre_breakdown')
          ORDER BY slug
     """)
     out = []
