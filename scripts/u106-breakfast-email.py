@@ -1,12 +1,12 @@
 """u106-breakfast-email.py — Compose + send the 5pm breakfast email.
 
-Version C voice (atmospheric/marketing-rich).
-HTML form with radio buttons.
-Per-guest columns (2-col responsive grid for 2 guests; auto for more).
-Submit POSTs to https://jolybox.tailc27dff.ts.net/api/breakfast/submit
+REPLY-BASED VERSION (not form-POST):
+  - Numbered menu so guests can reply with just "1, 3, coffee"
+  - Or reply freely — Haiku parses on the inbound side
+  - Reply-To: info@malthousetintagel.com
+  - Subject carries the booking ref so we can match on inbound
 
-DRY_RUN=1 by default — emails go ONLY to the addresses listed in
-TEST_RECIPIENTS, not to actual guests.
+DRY_RUN=1 by default — TEST_RECIPIENTS only.
 
 Usage:
   TEST=1 docker exec -i homeai-bot-responder python3 /tmp/u106.py
@@ -19,13 +19,16 @@ import asyncpg
 VAULT_TOKEN = os.environ['VAULT_TOKEN']
 TEST = os.environ.get('TEST', '1') == '1'
 GF = 'http://google-fetch:8011'
-BASE_URL = os.environ.get('BASE_URL', 'https://jolybox.tailc27dff.ts.net')
 SECRET = os.environ.get('BREAKFAST_TOKEN_SECRET', 'u106-rotate-me-please-1234567890')
 
 TEST_RECIPIENTS = [
     'jolyon.sandercock@gmail.com',
     'kitchen@malthousetintagel.com',
 ]
+
+# A real, working URL — the Reserve-a-Table button on the public site
+RESERVE_URL = 'https://malthousetintagel.com/our-food/'
+BOOK_PHONE  = '01840 770461'
 
 
 def vault(path):
@@ -46,112 +49,108 @@ def first_name(full: str) -> str:
     return m.group(1) if m else (full.split()[0] if full and full.split() else 'there')
 
 
-# Menu structure — matches the A5 print proof
 MENU = [
-    {'category': 'continental', 'label': 'Continental & Cereal', 'items': [
-        ('granola',     'Luxury granola with natural yoghurt'),
-        ('berries',     'Summer berry compote with natural yoghurt'),
-        ('cornflakes',  'Crunchy nut cornflakes with semi-skimmed milk'),
-        ('croissant',   'Freshly baked croissant, jam & butter'),
+    {'category': 'Continental & Cereal', 'items': [
+        'Luxury granola with natural yoghurt',
+        'Summer berry compote with natural yoghurt',
+        'Crunchy nut cornflakes with semi-skimmed milk',
+        'Freshly baked croissant, jam & butter',
     ]},
-    {'category': 'light', 'label': 'Light Breakfast', 'items': [
-        ('sausage_sw',  'Sausage sandwich'),
-        ('bacon_sw',    'Bacon sandwich'),
-        ('eggs_bacon',  'Scrambled eggs & bacon on toast'),
-        ('salmon_avo',  'Beetroot-cured salmon, smashed avocado & poached egg on toast'),
+    {'category': 'Light Breakfast', 'items': [
+        'Sausage sandwich',
+        'Bacon sandwich',
+        'Scrambled eggs & bacon on toast',
+        'Beetroot-cured salmon, smashed avocado & poached egg on toast',
     ]},
-    {'category': 'full', 'label': 'Full Breakfast', 'items': [
-        ('cornish',     'Full Cornish (bacon, sausage, hogs pudding, fried egg, tomato, mushrooms, beans, hash brown)'),
-        ('veggie',      'Full Vegetarian (veggie sausage, hash brown, fried egg, tomato, mushrooms, beans)'),
-        ('vegan',       'Full Vegan (vegan sausage, beans, hash browns, tomatoes, mushrooms)'),
+    {'category': 'Full Breakfast', 'items': [
+        'Full Cornish (bacon, sausage, hogs pudding, fried egg, tomato, mushrooms, beans, hash brown)',
+        'Full Vegetarian (veggie sausage, hash brown, fried egg, tomato, mushrooms, beans)',
+        'Full Vegan (vegan sausage, beans, hash browns, tomatoes, mushrooms)',
     ]},
 ]
 
-DRINKS = ['Tea', 'Coffee', 'Both', 'None — water only']
-TIMES  = ['08:00', '08:15', '08:30', '08:45', '09:00']
+
+def numbered_menu_html() -> str:
+    """Render the menu as a numbered list — guests reply with the numbers."""
+    out = []
+    counter = 1
+    for cat in MENU:
+        out.append(f'<h4 style="color:#18189b;margin:14px 0 6px 0">{cat["category"]}</h4><ol start="{counter}" style="margin:0 0 8px 22px;padding:0">')
+        for item in cat['items']:
+            out.append(f'<li style="margin:4px 0">{item}</li>')
+            counter += 1
+        out.append('</ol>')
+    return ''.join(out)
+
+
+def numbered_menu_text() -> str:
+    """Plain-text version of the menu for the text part."""
+    out = []
+    counter = 1
+    for cat in MENU:
+        out.append(f'\n{cat["category"]}')
+        for item in cat['items']:
+            out.append(f'  {counter}. {item}')
+            counter += 1
+    return '\n'.join(out)
 
 
 def render_html(booking_id: int, guest_count: int, first: str,
-                room: str, checkin_day: str, service_date: str,
-                weather: str, tides: str, activities: str, specials: str,
-                table_offer: str) -> str:
-    """Return full HTML email body with form."""
+                room: str, service_date: str,
+                weather: str, tides: str, activities: str, specials: str) -> str:
     token = make_token(booking_id, service_date)
-    action = f"{BASE_URL}/api/breakfast/submit"
+    weekday = date.fromisoformat(service_date).strftime('%A')
 
-    # Multi-column guest sections
-    col_class = "two-col" if guest_count == 2 else ("three-col" if guest_count >= 3 else "one-col")
-    guest_blocks = []
-    for g in range(1, max(guest_count, 1) + 1):
-        radio_dish = []
-        for cat in MENU:
-            radio_dish.append(f'<div class="cat">{cat["label"]}</div>')
-            for code, label in cat['items']:
-                radio_dish.append(
-                    f'<label class="opt"><input type="radio" name="g{g}_dish" value="{label}"> {label}</label>')
-        radio_drink = ''.join(
-            f'<label class="opt"><input type="radio" name="g{g}_drink" value="{d}"> {d}</label>'
-            for d in DRINKS)
-        guest_blocks.append(f"""
-        <div class="guest">
-          <div class="guest-h">Guest {g}{' (you)' if g == 1 else ''}</div>
-          <div class="sec-h">Hot drink</div>
-          {radio_drink}
-          <div class="sec-h">Dish</div>
-          {''.join(radio_dish)}
-          <label class="textfield">Allergies / notes
-            <input type="text" name="g{g}_notes" placeholder="e.g. gluten-free, no mushrooms">
-          </label>
-        </div>""")
+    # mailto fallback with pre-filled subject + body
+    import urllib.parse as up
+    mailto_body = up.quote(
+        f"Booking #{booking_id} — breakfast choices for {service_date}\n\n"
+        f"Guest 1: \n"
+        + (f"Guest 2: \n" if guest_count >= 2 else "")
+        + (f"Guest 3: \n" if guest_count >= 3 else "")
+        + "\nTime preference (8:00 / 8:30 / 9:00): \nDrinks: \nAllergies / notes: \n"
+    )
+    mailto_subj = up.quote(f"Breakfast — booking #{booking_id} ({service_date})")
+    mailto = f"mailto:info@malthousetintagel.com?subject={mailto_subj}&body={mailto_body}"
 
-    time_radios = ''.join(
-        f'<label class="time-opt"><input type="radio" name="service_time" value="{t}"{" checked" if t == "08:30" else ""}> {t}</label>'
-        for t in TIMES)
+    # Reserve-a-table mailto fallback
+    table_mailto = (
+        f"mailto:info@malthousetintagel.com?"
+        f"subject={up.quote('Table for tonight — booking #' + str(booking_id))}"
+        f"&body={up.quote('Please book us a table for tonight. Party size: __  Time preference: __')}"
+    )
 
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  body {{ font-family: Georgia, 'Times New Roman', serif; max-width: 720px; margin: 0 auto;
-          padding: 24px; background: #fafafa; color: #2a2a2a; line-height: 1.6; }}
-  h1 {{ font-size: 22px; color: #18189b; margin: 0 0 8px 0; }}
-  .intro {{ font-size: 15px; color: #555; }}
-  .brief {{ background: #fff; border-left: 3px solid #18189b; padding: 12px 16px; margin: 20px 0; font-size: 14px; }}
+  body {{ font-family: Georgia, 'Times New Roman', serif; max-width: 660px; margin: 0 auto;
+          padding: 24px; background: #fafafa; color: #2a2a2a; line-height: 1.55; }}
+  h1 {{ font-size: 22px; color: #18189b; margin: 0 0 10px 0; }}
+  .intro {{ font-size: 15px; color: #555; margin: 0 0 16px 0; }}
+  .brief {{ background: #fff; border-left: 3px solid #18189b; padding: 12px 16px;
+            margin: 18px 0; font-size: 14px; }}
   .brief b {{ color: #18189b; }}
-  form {{ background: #fff; padding: 20px; border: 1px solid #ddd; border-radius: 6px; }}
-  .grid {{ display: grid; gap: 18px; }}
-  .grid.one-col {{ grid-template-columns: 1fr; }}
-  .grid.two-col {{ grid-template-columns: 1fr 1fr; }}
-  .grid.three-col {{ grid-template-columns: 1fr 1fr 1fr; }}
-  .guest {{ background: #fbfbfb; border: 1px solid #e5e5e5; border-radius: 4px; padding: 14px; }}
-  .guest-h {{ font-weight: bold; font-size: 16px; color: #18189b; margin-bottom: 10px;
-              border-bottom: 1px solid #eee; padding-bottom: 6px; }}
-  .sec-h {{ font-weight: bold; font-size: 13px; margin-top: 12px; margin-bottom: 4px;
-            text-transform: uppercase; letter-spacing: 0.04em; color: #666; }}
-  .cat   {{ font-style: italic; color: #888; margin: 6px 0 2px 0; font-size: 12px; }}
-  label.opt {{ display: block; padding: 4px 0; font-size: 14px; cursor: pointer; }}
-  label.opt:hover {{ background: #f0f0f0; }}
-  label.opt input {{ margin-right: 8px; }}
-  label.textfield {{ display: block; margin-top: 8px; font-size: 13px; color: #555; }}
-  label.textfield input {{ display: block; width: 100%; padding: 8px;
-                            border: 1px solid #ccc; border-radius: 3px; margin-top: 4px;
-                            font-size: 14px; }}
-  .time-row {{ margin: 16px 0; padding: 12px; background: #f6f6f6; border-radius: 4px; }}
-  label.time-opt {{ display: inline-block; margin-right: 16px; font-size: 14px; cursor: pointer; }}
-  label.time-opt input {{ margin-right: 6px; }}
-  .submit-row {{ text-align: center; margin-top: 24px; }}
-  button {{ background: #18189b; color: #fff; padding: 14px 36px; font-size: 16px;
-            border: 0; border-radius: 4px; cursor: pointer; font-weight: bold; }}
-  button:hover {{ background: #0d0d6b; }}
+  .menu-box {{ background: #fff; padding: 14px 18px; border: 1px solid #ddd;
+               border-radius: 6px; font-size: 14px; }}
+  .menu-box h4 {{ font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; }}
+  .reply-cta {{ background: #18189b; color: #fff; padding: 16px 20px; border-radius: 6px;
+                margin: 22px 0; font-size: 15px; }}
+  .reply-cta a {{ color: #fff; font-weight: bold; text-decoration: underline; }}
+  .reply-eg {{ background: #f0f3ff; border: 1px dashed #18189b; padding: 10px 14px;
+               margin: 10px 0; font-family: ui-monospace, Menlo, monospace;
+               font-size: 13px; border-radius: 4px; color: #18189b; }}
   .table-offer {{ background: #fff7ed; border: 1px solid #fbbf24; padding: 14px;
                    border-radius: 4px; margin: 20px 0; font-size: 14px; }}
-  .specials {{ background: #fff; border: 1px dashed #888; padding: 12px; border-radius: 4px;
-                margin: 12px 0 20px 0; font-size: 14px; }}
+  .table-offer a {{ color: #18189b; font-weight: bold; }}
+  .specials {{ background: #fff; border: 1px dashed #888; padding: 12px;
+                border-radius: 4px; margin: 12px 0 18px 0; font-size: 14px; }}
   .specials b {{ color: #18189b; }}
-  footer {{ margin-top: 30px; color: #888; font-size: 12px; text-align: center; }}
+  footer {{ margin-top: 26px; color: #888; font-size: 12px; text-align: center;
+            border-top: 1px solid #eee; padding-top: 12px; }}
 </style></head>
 <body>
 
-<h1>A {checkin_day.lower()} kind of breakfast, {first}</h1>
+<h1>A {weekday.lower()} kind of breakfast, {first}</h1>
 
 <p class="intro">
 The light over the Atlantic tomorrow looks like {weather.lower()},
@@ -160,49 +159,94 @@ beautifully at this time of year.
 </p>
 
 <div class="brief">
-  <b>Tomorrow's brief</b> ({service_date})<br>
+  <b>Tomorrow's brief</b> ({weekday} {service_date})<br>
   <b>Weather:</b> {weather}<br>
   <b>Tides:</b> {tides}<br>
   <b>Locals:</b> {activities}
 </div>
 
-<p>Breakfast is served 8-9am downstairs. Here's what's on:</p>
+<p>Breakfast is served 8-9am downstairs. Here's the menu — numbered
+so you can reply quickly:</p>
 
 {('<div class="specials"><b>Chef specials tomorrow:</b><br>' + specials + '</div>') if specials else ''}
 
-<form action="{action}" method="POST">
-  <input type="hidden" name="t" value="{token}">
+<div class="menu-box">
+{numbered_menu_html()}
+</div>
 
-  <div class="time-row">
-    <b>What time would you like breakfast?</b><br>
-    {time_radios}
+<div class="reply-cta">
+  <b>Just hit reply</b> with your choices. We're happy with anything from
+  a one-word answer to a full sentence — your call.
+
+  <div class="reply-eg">
+    G1: 9 + coffee<br>
+    G2: 1 + tea, no nuts<br>
+    Time: 8:30
   </div>
 
-  <div class="grid {col_class}">
-    {''.join(guest_blocks)}
+  <div class="reply-eg">
+    "Cornish breakfast and a coffee for me, granola for Anna at 9am please"
   </div>
 
-  <div class="submit-row">
-    <button type="submit">Lock in our breakfast</button>
-  </div>
-</form>
+  Or if your email doesn't have an easy reply button:
+  <a href="{mailto}">click here to start a reply</a>.
+</div>
 
-{f'<div class="table-offer">{table_offer}</div>' if table_offer else ''}
+<div class="table-offer">
+  <b>Dinner tonight?</b> Tables fill up at this time of year.
+  <a href="{RESERVE_URL}">Reserve via our site</a>,
+  call us on <b>{BOOK_PHONE}</b>, or
+  <a href="{table_mailto}">click reply</a> and we'll sort it.
+</div>
 
 <footer>
-  Sent from the Olde Malthouse Inn ({room}). Reply directly to this
-  email if you'd rather just type it out — info@malthousetintagel.com.<br>
-  01840 770461 · malthousetintagel.com
+  Sent from the Olde Malthouse Inn ({room}). Replies go straight to
+  info@malthousetintagel.com.<br>
+  01840 770461  ·  malthousetintagel.com  ·  Booking ref #{booking_id}
 </footer>
 
 </body></html>"""
 
 
-def send_email(account: str, to: str, subject: str, html: str, text: str = None):
+def render_text(booking_id, guest_count, first, room, service_date,
+                weather, tides, activities, specials):
+    weekday = date.fromisoformat(service_date).strftime('%A')
+    return f"""A {weekday.lower()} kind of breakfast, {first}
+
+Looking forward to tomorrow ({weekday} {service_date}). Breakfast is
+served 8-9am downstairs.
+
+Tomorrow's brief:
+  Weather: {weather}
+  Tides:   {tides}
+  Locals:  {activities}
+
+{('CHEF SPECIALS: ' + specials) if specials else ''}
+
+MENU (reply with the numbers, or just words — whichever's easier):
+{numbered_menu_text()}
+
+DRINKS: Tea / Coffee / Both / None
+
+Examples of what to reply:
+  G1: 9 + coffee
+  G2: 1 + tea, no nuts
+  Time: 8:30
+
+Or: "Cornish breakfast and a coffee for me, granola for Anna at 9am please"
+
+DINNER TONIGHT?
+Reserve via {RESERVE_URL}, call {BOOK_PHONE}, or just reply.
+
+— The Olde Malthouse Inn ({room})
+01840 770461  ·  info@malthousetintagel.com  ·  Booking ref #{booking_id}
+"""
+
+
+def send_email(account: str, to: str, subject: str, html: str, text: str):
     payload = {
         'to': to, 'subject': subject,
-        'body_text': text or 'Please open this in an HTML-capable email client.',
-        'body_html': html,
+        'body_text': text, 'body_html': html,
         'reply_to': 'info@malthousetintagel.com',
     }
     req = urllib.request.Request(f'{GF}/send/{account}',
@@ -217,54 +261,55 @@ async def main():
     conn = await asyncpg.connect(f'postgresql://postgres:{pg_pw}@homeai-postgres:5432/homeai')
     await conn.execute("SELECT home_ai.set_realm('owner')")
 
-    if TEST:
-        # Build ONE sample email using Matthias Stötzner's real booking (Garden Suite, tonight)
-        sample = await conn.fetchrow("""
-            SELECT id, guest_name, room, checkin_date, checkout_date
-            FROM accommodation_bookings
-            WHERE checkin_date = CURRENT_DATE
-              AND status IN ('confirmed','deposit_paid','paid','active')
-            ORDER BY id LIMIT 1
-        """)
-        if not sample:
-            print('No sample booking for today')
-            return
-
-        service_date = (date.today() + timedelta(days=1)).isoformat()
-        weather    = "Mostly sunny 17°C, light SW breeze (live API placeholder)"
-        tides      = "Tomorrow high tide 06:42 & 19:18 — low tide perfect for rockpooling 12:30"
-        activities = "King Arthur's Castle (5-min walk), Coast Path to Boscastle (2 hrs), Glebe Cliff sunset bench"
-        specials   = "Pan-fried local mackerel with samphire — Chef's pick. (placeholder until kitchen@ 10am reply)"
-        table_offer = (
-            'Looking for dinner tonight? <a href="https://www.malthousetintagel.com/book-a-table" '
-            'style="color:#18189b;font-weight:bold">Reserve a table</a> — or '
-            "click reply and tell us 1, 2 or 6 people and we will sort it."
-        )
-
-        html = render_html(
-            booking_id=sample['id'],
-            guest_count=2,
-            first=first_name(sample['guest_name']),
-            room=sample['room'] or 'Garden Suite',
-            checkin_day=date.fromisoformat(service_date).strftime('%A'),
-            service_date=service_date,
-            weather=weather, tides=tides, activities=activities,
-            specials=specials, table_offer=table_offer,
-        )
-
-        subject = f"A {date.fromisoformat(service_date).strftime('%A').lower()} kind of breakfast, {first_name(sample['guest_name'])}"
-
-        for to_addr in TEST_RECIPIENTS:
-            try:
-                # For kitchen@ — send AS info@ (workspace alias)
-                # For jolyon.sandercock@gmail.com — send from bot per policy
-                account = 'bot' if 'sandercock' in to_addr else 'info'
-                resp = send_email(account, to_addr, '[TEST] ' + subject, html)
-                print(f'  sent to {to_addr} via {account} → {resp.get("message_id")}')
-            except Exception as e:
-                print(f'  FAILED to {to_addr}: {e}')
-    else:
+    if not TEST:
         print('LIVE mode not yet enabled — set TEST=0 to fire to guests.')
+        await conn.close()
+        return
+
+    sample = await conn.fetchrow("""
+        SELECT id, guest_name, room
+        FROM accommodation_bookings
+        WHERE checkin_date = CURRENT_DATE
+          AND status IN ('confirmed','deposit_paid','paid','active')
+        ORDER BY id LIMIT 1
+    """)
+    if not sample:
+        print('No sample booking for today')
+        await conn.close()
+        return
+
+    service_date = (date.today() + timedelta(days=1)).isoformat()
+    weather    = "Mostly sunny 17°C, light SW breeze (weather API stub)"
+    tides      = "High 06:42 & 19:18; low tide rockpooling 12:30 (tide API stub)"
+    activities = "Tintagel Castle (5-min), Coast Path to Boscastle (2h), Glebe Cliff sunset"
+    specials   = "Pan-fried local mackerel with samphire — chef's pick (placeholder)"
+
+    html = render_html(
+        booking_id=sample['id'],
+        guest_count=2,
+        first=first_name(sample['guest_name']),
+        room=sample['room'] or 'Garden Suite',
+        service_date=service_date,
+        weather=weather, tides=tides, activities=activities, specials=specials,
+    )
+    text = render_text(
+        booking_id=sample['id'], guest_count=2,
+        first=first_name(sample['guest_name']),
+        room=sample['room'] or 'Garden Suite',
+        service_date=service_date,
+        weather=weather, tides=tides, activities=activities, specials=specials,
+    )
+
+    subject = (f"[TEST] A {date.fromisoformat(service_date).strftime('%A').lower()} "
+               f"kind of breakfast — booking #{sample['id']}")
+
+    for to_addr in TEST_RECIPIENTS:
+        account = 'bot' if 'sandercock' in to_addr else 'info'
+        try:
+            resp = send_email(account, to_addr, subject, html, text)
+            print(f'  sent to {to_addr:38s} via {account:5s} → {resp.get("message_id")}')
+        except Exception as e:
+            print(f'  FAILED to {to_addr}: {e}')
 
     await conn.close()
 
