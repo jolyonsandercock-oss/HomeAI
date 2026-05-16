@@ -268,27 +268,52 @@ async def main():
     today = date.today()
     tomorrow = today + timedelta(days=1)
 
-    arrivals = await conn.fetch("""
-        SELECT id, guest_name, room, source, gross_amount, payment_status
-          FROM accommodation_bookings
-         WHERE checkin_date = $1
-           AND status IN ('confirmed','deposit_paid','paid','active')
-         ORDER BY room, id
-    """, today)
-    staythroughs = await conn.fetch("""
-        SELECT id, guest_name, room, source, checkout_date, gross_amount, payment_status
-          FROM accommodation_bookings
-         WHERE checkin_date < $1 AND checkout_date > $1
-           AND status IN ('confirmed','deposit_paid','paid','active')
-         ORDER BY checkout_date, room
-    """, today)
-    departures = await conn.fetch("""
-        SELECT id, guest_name, room, source, gross_amount, total_amount, payment_status
-          FROM accommodation_bookings
-         WHERE checkout_date = $1
-           AND status IN ('confirmed','deposit_paid','paid','active')
-         ORDER BY room
-    """, today)
+    # Common allocation fix: when multiple rooms in a single multi-room
+    # booking get the same total duplicated, divide by the sibling count.
+    # Pattern: same canonical name + same checkin + same checkout + same
+    # gross_amount appearing N times. Sibling rows with distinct amounts
+    # (per-room pricing) pass through untouched.
+    # Postgres doesn't support COUNT(DISTINCT …) OVER, so pre-aggregate
+    # group stats then LATERAL-join back.
+    ALLOC_CTE = """
+        WITH groups AS (
+          SELECT guest_name_canonical, checkin_date, checkout_date,
+                 COUNT(*) AS sib_count,
+                 COUNT(DISTINCT gross_amount) AS sib_distinct_amts
+            FROM accommodation_bookings
+           WHERE status IN ('confirmed','deposit_paid','paid','active')
+           GROUP BY guest_name_canonical, checkin_date, checkout_date
+        ),
+        siblings AS (
+          SELECT b.id,
+                 b.guest_name, b.room, b.source, b.payment_status,
+                 b.checkin_date, b.checkout_date,
+                 (b.checkout_date - b.checkin_date) AS nights,
+                 g.sib_count,
+                 CASE WHEN g.sib_count > 1 AND g.sib_distinct_amts = 1
+                      THEN ROUND((b.gross_amount / g.sib_count)::numeric, 2)
+                      ELSE b.gross_amount END AS gross_amount,
+                 CASE WHEN g.sib_count > 1 AND g.sib_distinct_amts = 1
+                      THEN ROUND((b.total_amount / g.sib_count)::numeric, 2)
+                      ELSE b.total_amount END AS total_amount
+            FROM accommodation_bookings b
+            JOIN groups g
+              ON g.guest_name_canonical = b.guest_name_canonical
+             AND g.checkin_date = b.checkin_date
+             AND g.checkout_date = b.checkout_date
+           WHERE b.status IN ('confirmed','deposit_paid','paid','active')
+        )
+        SELECT id, guest_name, room, source, payment_status,
+               checkin_date, checkout_date, nights, sib_count,
+               gross_amount, total_amount
+        """
+    arrivals = await conn.fetch(
+        ALLOC_CTE + " FROM siblings WHERE checkin_date = $1 ORDER BY room, id", today)
+    staythroughs = await conn.fetch(
+        ALLOC_CTE + " FROM siblings WHERE checkin_date < $1 AND checkout_date > $1 "
+        "ORDER BY checkout_date, room", today)
+    departures = await conn.fetch(
+        ALLOC_CTE + " FROM siblings WHERE checkout_date = $1 ORDER BY room", today)
     covers = await conn.fetch("""
         SELECT id, source_ref, reservation_at, guest_name, party_size, booking_type
           FROM restaurant_reservations
@@ -297,44 +322,53 @@ async def main():
          ORDER BY reservation_at
     """, today)
     cross = await conn.fetch("SELECT * FROM v_today_stay_dine_crosslink")
-    tom_arrivals = await conn.fetch("""
-        SELECT guest_name, room, source, gross_amount, payment_status
-          FROM accommodation_bookings
-         WHERE checkin_date = $1
-           AND status IN ('confirmed','deposit_paid','paid','active')
-         ORDER BY room
-    """, tomorrow)
+    tom_arrivals = await conn.fetch(
+        ALLOC_CTE + " FROM siblings WHERE checkin_date = $1 ORDER BY room", tomorrow)
 
     kpi = await conn.fetchrow("SELECT * FROM v_today_kpis_work")
 
-    # Cost/income ratio + shift roster anchored on YESTERDAY (Jo 2026-05-16:
-    # "make the cost/income for the previous day").
+    # Roster + rollup → TODAY (the day ahead). Cost/income vs target → YESTERDAY.
     yest = today - timedelta(days=1)
 
-    shifts_team = await conn.fetch("""
-        SELECT team, department_name, hours, cost_with_oncost, staff_count, report_date
-          FROM v_daily_labour_by_team
-         WHERE report_date = $1 ORDER BY cost_with_oncost DESC NULLS LAST
-    """, yest)
-    sht = shifts_team
-    shift_date = yest
-
-    # Per-person shifts yesterday, with names + start/end + team — for
-    # service-period roster (breakfast / lunch / dinner / housekeeping / cafe).
-    shifts_people = await conn.fetch("""
+    SHIFT_PEOPLE_SQL = """
         SELECT
           COALESCE(NULLIF(u.preferred_name,''), u.full_name, 'unknown') AS name,
           d.team,
           to_char(s.start_time AT TIME ZONE 'Europe/London', 'HH24:MI') AS start_h,
           to_char(s.end_time   AT TIME ZONE 'Europe/London', 'HH24:MI') AS end_h,
           EXTRACT(HOUR FROM (s.start_time AT TIME ZONE 'Europe/London'))::int AS start_hr,
-          s.hours_worked
+          s.hours_worked,
+          COALESCE(NULLIF(s.cost_estimate, 0), s.hours_worked * COALESCE(u.base_pay_rate, 11.44)) AS cost_planned
           FROM workforce_shifts s
           LEFT JOIN workforce_users u ON u.external_id = s.user_external_id
           LEFT JOIN workforce_departments d ON d.external_id = s.department_external_id
          WHERE s.shift_date = $1
          ORDER BY s.start_time, name
-    """, yest)
+    """
+    shifts_people = await conn.fetch(SHIFT_PEOPLE_SQL, today)
+    roster_date = today
+    if not shifts_people:
+        # Tanda hasn't synced today's shifts yet — fall back to yesterday's
+        # roster as a reference and flag the staleness
+        shifts_people = await conn.fetch(SHIFT_PEOPLE_SQL, yest)
+        roster_date = yest
+
+    # Labour rollup also uses today; fall back to yesterday if empty.
+    shifts_team = await conn.fetch("""
+        SELECT team, department_name, hours, cost_with_oncost, staff_count, report_date
+          FROM v_daily_labour_by_team
+         WHERE report_date = $1 ORDER BY cost_with_oncost DESC NULLS LAST
+    """, today)
+    rollup_date = today
+    if not shifts_team:
+        shifts_team = await conn.fetch("""
+            SELECT team, department_name, hours, cost_with_oncost, staff_count, report_date
+              FROM v_daily_labour_by_team
+             WHERE report_date = $1 ORDER BY cost_with_oncost DESC NULLS LAST
+        """, yest)
+        rollup_date = yest
+    sht = shifts_team
+    shift_date = rollup_date
 
     # Yesterday's sales (the only ratio we show now)
     sales_rows = await conn.fetch("""
@@ -434,24 +468,49 @@ async def main():
     out.append(f'<p style="{STY["empty"]}">Tide times: source integration pending (no free '
                'API responded without auth).</p>')
 
+    def nights_summary(rows, kind):
+        """Bookings × total nights summary line."""
+        if not rows:
+            return ''
+        if kind == 'stay':
+            # nights remaining = checkout − today
+            n = sum((r['checkout_date'] - today).days for r in rows)
+            return f'<strong>{len(rows)}</strong> bookings · <strong>{n}</strong> nights remaining'
+        else:
+            n = sum(r['nights'] or 0 for r in rows)
+            return f'<strong>{len(rows)}</strong> bookings · <strong>{n}</strong> nights total'
+
+    def alloc_badge(sib_count):
+        if sib_count and sib_count > 1:
+            return (' <span style="color:#888;font-size:11px;'
+                    'background:#f3f4f6;padding:1px 5px;border-radius:3px" '
+                    f'title="Total split across {sib_count} sibling rooms">'
+                    f'÷{sib_count}</span>')
+        return ''
+
     # Arrivals
+    cross_ids = {x['booking_id'] for x in cross}
     if arrivals:
-        cross_ids = {x['booking_id'] for x in cross}
         rows = []
         for a in arrivals:
             star = ' ★' if a['id'] in cross_ids else ''
             src = source_label(a['source'])
             src_html = f'<span style="color:#888;font-size:12px">{h(src)}</span>' if src else ''
+            nights_cell = f'{a["nights"]}n'
             rows.append(
                 f'<tr>'
                 f'<td style="{STY["td"]}"><strong>{h(a["guest_name"])}</strong>{star}</td>'
                 f'<td style="{STY["td"]}">{h(a["room"])}</td>'
-                f'<td style="{STY["td"]}">{pay_badge(a["payment_status"], a["gross_amount"])}</td>'
+                f'<td style="{STY["td"]};text-align:center">{nights_cell}</td>'
+                f'<td style="{STY["td"]}">{pay_badge(a["payment_status"], a["gross_amount"])}'
+                f'{alloc_badge(a.get("sib_count"))}</td>'
                 f'<td style="{STY["td"]}">{src_html}</td>'
                 f'</tr>')
-        body = (f'<table style="{STY["tbl"]}">'
+        body = (f'<p style="color:#666;font-size:13px;margin:0 0 6px 0">{nights_summary(arrivals, "arr")}</p>'
+                f'<table style="{STY["tbl"]}">'
                 f'<tr><th style="{STY["th"]}">Guest</th>'
                 f'<th style="{STY["th"]}">Room</th>'
+                f'<th style="{STY["th"]};text-align:center">Nights</th>'
                 f'<th style="{STY["th"]}">Payment</th>'
                 f'<th style="{STY["th"]}">Source</th></tr>'
                 + '\n'.join(rows) + '</table>')
@@ -461,19 +520,22 @@ async def main():
 
     # Stay-throughs
     if staythroughs:
-        cross_ids = {x['booking_id'] for x in cross}
         rows = []
         for s in staythroughs:
             star = ' ★' if s['id'] in cross_ids else ''
+            remaining = (s['checkout_date'] - today).days
             rows.append(
                 f'<tr>'
                 f'<td style="{STY["td"]}"><strong>{h(s["guest_name"])}</strong>{star}</td>'
                 f'<td style="{STY["td"]}">{h(s["room"])}</td>'
+                f'<td style="{STY["td"]};text-align:center">{remaining}n</td>'
                 f'<td style="{STY["td"]}">checks out <strong>{fmt_day(s["checkout_date"])}</strong></td>'
                 f'</tr>')
-        body = (f'<table style="{STY["tbl"]}">'
+        body = (f'<p style="color:#666;font-size:13px;margin:0 0 6px 0">{nights_summary(staythroughs, "stay")}</p>'
+                f'<table style="{STY["tbl"]}">'
                 f'<tr><th style="{STY["th"]}">Guest</th>'
                 f'<th style="{STY["th"]}">Room</th>'
+                f'<th style="{STY["th"]};text-align:center">Left</th>'
                 f'<th style="{STY["th"]}">Departing</th></tr>'
                 + '\n'.join(rows) + '</table>')
     else:
@@ -489,11 +551,15 @@ async def main():
                 f'<tr>'
                 f'<td style="{STY["td"]}"><strong>{h(d["guest_name"])}</strong></td>'
                 f'<td style="{STY["td"]}">{h(d["room"])}</td>'
-                f'<td style="{STY["td"]}">{pay_badge(d["payment_status"], amt)}</td>'
+                f'<td style="{STY["td"]};text-align:center">{d["nights"]}n</td>'
+                f'<td style="{STY["td"]}">{pay_badge(d["payment_status"], amt)}'
+                f'{alloc_badge(d.get("sib_count"))}</td>'
                 f'</tr>')
-        body = (f'<table style="{STY["tbl"]}">'
+        body = (f'<p style="color:#666;font-size:13px;margin:0 0 6px 0">{nights_summary(departures, "dep")}</p>'
+                f'<table style="{STY["tbl"]}">'
                 f'<tr><th style="{STY["th"]}">Guest</th>'
                 f'<th style="{STY["th"]}">Room</th>'
+                f'<th style="{STY["th"]};text-align:center">Stay</th>'
                 f'<th style="{STY["th"]}">Payment</th></tr>'
                 + '\n'.join(rows) + '</table>')
     else:
@@ -567,96 +633,84 @@ async def main():
         body = f'<table style="{STY["tbl"]}">' + '\n'.join(rows) + '</table>'
         out.append(section('VIP — staying AND dining tonight', len(cross), body))
 
-    # Staff roster by service period (breakfast / lunch / dinner / housekeeping / cafe)
-    #   - Breakfast = pub kitchen+FOH starting before 10:00
-    #   - Lunch     = pub kitchen+FOH starting 10:00–14:00
-    #   - Dinner    = pub kitchen+FOH starting 14:00 or later
-    #   - Housekeeping = team='accommodation' (any time)
-    #   - Cafe         = team='cafe' (any time)
-    buckets = {
-        'Breakfast — Kitchen':   [], 'Breakfast — Front of house': [],
-        'Lunch — Kitchen':       [], 'Lunch — Front of house':     [],
-        'Dinner — Kitchen':      [], 'Dinner — Front of house':    [],
-        'Housekeeping':          [],
-        'Cafe':                  [],
+    # Roster — TODAY (the day ahead). One row per department; each shift as
+    # its own column; cost-per-row at the end. Total + sales target at the
+    # bottom.
+    DEPT_LABELS = {
+        'kitchen':        'Kitchen',
+        'front_of_house': 'Front of house',
+        'accommodation':  'Housekeeping',
+        'cafe':           'Cafe',
     }
+    dept_shifts = {k: [] for k in DEPT_LABELS}
     for p in shifts_people:
         team = (p['team'] or '').lower()
-        sh = p['start_hr']
-        label_team = 'Kitchen' if team == 'kitchen' else 'Front of house'
-        if team == 'accommodation':
-            buckets['Housekeeping'].append(p)
-        elif team == 'cafe':
-            buckets['Cafe'].append(p)
-        elif team in ('kitchen', 'front_of_house'):
-            if sh is None:
-                period = 'Dinner'
-            elif sh < 10:
-                period = 'Breakfast'
-            elif sh < 14:
-                period = 'Lunch'
-            else:
-                period = 'Dinner'
-            buckets[f'{period} — {label_team}'].append(p)
+        if team in dept_shifts:
+            dept_shifts[team].append(p)
 
-    def fmt_person(p):
-        nm = (p['name'] or '?').replace('  ', ' ').strip()
-        if p['start_h'] and p['end_h']:
-            return f'<strong>{h(nm)}</strong> <span style="color:#666">{h(p["start_h"])}–{h(p["end_h"])}</span>'
-        return f'<strong>{h(nm)}</strong> <span style="color:#999">(no times)</span>'
+    max_cols = max((len(v) for v in dept_shifts.values()), default=0)
+    today_target_pub  = target_map.get('malthouse', 0)
+    today_target_cafe = target_map.get('sandwich', 0)
+    today_target_sales = today_target_pub + today_target_cafe
 
-    roster_rows = []
-    for label, people in buckets.items():
-        if not people:
-            continue
-        cell = ' · '.join(fmt_person(p) for p in people)
-        roster_rows.append(
-            f'<tr>'
-            f'<td style="{STY["td"]};white-space:nowrap"><strong>{h(label)}</strong></td>'
-            f'<td style="{STY["td"]}">{cell}</td>'
-            f'<td style="{STY["td"]};text-align:right;color:#666">{len(people)}</td>'
-            f'</tr>')
-    if roster_rows:
-        body = (f'<table style="{STY["tbl"]}">'
-                f'<tr><th style="{STY["th"]}">Service</th>'
-                f'<th style="{STY["th"]}">On shift</th>'
-                f'<th style="{STY["th"]};text-align:right">N</th></tr>'
-                + '\n'.join(roster_rows) + '</table>')
+    if max_cols == 0:
+        body = f'<p style="{STY["empty"]}">Tanda has not synced any shifts for {fmt_day(roster_date)} yet.</p>'
     else:
-        body = f'<p style="{STY["empty"]}">No shifts logged for {fmt_day(yest)}.</p>'
-    out.append(section(f'Roster — {fmt_day(yest)}', None, body))
+        def cell_for(p):
+            if not p:
+                return f'<td style="{STY["td"]};color:#ccc">—</td>'
+            nm = (p['name'] or '?').replace('  ', ' ').strip()
+            times = (f'{h(p["start_h"])}–{h(p["end_h"])}'
+                     if p['start_h'] and p['end_h'] else
+                     '<span style="color:#999">no times</span>')
+            return (f'<td style="{STY["td"]};white-space:nowrap">'
+                    f'<strong>{h(nm)}</strong><br>'
+                    f'<span style="color:#666;font-size:12px">{times}</span></td>')
 
-    # Hours/cost rollup by team
-    if sht:
-        total_h = total_c = total_s = 0
         rows = []
-        for s in sht:
-            total_h += float(s['hours'] or 0)
-            total_c += float(s['cost_with_oncost'] or 0)
-            total_s += int(s['staff_count'] or 0)
+        grand_cost = 0.0
+        for team_key, label in DEPT_LABELS.items():
+            people = dept_shifts[team_key]
+            dept_cost = sum(float(p['cost_planned'] or 0) for p in people)
+            grand_cost += dept_cost
+            cells = ''.join(cell_for(p if i < len(people) else None)
+                            for i, p in enumerate(people + [None] * (max_cols - len(people))))
             rows.append(
                 f'<tr>'
-                f'<td style="{STY["td"]}"><strong>{h(s["team"])}</strong></td>'
-                f'<td style="{STY["td"]}">{h(s["department_name"])}</td>'
-                f'<td style="{STY["td"]}">{float(s["hours"] or 0):.2f}h</td>'
-                f'<td style="{STY["td"]}">£{float(s["cost_with_oncost"] or 0):,.2f}</td>'
-                f'<td style="{STY["td"]}">{s["staff_count"] or 0}</td>'
+                f'<td style="{STY["td"]};white-space:nowrap"><strong>{h(label)}</strong></td>'
+                f'{cells}'
+                f'<td style="{STY["td"]};text-align:right;white-space:nowrap">'
+                f'<strong>£{dept_cost:,.0f}</strong></td>'
                 f'</tr>')
+
+        # Total + sales target rows
         rows.append(
             f'<tr style="background:#f8f8f8">'
-            f'<td style="{STY["td"]}" colspan="2"><strong>Total — {fmt_day(shift_date)}</strong></td>'
-            f'<td style="{STY["td"]}"><strong>{total_h:.2f}h</strong></td>'
-            f'<td style="{STY["td"]}"><strong>£{total_c:,.2f}</strong></td>'
-            f'<td style="{STY["td"]}"><strong>{total_s}</strong></td>'
+            f'<td style="{STY["td"]}"><strong>Labour total</strong></td>'
+            f'<td style="{STY["td"]};color:#777;font-size:12px" colspan="{max_cols}">planned for {fmt_day(roster_date)}</td>'
+            f'<td style="{STY["td"]};text-align:right"><strong>£{grand_cost:,.0f}</strong></td>'
             f'</tr>')
-        body = (f'<table style="{STY["tbl"]}">'
-                f'<tr><th style="{STY["th"]}">Team</th>'
-                f'<th style="{STY["th"]}">Dept</th>'
-                f'<th style="{STY["th"]}">Hours</th>'
-                f'<th style="{STY["th"]}">Cost</th>'
-                f'<th style="{STY["th"]}">Staff</th></tr>'
-                + '\n'.join(rows) + '</table>')
-        out.append(section(f'Labour rollup — {fmt_day(shift_date)}', None, body))
+        if today_target_sales > 0:
+            tgt_ratio = grand_cost / today_target_sales * 100
+            tgt_colour = '#dc2626' if tgt_ratio > 30 else '#16a34a'
+            rows.append(
+                f'<tr style="background:#f8f8f8">'
+                f'<td style="{STY["td"]}"><strong>Sales target</strong></td>'
+                f'<td style="{STY["td"]};color:#777;font-size:12px" colspan="{max_cols}">'
+                f'avg same day-of-week × 1.05 · ratio if hit: '
+                f'<span style="color:{tgt_colour};font-weight:bold">{tgt_ratio:.1f}%</span></td>'
+                f'<td style="{STY["td"]};text-align:right"><strong>£{today_target_sales:,.0f}</strong></td>'
+                f'</tr>')
+
+        header = (f'<tr><th style="{STY["th"]}">Dept</th>'
+                  + ''.join(f'<th style="{STY["th"]}">Shift {i+1}</th>' for i in range(max_cols))
+                  + f'<th style="{STY["th"]};text-align:right">Cost</th></tr>')
+        body = (f'<table style="{STY["tbl"]}">' + header + '\n'.join(rows) + '</table>')
+
+    roster_title = f'Roster — {fmt_day(roster_date)}'
+    if roster_date != today:
+        roster_title += " (today's not yet synced — yesterday's shown)"
+    out.append(section(roster_title, None, body))
 
     # Cost/income ratio — YESTERDAY (Jo's preferred lens) + budget + target
     pub_cost = sum(float(s['cost_with_oncost'] or 0) for s in sht
