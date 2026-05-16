@@ -74,15 +74,45 @@ TOOL_SCHEMA = {
     "required": ["lines"]
 }
 
+async def log_ai_usage(conn, model, usage, *, service, trace):
+    """Write Anthropic usage (including prompt-cache stats) to ai_usage.
+    Silent on failure — observability shouldn't block extraction."""
+    if not usage:
+        return
+    try:
+        await conn.execute("""
+            INSERT INTO ai_usage
+              (trace_id, task_type, model_used, tier,
+               prompt_tokens, completion_tokens,
+               cache_creation_tokens, cache_read_tokens,
+               service, realm, provider, cached)
+            VALUES ($1, 'invoice.line_items', $2, 'cloud',
+                    $3, $4, $5, $6, $7, 'work', 'anthropic', $8)
+        """, trace, model,
+             usage.get("input_tokens", 0) or 0,
+             usage.get("output_tokens", 0) or 0,
+             usage.get("cache_creation_input_tokens", 0) or 0,
+             usage.get("cache_read_input_tokens", 0) or 0,
+             service,
+             bool(usage.get("cache_read_input_tokens")))
+    except Exception as e:
+        print(f"[usage-log] {service}: {e}")
+
+
 async def call_model(client, model, text):
     payload = {
         "model": model,
         "max_tokens": 2048,
-        "system": SYSTEM,
+        # System + tool are stable across all invoices → cache. Below the
+        # 2048-token Haiku minimum on its own, but the marker is harmless
+        # and kicks in for Sonnet escalations and any future prompt growth.
+        "system": [{"type": "text", "text": SYSTEM,
+                    "cache_control": {"type": "ephemeral"}}],
         "tools": [{
             "name": "record_line_items",
             "description": "Record every line item extracted from the invoice.",
             "input_schema": TOOL_SCHEMA,
+            "cache_control": {"type": "ephemeral"},
         }],
         "tool_choice": {"type": "tool", "name": "record_line_items"},
         "messages": [{"role": "user", "content": f"Invoice text:\n\n{text}"}],
@@ -274,6 +304,8 @@ async def main():
             if usage:
                 stats["haiku_in_tok"]  += usage.get("input_tokens", 0)
                 stats["haiku_out_tok"] += usage.get("output_tokens", 0)
+                await log_ai_usage(conn, MODEL_HAIKU, usage,
+                                   service="u61-line-items", trace=f"inv#{inv_id}")
             model_used = "haiku-4-5"
             confidence = 1.0
             ok, _, _ = validate(extracted, inv_total)
@@ -283,6 +315,8 @@ async def main():
                 if usage_s:
                     stats["sonnet_in_tok"]  += usage_s.get("input_tokens", 0)
                     stats["sonnet_out_tok"] += usage_s.get("output_tokens", 0)
+                    await log_ai_usage(conn, MODEL_SONNET, usage_s,
+                                       service="u61-line-items", trace=f"inv#{inv_id}")
                 ok_s, _, _ = validate(extracted_s, inv_total)
                 if ok_s:
                     extracted = extracted_s

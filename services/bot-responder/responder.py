@@ -27,7 +27,15 @@ PG_DSN_ADMIN = os.environ["PG_DSN"]        # postgres user — for whitelist + w
 VAULT_TOKEN  = os.environ["VAULT_TOKEN"]
 # PG_DSN_RO resolved at runtime from vault if not pre-set
 
-MODEL = "claude-haiku-4-5-20251001"
+MODEL = os.environ.get("BOT_RESPONDER_MODEL", "claude-haiku-4-5-20251001")
+# Bot-responder system + tools = ~4165 tokens. Empirically observed:
+#   - Sonnet 4.6 caches reliably at this size (cw=3808, cr=3808 on hit).
+#   - Haiku 4.5 does NOT cache below ~5000 tokens (threshold higher than
+#     the documented 2048 — verified 2026-05-16). Caching is a no-op.
+# To enable caching: override BOT_RESPONDER_MODEL with a Sonnet model id
+# Trade: Sonnet is ~3x slower, ~5x base input cost — but at >50% cache
+# hit (likely for stable system+tools) effective cost is comparable or
+# cheaper than Haiku, and quality is meaningfully higher.
 MAX_TOOL_ITERS = 6
 RESPONDER_NAME = "bot-responder"
 
@@ -289,6 +297,9 @@ async def main():
         last_reason = None
         last_detail = None
 
+        # Accumulate token usage across the tool-use loop
+        usage_total = {"in": 0, "out": 0, "cache_w": 0, "cache_r": 0}
+
         for _ in range(MAX_TOOL_ITERS):
             resp = client.messages.create(
                 model=MODEL,
@@ -297,6 +308,12 @@ async def main():
                 tools=tools,
                 messages=messages,
             )
+            u = getattr(resp, "usage", None)
+            if u is not None:
+                usage_total["in"]      += getattr(u, "input_tokens", 0) or 0
+                usage_total["out"]     += getattr(u, "output_tokens", 0) or 0
+                usage_total["cache_w"] += getattr(u, "cache_creation_input_tokens", 0) or 0
+                usage_total["cache_r"] += getattr(u, "cache_read_input_tokens", 0) or 0
             if resp.stop_reason == "end_turn":
                 # Collect text
                 parts = [b.text for b in resp.content if b.type == "text"]
@@ -359,6 +376,26 @@ async def main():
             final_text = "(iteration cap reached — escalating to human)"
 
         await ro_conn.close()
+
+        # Log Anthropic token usage (including prompt-cache stats) to ai_usage
+        try:
+            await conn.execute("""
+                INSERT INTO ai_usage
+                  (trace_id, task_type, model_used, tier,
+                   prompt_tokens, completion_tokens,
+                   cache_creation_tokens, cache_read_tokens,
+                   service, realm, provider, cached)
+                VALUES ($1, 'bot.responder', $2, 'cloud',
+                        $3, $4, $5, $6, 'bot-responder', $7, 'anthropic', $8)
+            """,
+                None,  # trace_id is UUID; bot-responder doesn't generate one
+                MODEL,
+                usage_total["in"], usage_total["out"],
+                usage_total["cache_w"], usage_total["cache_r"],
+                sender_realm,
+                bool(usage_total["cache_r"]))
+        except Exception as e:
+            print(f"[usage-log] failed: {e}", flush=True)
 
         if not final_text or "need" in final_text.lower() and "session" in final_text.lower() or final_text.startswith("("):
             # Escalation path
