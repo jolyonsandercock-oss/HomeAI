@@ -307,36 +307,60 @@ async def main():
 
     kpi = await conn.fetchrow("SELECT * FROM v_today_kpis_work")
 
-    shifts_today = await conn.fetch("""
-        SELECT team, department_name, hours, cost_with_oncost, staff_count, report_date
-          FROM v_daily_labour_by_team
-         WHERE report_date = $1 ORDER BY cost_with_oncost DESC NULLS LAST
-    """, today)
-    shifts_yest = await conn.fetch("""
-        SELECT team, department_name, hours, cost_with_oncost, staff_count, report_date
-          FROM v_daily_labour_by_team
-         WHERE report_date = $1 ORDER BY cost_with_oncost DESC NULLS LAST
-    """, today - timedelta(days=1))
-    sht = shifts_today or shifts_yest
-    shift_date = sht[0]['report_date'] if sht else today
+    # Cost/income ratio + shift roster anchored on YESTERDAY (Jo 2026-05-16:
+    # "make the cost/income for the previous day").
+    yest = today - timedelta(days=1)
 
-    # Today's sales for live ratio (fall back to yesterday if today not synced)
-    sales_today = await conn.fetch("""
+    shifts_team = await conn.fetch("""
+        SELECT team, department_name, hours, cost_with_oncost, staff_count, report_date
+          FROM v_daily_labour_by_team
+         WHERE report_date = $1 ORDER BY cost_with_oncost DESC NULLS LAST
+    """, yest)
+    sht = shifts_team
+    shift_date = yest
+
+    # Per-person shifts yesterday, with names + start/end + team — for
+    # service-period roster (breakfast / lunch / dinner / housekeeping / cafe).
+    shifts_people = await conn.fetch("""
+        SELECT
+          COALESCE(NULLIF(u.preferred_name,''), u.full_name, 'unknown') AS name,
+          d.team,
+          to_char(s.start_time AT TIME ZONE 'Europe/London', 'HH24:MI') AS start_h,
+          to_char(s.end_time   AT TIME ZONE 'Europe/London', 'HH24:MI') AS end_h,
+          EXTRACT(HOUR FROM (s.start_time AT TIME ZONE 'Europe/London'))::int AS start_hr,
+          s.hours_worked
+          FROM workforce_shifts s
+          LEFT JOIN workforce_users u ON u.external_id = s.user_external_id
+          LEFT JOIN workforce_departments d ON d.external_id = s.department_external_id
+         WHERE s.shift_date = $1
+         ORDER BY s.start_time, name
+    """, yest)
+
+    # Yesterday's sales (the only ratio we show now)
+    sales_rows = await conn.fetch("""
         SELECT site, SUM(value)::numeric(10,2) net_sales
           FROM touchoffice_department_sales
          WHERE report_date = $1
          GROUP BY site
-    """, today)
-    sales_for_ratio = sales_today
-    if not sales_today:
-        sales_for_ratio = await conn.fetch("""
-            SELECT site, SUM(value)::numeric(10,2) net_sales
-              FROM touchoffice_department_sales
-             WHERE report_date = $1
-             GROUP BY site
-        """, today - timedelta(days=1))
-    sales_map = {r['site']: float(r['net_sales']) for r in sales_for_ratio}
-    sales_date = today if sales_today else (today - timedelta(days=1))
+    """, yest)
+    sales_map = {r['site']: float(r['net_sales']) for r in sales_rows}
+    sales_date = yest
+
+    # Target sales — last 8 same-DOW averages × 1.05 (push for growth).
+    # Target labour cost = 28% of target sales (Jo's amber = 30%).
+    dow_target_rows = await conn.fetch("""
+        WITH same_dow AS (
+          SELECT site, report_date, SUM(value) AS day_total
+            FROM touchoffice_department_sales
+           WHERE EXTRACT(DOW FROM report_date) = EXTRACT(DOW FROM $1::date)
+             AND report_date BETWEEN $1::date - INTERVAL '8 weeks' AND $1::date - INTERVAL '1 day'
+           GROUP BY site, report_date
+        )
+        SELECT site, ROUND(AVG(day_total)::numeric, 2) AS avg_dow
+          FROM same_dow GROUP BY site
+    """, yest)
+    target_map = {r['site']: float(r['avg_dow']) * 1.05 for r in dow_target_rows}
+    LABOUR_PCT_TARGET = 0.28  # decision: target = 28%, amber line = 30%
 
     deliveries = await conn.fetch("""
         SELECT v.id, v.vendor_name, v.vendor_domain, v.delivery_date,
@@ -543,7 +567,66 @@ async def main():
         body = f'<table style="{STY["tbl"]}">' + '\n'.join(rows) + '</table>'
         out.append(section('VIP — staying AND dining tonight', len(cross), body))
 
-    # Staff on shift
+    # Staff roster by service period (breakfast / lunch / dinner / housekeeping / cafe)
+    #   - Breakfast = pub kitchen+FOH starting before 10:00
+    #   - Lunch     = pub kitchen+FOH starting 10:00–14:00
+    #   - Dinner    = pub kitchen+FOH starting 14:00 or later
+    #   - Housekeeping = team='accommodation' (any time)
+    #   - Cafe         = team='cafe' (any time)
+    buckets = {
+        'Breakfast — Kitchen':   [], 'Breakfast — Front of house': [],
+        'Lunch — Kitchen':       [], 'Lunch — Front of house':     [],
+        'Dinner — Kitchen':      [], 'Dinner — Front of house':    [],
+        'Housekeeping':          [],
+        'Cafe':                  [],
+    }
+    for p in shifts_people:
+        team = (p['team'] or '').lower()
+        sh = p['start_hr']
+        label_team = 'Kitchen' if team == 'kitchen' else 'Front of house'
+        if team == 'accommodation':
+            buckets['Housekeeping'].append(p)
+        elif team == 'cafe':
+            buckets['Cafe'].append(p)
+        elif team in ('kitchen', 'front_of_house'):
+            if sh is None:
+                period = 'Dinner'
+            elif sh < 10:
+                period = 'Breakfast'
+            elif sh < 14:
+                period = 'Lunch'
+            else:
+                period = 'Dinner'
+            buckets[f'{period} — {label_team}'].append(p)
+
+    def fmt_person(p):
+        nm = (p['name'] or '?').replace('  ', ' ').strip()
+        if p['start_h'] and p['end_h']:
+            return f'<strong>{h(nm)}</strong> <span style="color:#666">{h(p["start_h"])}–{h(p["end_h"])}</span>'
+        return f'<strong>{h(nm)}</strong> <span style="color:#999">(no times)</span>'
+
+    roster_rows = []
+    for label, people in buckets.items():
+        if not people:
+            continue
+        cell = ' · '.join(fmt_person(p) for p in people)
+        roster_rows.append(
+            f'<tr>'
+            f'<td style="{STY["td"]};white-space:nowrap"><strong>{h(label)}</strong></td>'
+            f'<td style="{STY["td"]}">{cell}</td>'
+            f'<td style="{STY["td"]};text-align:right;color:#666">{len(people)}</td>'
+            f'</tr>')
+    if roster_rows:
+        body = (f'<table style="{STY["tbl"]}">'
+                f'<tr><th style="{STY["th"]}">Service</th>'
+                f'<th style="{STY["th"]}">On shift</th>'
+                f'<th style="{STY["th"]};text-align:right">N</th></tr>'
+                + '\n'.join(roster_rows) + '</table>')
+    else:
+        body = f'<p style="{STY["empty"]}">No shifts logged for {fmt_day(yest)}.</p>'
+    out.append(section(f'Roster — {fmt_day(yest)}', None, body))
+
+    # Hours/cost rollup by team
     if sht:
         total_h = total_c = total_s = 0
         rows = []
@@ -573,41 +656,84 @@ async def main():
                 f'<th style="{STY["th"]}">Cost</th>'
                 f'<th style="{STY["th"]}">Staff</th></tr>'
                 + '\n'.join(rows) + '</table>')
-        out.append(section(f'Staff on shift — {fmt_day(shift_date)}', None, body))
+        out.append(section(f'Labour rollup — {fmt_day(shift_date)}', None, body))
 
-    # Cost/income ratio
+    # Cost/income ratio — YESTERDAY (Jo's preferred lens) + budget + target
     pub_cost = sum(float(s['cost_with_oncost'] or 0) for s in sht
                    if (s['team'] or '').lower() in ('kitchen','front_of_house','accommodation'))
     cafe_cost = sum(float(s['cost_with_oncost'] or 0) for s in sht
                     if (s['team'] or '').lower() == 'cafe')
     pub_sales = sales_map.get('malthouse', 0)
     cafe_sales = sales_map.get('sandwich', 0)
+    pub_target = target_map.get('malthouse', 0)
+    cafe_target = target_map.get('sandwich', 0)
+    pub_budget_labour  = pub_target  * LABOUR_PCT_TARGET
+    cafe_budget_labour = cafe_target * LABOUR_PCT_TARGET
     total_cost = pub_cost + cafe_cost
     total_sales = pub_sales + cafe_sales
+    total_target = pub_target + cafe_target
+    total_budget_labour = pub_budget_labour + cafe_budget_labour
+
+    def vs(actual, target):
+        if target <= 0:
+            return '<span style="color:#777">—</span>'
+        diff = actual - target
+        if diff >= 0:
+            return (f'<span style="color:#16a34a;font-weight:bold">+£{diff:,.0f}</span> '
+                    f'<span style="color:#666;font-size:12px">vs target</span>')
+        return (f'<span style="color:#dc2626;font-weight:bold">−£{abs(diff):,.0f}</span> '
+                f'<span style="color:#666;font-size:12px">vs target</span>')
+
+    def vs_cost(actual, budget):
+        if budget <= 0:
+            return '<span style="color:#777">—</span>'
+        diff = actual - budget
+        # Under budget = green, over budget = red
+        if diff <= 0:
+            return (f'<span style="color:#16a34a;font-weight:bold">−£{abs(diff):,.0f}</span> '
+                    f'<span style="color:#666;font-size:12px">vs budget</span>')
+        return (f'<span style="color:#dc2626;font-weight:bold">+£{diff:,.0f}</span> '
+                f'<span style="color:#666;font-size:12px">vs budget</span>')
 
     body = (f'<p style="color:#666;font-size:13px;margin:0 0 6px 0">'
-            f'Staff cost (incl. on-cost) divided by net sales · sales for {fmt_day(sales_date)}'
+            f'Sales + labour for <strong>{fmt_day(yest)}</strong>. '
+            f'Target = avg sales same day-of-week (last 8 weeks) × 1.05. '
+            f'Budgeted labour = {int(LABOUR_PCT_TARGET*100)}% of target sales '
+            f'(amber line {fmt_pct(0.3, 1.0).split(">")[1].split("<")[0]} = 30%).'
             f'</p>'
             f'<table style="{STY["tbl"]}">'
-            f'<tr><th style="{STY["th"]}">Cost centre</th>'
-            f'<th style="{STY["th"]}">Cost</th>'
+            f'<tr><th style="{STY["th"]}">Centre</th>'
             f'<th style="{STY["th"]}">Sales</th>'
+            f'<th style="{STY["th"]}">Target</th>'
+            f'<th style="{STY["th"]}">Labour cost</th>'
+            f'<th style="{STY["th"]}">Budget</th>'
             f'<th style="{STY["th"]}">Ratio</th></tr>'
-            f'<tr><td style="{STY["td"]}"><strong>Pub</strong> (kitchen + FOH + accom)</td>'
-            f'<td style="{STY["td"]}">£{pub_cost:,.2f}</td>'
-            f'<td style="{STY["td"]}">£{pub_sales:,.2f}</td>'
+
+            f'<tr><td style="{STY["td"]}"><strong>Pub</strong><br>'
+            f'<span style="color:#888;font-size:12px">kitchen + FOH + accom</span></td>'
+            f'<td style="{STY["td"]}"><strong>£{pub_sales:,.0f}</strong><br>{vs(pub_sales, pub_target)}</td>'
+            f'<td style="{STY["td"]}">£{pub_target:,.0f}</td>'
+            f'<td style="{STY["td"]}"><strong>£{pub_cost:,.0f}</strong><br>{vs_cost(pub_cost, pub_budget_labour)}</td>'
+            f'<td style="{STY["td"]}">£{pub_budget_labour:,.0f}</td>'
             f'<td style="{STY["td"]}">{fmt_pct(pub_cost, pub_sales)}</td></tr>'
-            f'<tr><td style="{STY["td"]}"><strong>Cafe</strong> (cafe team)</td>'
-            f'<td style="{STY["td"]}">£{cafe_cost:,.2f}</td>'
-            f'<td style="{STY["td"]}">£{cafe_sales:,.2f}</td>'
+
+            f'<tr><td style="{STY["td"]}"><strong>Cafe</strong><br>'
+            f'<span style="color:#888;font-size:12px">cafe team</span></td>'
+            f'<td style="{STY["td"]}"><strong>£{cafe_sales:,.0f}</strong><br>{vs(cafe_sales, cafe_target)}</td>'
+            f'<td style="{STY["td"]}">£{cafe_target:,.0f}</td>'
+            f'<td style="{STY["td"]}"><strong>£{cafe_cost:,.0f}</strong><br>{vs_cost(cafe_cost, cafe_budget_labour)}</td>'
+            f'<td style="{STY["td"]}">£{cafe_budget_labour:,.0f}</td>'
             f'<td style="{STY["td"]}">{fmt_pct(cafe_cost, cafe_sales)}</td></tr>'
+
             f'<tr style="background:#f8f8f8">'
             f'<td style="{STY["td"]}"><strong>Combined</strong></td>'
-            f'<td style="{STY["td"]}"><strong>£{total_cost:,.2f}</strong></td>'
-            f'<td style="{STY["td"]}"><strong>£{total_sales:,.2f}</strong></td>'
+            f'<td style="{STY["td"]}"><strong>£{total_sales:,.0f}</strong><br>{vs(total_sales, total_target)}</td>'
+            f'<td style="{STY["td"]}"><strong>£{total_target:,.0f}</strong></td>'
+            f'<td style="{STY["td"]}"><strong>£{total_cost:,.0f}</strong><br>{vs_cost(total_cost, total_budget_labour)}</td>'
+            f'<td style="{STY["td"]}"><strong>£{total_budget_labour:,.0f}</strong></td>'
             f'<td style="{STY["td"]}">{fmt_pct(total_cost, total_sales)}</td></tr>'
             f'</table>')
-    out.append(section('Staff cost / income', None, body))
+    out.append(section(f'Sales + labour vs target — {fmt_day(yest)}', None, body))
 
     # Deliveries
     if deliveries:
