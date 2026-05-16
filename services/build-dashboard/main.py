@@ -1324,6 +1324,17 @@ async def mobile_page():
     return FileResponse(str(STATIC / "m.html"))
 
 
+# ── U85 Phase D1 — Desktop view (canary) ──────────────────────────
+@app.get("/desktop")
+async def desktop_root():
+    return RedirectResponse(url="/desktop/work/today", status_code=302)
+
+
+@app.get("/desktop/work/today")
+async def desktop_work_today_page():
+    return FileResponse(str(STATIC / "desktop-work-today.html"))
+
+
 # ── U84 Phase 2 — Today screens ───────────────────────────────────
 @app.get("/work/today")
 async def work_today_page():
