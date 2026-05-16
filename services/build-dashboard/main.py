@@ -5506,7 +5506,9 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         -- U84 Phase 3 additions (work tabs)
                         'work_docs_kpis','work_staff_kpis','work_email_kpis',
                         -- U84 Phase 4 additions (private tabs)
-                        'private_family_kpis','private_docs_kpis')
+                        'private_family_kpis','private_docs_kpis',
+                        -- U84 Phase 7 additions (telemetry)
+                        'route_telemetry_7d')
          ORDER BY slug
     """)
     out = []
