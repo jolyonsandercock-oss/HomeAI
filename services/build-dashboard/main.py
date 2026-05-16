@@ -5721,7 +5721,10 @@ async def _load_finance_slugs(conn) -> list[dict]:
                         'today_bookings','today_pub_sales',
                         -- U85 Phase D3 (docs/vendors)
                         'recent_invoices','vendor_site_rules',
-                        'noise_senders','cost_centre_breakdown')
+                        'noise_senders','cost_centre_breakdown',
+                        -- U85 Phase D9 (placeholder slugs wired)
+                        'children','email_tasks_open','bot_instructions_pending',
+                        'labour_recent_14d','ghost_shifts_recent','daily_gp_recent')
          ORDER BY slug
     """)
     out = []

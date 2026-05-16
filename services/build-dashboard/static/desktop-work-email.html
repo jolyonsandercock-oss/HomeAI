@@ -122,7 +122,7 @@
 
 <section id="E01" data-section-code="E01"
          class="glass rounded-lg p-4 mb-4"
-         x-data="desktopSection({ code: 'E01', name: 'Email tasks open',  })"
+         x-data="desktopSection({ code: 'E01', name: 'Email tasks open', slug: 'email_tasks_open' })"
          x-init="init()" aria-labelledby="E01-h">
   <header class="flex items-baseline justify-between mb-3">
     <h2 id="E01-h" class="text-base font-semibold">
@@ -131,12 +131,31 @@
     </h2>
     <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
   </header>
-  <div class="text-sm text-slate-400 py-2">Email-tasks slug TBD — wire v_email_tasks_open</div>
+
+  <template x-if="loading"><div class="skel h-32"></div></template>
+  <template x-if="error"><div class="text-red-300 text-sm">Couldn't load: <span x-text="error"></span></div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length === 0">
+    <div class="text-slate-400 text-sm py-2">No rows.</div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length > 0">
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead class="text-xs uppercase tracking-wider text-slate-500">
+        <tr><template x-for="k in Object.keys(data.rows[0])" :key="k">
+          <th class="text-left px-2 py-2" x-text="k"></th></template></tr></thead>
+      <tbody><template x-for="(r, i) in data.rows.slice(0, 100)" :key="i">
+        <tr class="border-t border-white/5">
+          <template x-for="k in Object.keys(data.rows[0])" :key="k">
+            <td class="px-2 py-2"
+                :class="typeof r[k] === 'number' ? 'mono text-right' : 'text-zinc-100'"
+                x-text="r[k] === null ? '—' : (typeof r[k] === 'object' ? JSON.stringify(r[k]) : r[k])"></td>
+          </template></tr></template></tbody></table>
+      <div class="text-xs text-slate-500 mt-2"
+           x-text="data.rows.length > 100 ? `${data.rows.length} rows, first 100 shown` : `${data.rows.length} row(s)`"></div>
+    </div></template>
 </section>
 
 <section id="E02" data-section-code="E02"
          class="glass rounded-lg p-4 mb-4"
-         x-data="desktopSection({ code: 'E02', name: 'Pending instructions',  })"
+         x-data="desktopSection({ code: 'E02', name: 'Pending instructions', slug: 'bot_instructions_pending' })"
          x-init="init()" aria-labelledby="E02-h">
   <header class="flex items-baseline justify-between mb-3">
     <h2 id="E02-h" class="text-base font-semibold">
@@ -145,7 +164,26 @@
     </h2>
     <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
   </header>
-  <div class="text-sm text-slate-400 py-2">bot_instructions slug TBD</div>
+
+  <template x-if="loading"><div class="skel h-32"></div></template>
+  <template x-if="error"><div class="text-red-300 text-sm">Couldn't load: <span x-text="error"></span></div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length === 0">
+    <div class="text-slate-400 text-sm py-2">No rows.</div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length > 0">
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead class="text-xs uppercase tracking-wider text-slate-500">
+        <tr><template x-for="k in Object.keys(data.rows[0])" :key="k">
+          <th class="text-left px-2 py-2" x-text="k"></th></template></tr></thead>
+      <tbody><template x-for="(r, i) in data.rows.slice(0, 100)" :key="i">
+        <tr class="border-t border-white/5">
+          <template x-for="k in Object.keys(data.rows[0])" :key="k">
+            <td class="px-2 py-2"
+                :class="typeof r[k] === 'number' ? 'mono text-right' : 'text-zinc-100'"
+                x-text="r[k] === null ? '—' : (typeof r[k] === 'object' ? JSON.stringify(r[k]) : r[k])"></td>
+          </template></tr></template></tbody></table>
+      <div class="text-xs text-slate-500 mt-2"
+           x-text="data.rows.length > 100 ? `${data.rows.length} rows, first 100 shown` : `${data.rows.length} row(s)`"></div>
+    </div></template>
 </section>
   </main>
 </div>

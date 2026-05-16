@@ -114,7 +114,7 @@
       </ul></details>
     <div class="mt-3 pt-3 border-t border-white/5">
       <div class="px-2 py-1 text-xs uppercase tracking-wider text-zinc-500">On this page</div>
-      <ul class="space-y-0.5 ml-1"><li><a href="#L01" class="rail-link cursor-pointer" :class="{'active': isActive('L01')}" @click.prevent="scrollTo('L01')"><span class="rail-code">§L01</span><span>Labour by team</span></a></li><li><a href="#L02" class="rail-link cursor-pointer" :class="{'active': isActive('L02')}" @click.prevent="scrollTo('L02')"><span class="rail-code">§L02</span><span>Ghost shifts</span></a></li></ul>
+      <ul class="space-y-0.5 ml-1"><li><a href="#L01" class="rail-link cursor-pointer" :class="{'active': isActive('L01')}" @click.prevent="scrollTo('L01')"><span class="rail-code">§L01</span><span>Labour by team · 14d</span></a></li><li><a href="#L02" class="rail-link cursor-pointer" :class="{'active': isActive('L02')}" @click.prevent="scrollTo('L02')"><span class="rail-code">§L02</span><span>Ghost shifts</span></a></li></ul>
     </div>
   </aside>
   <div x-show="railOpen && !isWide" x-cloak class="fixed inset-0 top-[88px] z-20 bg-black/40 lg:hidden" @click="closeRail()"></div>
@@ -122,21 +122,40 @@
 
 <section id="L01" data-section-code="L01"
          class="glass rounded-lg p-4 mb-4"
-         x-data="desktopSection({ code: 'L01', name: 'Labour by team',  })"
+         x-data="desktopSection({ code: 'L01', name: 'Labour by team · 14d', slug: 'labour_recent_14d' })"
          x-init="init()" aria-labelledby="L01-h">
   <header class="flex items-baseline justify-between mb-3">
     <h2 id="L01-h" class="text-base font-semibold">
       <span class="mono text-xs text-amber-300">§L01</span>
-      Labour by team
+      Labour by team · 14d
     </h2>
     <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
   </header>
-  <div class="text-sm text-slate-400 py-2">Labour-by-team slug TBD — wire v_daily_labour_by_team</div>
+
+  <template x-if="loading"><div class="skel h-32"></div></template>
+  <template x-if="error"><div class="text-red-300 text-sm">Couldn't load: <span x-text="error"></span></div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length === 0">
+    <div class="text-slate-400 text-sm py-2">No rows.</div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length > 0">
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead class="text-xs uppercase tracking-wider text-slate-500">
+        <tr><template x-for="k in Object.keys(data.rows[0])" :key="k">
+          <th class="text-left px-2 py-2" x-text="k"></th></template></tr></thead>
+      <tbody><template x-for="(r, i) in data.rows.slice(0, 100)" :key="i">
+        <tr class="border-t border-white/5">
+          <template x-for="k in Object.keys(data.rows[0])" :key="k">
+            <td class="px-2 py-2"
+                :class="typeof r[k] === 'number' ? 'mono text-right' : 'text-zinc-100'"
+                x-text="r[k] === null ? '—' : (typeof r[k] === 'object' ? JSON.stringify(r[k]) : r[k])"></td>
+          </template></tr></template></tbody></table>
+      <div class="text-xs text-slate-500 mt-2"
+           x-text="data.rows.length > 100 ? `${data.rows.length} rows, first 100 shown` : `${data.rows.length} row(s)`"></div>
+    </div></template>
 </section>
 
 <section id="L02" data-section-code="L02"
          class="glass rounded-lg p-4 mb-4"
-         x-data="desktopSection({ code: 'L02', name: 'Ghost shifts',  })"
+         x-data="desktopSection({ code: 'L02', name: 'Ghost shifts', slug: 'ghost_shifts_recent' })"
          x-init="init()" aria-labelledby="L02-h">
   <header class="flex items-baseline justify-between mb-3">
     <h2 id="L02-h" class="text-base font-semibold">
@@ -145,7 +164,26 @@
     </h2>
     <span class="text-xs text-slate-500" x-text="lastRefresh"></span>
   </header>
-  <div class="text-sm text-slate-400 py-2">Ghost-shifts slug TBD — wire mart.v_ghost_shifts</div>
+
+  <template x-if="loading"><div class="skel h-32"></div></template>
+  <template x-if="error"><div class="text-red-300 text-sm">Couldn't load: <span x-text="error"></span></div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length === 0">
+    <div class="text-slate-400 text-sm py-2">No rows.</div></template>
+  <template x-if="!loading && !error && data && data.rows && data.rows.length > 0">
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead class="text-xs uppercase tracking-wider text-slate-500">
+        <tr><template x-for="k in Object.keys(data.rows[0])" :key="k">
+          <th class="text-left px-2 py-2" x-text="k"></th></template></tr></thead>
+      <tbody><template x-for="(r, i) in data.rows.slice(0, 100)" :key="i">
+        <tr class="border-t border-white/5">
+          <template x-for="k in Object.keys(data.rows[0])" :key="k">
+            <td class="px-2 py-2"
+                :class="typeof r[k] === 'number' ? 'mono text-right' : 'text-zinc-100'"
+                x-text="r[k] === null ? '—' : (typeof r[k] === 'object' ? JSON.stringify(r[k]) : r[k])"></td>
+          </template></tr></template></tbody></table>
+      <div class="text-xs text-slate-500 mt-2"
+           x-text="data.rows.length > 100 ? `${data.rows.length} rows, first 100 shown` : `${data.rows.length} row(s)`"></div>
+    </div></template>
 </section>
   </main>
 </div>

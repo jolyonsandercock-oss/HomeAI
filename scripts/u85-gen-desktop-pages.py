@@ -36,24 +36,18 @@ SECTIONS = {
   'C02': {'name': 'Credit cards',        'slug': 'credit_card_status',   'kind': 'table'},
   'C05': {'name': 'Inter-entity owings', 'slug': 'owings_summary',       'kind': 'table'},
   # Sales / EPOS
-  'S01': {'name': 'Daily GP',            'slug': None,                   'kind': 'note',
-          'note': 'Daily GP slug TBD — wire v_daily_gp in next pass'},
+  'S01': {'name': 'Daily GP',            'slug': 'daily_gp_recent',      'kind': 'table'},
   # Labour / staff
-  'L01': {'name': 'Labour by team',      'slug': None,                   'kind': 'note',
-          'note': 'Labour-by-team slug TBD — wire v_daily_labour_by_team'},
-  'L02': {'name': 'Ghost shifts',        'slug': None,                   'kind': 'note',
-          'note': 'Ghost-shifts slug TBD — wire mart.v_ghost_shifts'},
+  'L01': {'name': 'Labour by team · 14d','slug': 'labour_recent_14d',    'kind': 'table'},
+  'L02': {'name': 'Ghost shifts',        'slug': 'ghost_shifts_recent',  'kind': 'table'},
   # Email
-  'E01': {'name': 'Email tasks open',    'slug': None,                   'kind': 'note',
-          'note': 'Email-tasks slug TBD — wire v_email_tasks_open'},
-  'E02': {'name': 'Pending instructions','slug': None,                   'kind': 'note',
-          'note': 'bot_instructions slug TBD'},
+  'E01': {'name': 'Email tasks open',    'slug': 'email_tasks_open',     'kind': 'table'},
+  'E02': {'name': 'Pending instructions','slug': 'bot_instructions_pending', 'kind': 'table'},
   # Docs / private
   'D01': {'name': 'Mortgages',           'slug': 'mortgages_all',        'kind': 'table'},
   'D02': {'name': 'Mortgage coverage',   'slug': 'mortgage_coverage',    'kind': 'table'},
   'D03': {'name': 'Vehicles',            'slug': 'private_vehicles',     'kind': 'table'},
-  'D04': {'name': 'Children',            'slug': None,                   'kind': 'note',
-          'note': 'Children slug TBD'},
+  'D04': {'name': 'Children',            'slug': 'children',             'kind': 'table'},
   'D06': {'name': 'Net worth',           'slug': 'net_worth_summary',    'kind': 'table'},
   # Build
   'B01': {'name': 'AI pipeline status',  'slug': 'build_pipeline_status','kind': 'table'},
