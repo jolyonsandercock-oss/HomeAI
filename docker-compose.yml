@@ -449,6 +449,20 @@ services:
   # Long-running idle container; host cron invokes responder.py every 5 min.
   # ai-internal: vault, postgres, google-fetch.
   # ai-egress:  api.anthropic.com, api.telegram.org.
+  wa-bridge:
+    build: ./services/wa-bridge
+    container_name: homeai-wa-bridge
+    networks: [ai-internal, ai-egress]
+    ports: ["8770:8770"]
+    volumes:
+      - /home_ai/data/wa-profiles:/wa-profiles
+    environment:
+      PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
+      WA_PROFILE_DIR: "/wa-profiles"
+      WA_SEND_GAP_S: "6"
+      WA_HOURLY_CAP: "30"
+    restart: unless-stopped
+
   homeai-mcp:
     build: ./services/homeai-mcp
     container_name: homeai-mcp
