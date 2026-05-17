@@ -49,8 +49,8 @@ with sync_playwright() as p:
     # warnings" to skip incomplete rows (which block the export), then
     # export everything. We narrow to a date window inside our DB after parse.
     page.goto('https://app.dext.com/delta/costs/archive',
-              wait_until='domcontentloaded', timeout=30000)
-    page.wait_for_load_state('networkidle', timeout=20000)
+              wait_until='commit', timeout=60000)
+    page.wait_for_load_state('networkidle', timeout=30000)
 
     if 'login' in page.url.lower() or 'sign-in' in page.url.lower():
         print(f'ERR: bounced to {page.url} — session expired, re-pair', file=sys.stderr)
