@@ -15,6 +15,9 @@ VENV=/home_ai/data/dext-venv
 CHROME=/home_ai/data/playwright-browsers/chromium-1148/chrome-linux/chrome
 mkdir -p "$EXPORT_DIR"
 
+# Clear any orphan Singleton locks from a previous run that crashed
+rm -f "$PROFILE_DIR/Singleton"* 2>/dev/null || true
+
 [ -x "$VENV/bin/python" ] || { echo "venv missing — pair first"; exit 1; }
 [ -x "$CHROME" ]          || { echo "chromium missing at $CHROME"; exit 1; }
 [ -d "$PROFILE_DIR" ] && [ -n "$(ls -A "$PROFILE_DIR" 2>/dev/null)" ] || {
@@ -48,15 +51,21 @@ with sync_playwright() as p:
     # The funnel has no date filter. Strategy: apply "Without extraction
     # warnings" to skip incomplete rows (which block the export), then
     # export everything. We narrow to a date window inside our DB after parse.
+    # Use 'load' (window onload) — fully-loaded resources. Dext SPA still
+    # bootstraps after this, so wait for a specific button to appear.
     page.goto('https://app.dext.com/delta/costs/archive',
-              wait_until='commit', timeout=60000)
-    # Don't wait_for_load_state(networkidle) — Dext has constant background
-    # WS/telemetry traffic so it never goes idle. Wait for a specific
-    # element that indicates the page is interactive instead.
+              wait_until='load', timeout=90000)
+    # Hard wait for the SPA to finish hydrating
+    print('  (waiting for Dext SPA to hydrate…)')
     try:
-        page.wait_for_selector('button:has-text("Export all")', timeout=30000)
-    except Exception:
-        page.wait_for_timeout(5000)
+        page.wait_for_selector('button:has-text("Export all")', timeout=90000, state='visible')
+        print('  Export all button visible — page is ready')
+    except Exception as e:
+        print(f'  ! Export all never appeared after 90s: {e}')
+        # Save state for debugging
+        page.screenshot(path=OUT.replace('.csv', '-NOBUTTON.png'), full_page=True)
+        open(OUT.replace('.csv', '-NOBUTTON.html'), 'w').write(page.content())
+        raise
 
     if 'login' in page.url.lower() or 'sign-in' in page.url.lower():
         print(f'ERR: bounced to {page.url} — session expired, re-pair', file=sys.stderr)
