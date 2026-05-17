@@ -35,12 +35,15 @@ def vault(p):
     return json.loads(r.read())["data"]["data"]
 
 def tg_send(text):
+    # Plain text — Telegram Markdown parser is fragile with em-dashes,
+    # underscores in slug names, dots in template-ids, etc. The body of
+    # a guest message contains all three. Plain text always works.
     tg = vault("telegram")
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{tg['bot_token']}/sendMessage",
         data=json.dumps({
             "chat_id": tg["chat_id"], "text": text,
-            "parse_mode": "Markdown", "disable_web_page_preview": True,
+            "disable_web_page_preview": True,
         }).encode(),
         headers={"Content-Type": "application/json"}, method="POST")
     return urllib.request.urlopen(req, timeout=10).read()
@@ -62,12 +65,14 @@ async def main():
         return
     for r in pending:
         msg = (
-            f"📲 *WA draft for approval* — id `{r['id']}`\n"
-            f"_account_: {r['account']}\n"
-            f"_to_: *{r['target_label'] or r['target_jid']}*\n"
-            f"_reason_: {r['draft_reason'] or '(no reason)'}\n\n"
-            f"```\n{r['body'][:500]}\n```\n"
-            f"Reply `approve {r['id']}` or `reject {r['id']}`"
+            f"WA draft for approval — id {r['id']}\n"
+            f"account: {r['account']}\n"
+            f"to:      {r['target_label'] or r['target_jid']}\n"
+            f"reason:  {r['draft_reason'] or '(no reason)'}\n"
+            f"\n"
+            f"{r['body'][:500]}\n"
+            f"\n"
+            f"Reply:  approve {r['id']}   or   reject {r['id']}"
         )
         try:
             tg_send(msg)
