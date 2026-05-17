@@ -789,6 +789,10 @@
               <span class="mono" x-text="data.counts.event_partitions"></span> parts ·
               <span class="mono" x-text="data.counts.alerts_firing"></span> alerts firing
             </div>
+            <a x-show="data.counts.docs_needing_review > 0" href="/documents"
+               class="mt-2 inline-block text-xs text-amber-300 hover:text-amber-200">
+              📋 <span class="mono" x-text="data.counts.docs_needing_review"></span> docs need your eye →
+            </a>
           </div>
 
           <!-- Context Pressure -->

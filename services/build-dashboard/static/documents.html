@@ -74,12 +74,131 @@
     </div>
   </section>
 
+  <!-- Tab strip -->
+  <section class="glass rounded-xl p-3">
+    <div class="flex flex-wrap gap-2">
+      <button class="dw-btn" :class="{active: tab==='all'}" @click="setTab('all')">
+        All <span class="muted" x-text="`(${docs.length})`"></span>
+      </button>
+      <button class="dw-btn" :class="{active: tab==='review'}" @click="setTab('review')">
+        ⚠ Needs your eye <span class="muted" x-text="`(${review.length})`"></span>
+      </button>
+      <button class="dw-btn" :class="{active: tab==='linked'}" @click="setTab('linked')">
+        Auto-linked <span class="muted" x-text="`(${docs.filter(d=>d.linked_table).length})`"></span>
+      </button>
+    </div>
+  </section>
+
   <section class="glass rounded-xl p-3 md:p-4">
-    <h2 class="text-lg font-medium mb-2 px-1">Stored documents</h2>
+    <h2 class="text-lg font-medium mb-2 px-1"
+        x-text="tab==='review' ? 'Documents needing review' : (tab==='linked' ? 'Auto-linked documents' : 'All stored documents')"></h2>
     <div id="docs-table"></div>
   </section>
 
+  <!-- Manual-link side panel -->
+  <template x-if="panel.open">
+    <div class="side-overlay" @click.self="closePanel()">
+      <div class="side-panel">
+        <header>
+          <div>
+            <div class="text-lg font-medium" x-text="'Doc #' + panel.doc.id + ' — ' + (panel.doc.title||'').slice(0,70)"></div>
+            <div class="text-xs muted" x-show="panel.doc.classifier_status"
+                 x-text="'classifier: ' + panel.doc.classifier_status + ' (conf ' + (Number(panel.doc.confidence||0).toFixed(2)) + ')'"></div>
+          </div>
+          <div class="flex items-center gap-2">
+            <a class="text-xs text-blue-300 hover:text-blue-200"
+               :href="'/api/documents/' + panel.doc.id + '/file'" target="_blank">open file →</a>
+            <button class="close-btn" @click="closePanel()">✕ close</button>
+          </div>
+        </header>
+
+        <section class="space-y-3">
+          <template x-if="panel.doc.summary">
+            <div class="bg-slate-900/50 rounded p-3">
+              <div class="text-xs uppercase muted mb-1">AI summary</div>
+              <div class="text-sm" x-text="panel.doc.summary"></div>
+            </div>
+          </template>
+          <template x-if="panel.doc.suggested_link_table">
+            <div class="bg-slate-900/50 rounded p-3">
+              <div class="text-xs uppercase muted mb-1">Suggested link</div>
+              <div class="text-sm">
+                <span x-text="panel.doc.suggested_link_table"></span>
+                <span x-show="panel.doc.suggested_link_id" class="muted">#<span x-text="panel.doc.suggested_link_id"></span></span>
+                <template x-if="panel.doc.suggested_link_label">
+                  <span class="text-emerald-300 ml-2" x-text="'→ ' + panel.doc.suggested_link_label"></span>
+                </template>
+                <span class="muted ml-2" x-text="panel.doc.suggested_link_hint ? '(hint: ' + panel.doc.suggested_link_hint + ')' : ''"></span>
+              </div>
+              <div class="flex gap-2 mt-2" x-show="panel.doc.suggested_link_id">
+                <button class="btn-primary" @click="acceptSuggested()" :disabled="panel.saving">✓ accept suggestion</button>
+              </div>
+            </div>
+          </template>
+
+          <div class="bg-slate-900/50 rounded p-3 space-y-2">
+            <div class="text-xs uppercase muted">Manual link</div>
+            <select x-model="panel.linkTable" @change="loadOptions()"
+                    class="bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm w-full">
+              <option value="">— select table —</option>
+              <option value="vehicles">vehicles</option>
+              <option value="properties">properties</option>
+              <option value="bank_accounts">bank_accounts</option>
+              <option value="mortgage_accounts">mortgage_accounts</option>
+              <option value="entities">entities</option>
+              <option value="children">children</option>
+            </select>
+            <select x-model.number="panel.linkId" x-show="panel.linkTable"
+                    class="bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm w-full">
+              <option :value="null">— select record —</option>
+              <template x-for="o in panel.linkOptions" :key="o.id">
+                <option :value="o.id" x-text="o.label"></option>
+              </template>
+            </select>
+            <div class="flex gap-2 justify-end">
+              <button class="close-btn" @click="reject()">✗ reject / no link</button>
+              <button class="btn-primary" @click="applyManualLink()"
+                      :disabled="!panel.linkTable || !panel.linkId || panel.saving">
+                Link
+              </button>
+            </div>
+          </div>
+
+          <template x-if="panel.doc.ocr_text_preview">
+            <details class="bg-slate-900/30 rounded p-3">
+              <summary class="text-xs uppercase muted cursor-pointer">OCR text preview</summary>
+              <pre class="text-xs muted mt-2 whitespace-pre-wrap" x-text="panel.doc.ocr_text_preview"></pre>
+            </details>
+          </template>
+        </section>
+      </div>
+    </div>
+  </template>
+
 </div>
+
+<style>
+  .dw-btn { padding: 0.45rem 0.9rem; border-radius: 0.45rem; font-size: 0.82rem;
+    background: rgba(15,23,42,0.6); border: 1px solid rgba(148,163,184,0.2);
+    cursor: pointer; color: #cbd5e1; }
+  .dw-btn:hover { background: rgba(15,23,42,0.9); }
+  .dw-btn.active { background: rgba(59,130,246,0.18); color: #93c5fd; border-color: rgba(59,130,246,0.45); }
+  .side-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 40;
+    display: flex; justify-content: flex-end; backdrop-filter: blur(3px); }
+  .side-panel { width: min(720px, 95vw); height: 100vh; background: #0b1220;
+    border-left: 1px solid rgba(148,163,184,0.25); overflow-y: auto; }
+  .side-panel header { position: sticky; top: 0; background: #0b1220;
+    border-bottom: 1px solid rgba(148,163,184,0.18); padding: 14px 20px; z-index: 2;
+    display: flex; align-items: center; justify-content: space-between; }
+  .side-panel section { padding: 14px 20px; }
+  .close-btn { padding: 6px 12px; background: rgba(148,163,184,0.15); border-radius: 6px;
+    border: 1px solid rgba(148,163,184,0.25); color: #e2e8f0; cursor: pointer; font-size: 13px; }
+  .close-btn:hover { background: rgba(148,163,184,0.30); }
+  .btn-primary { padding: 7px 14px; background: rgb(59,130,246); border-radius: 6px;
+    border: none; color: white; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .btn-primary:hover { background: rgb(37,99,235); }
+  .btn-primary:disabled { background: rgba(59,130,246,0.4); cursor: not-allowed; }
+</style>
 
 <script>
 function docsPage() {
@@ -89,16 +208,84 @@ function docsPage() {
     uploadingName: '',
     lastResults: [],
     docs: [],
+    review: [],
     table: null,
+    tab: 'all',
+    panel: { open: false, doc: {}, linkTable: '', linkId: null, linkOptions: [], saving: false },
 
     async boot() {
-      await this.loadList();
+      await Promise.all([this.loadList(), this.loadReview()]);
+      // open review tab automatically if there's anything pending
+      if (this.review.length > 0 && this.tab === 'all') this.tab = 'review';
+      this.render();
     },
 
     async loadList() {
       const r = await fetch('/api/documents/list?limit=300');
       const d = await r.json();
       this.docs = d.rows || [];
+    },
+
+    async loadReview() {
+      const r = await fetch('/api/documents/review-queue');
+      const d = await r.json();
+      this.review = d.rows || [];
+    },
+
+    setTab(t) { this.tab = t; this.render(); },
+
+    openPanel(doc) {
+      this.panel.open = true;
+      this.panel.doc = { ...doc };
+      this.panel.linkTable = doc.suggested_link_table || '';
+      this.panel.linkId = doc.suggested_link_id || null;
+      this.panel.linkOptions = [];
+      this.panel.saving = false;
+      if (this.panel.linkTable) this.loadOptions();
+    },
+    closePanel() { this.panel.open = false; },
+
+    async loadOptions() {
+      this.panel.linkOptions = [];
+      if (!this.panel.linkTable) return;
+      const r = await fetch('/api/documents/link-options?table=' + encodeURIComponent(this.panel.linkTable));
+      const d = await r.json();
+      this.panel.linkOptions = d.rows || [];
+    },
+
+    async applyManualLink() {
+      if (!this.panel.linkTable || !this.panel.linkId) return;
+      this.panel.saving = true;
+      try {
+        const r = await fetch('/api/documents/' + this.panel.doc.document_id + '/link', {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({table: this.panel.linkTable, linked_id: this.panel.linkId}),
+        });
+        const j = await r.json();
+        if (j.ok) {
+          this.closePanel();
+          await Promise.all([this.loadList(), this.loadReview()]);
+          this.render();
+        } else alert('Link failed: ' + (j.error || 'unknown'));
+      } finally { this.panel.saving = false; }
+    },
+
+    async acceptSuggested() {
+      if (!this.panel.doc.suggested_link_id) return;
+      this.panel.linkTable = this.panel.doc.suggested_link_table;
+      this.panel.linkId = this.panel.doc.suggested_link_id;
+      await this.applyManualLink();
+    },
+
+    async reject() {
+      const reason = prompt('Why are you rejecting this? (optional)', '') || '';
+      if (reason === null) return;
+      await fetch('/api/documents/' + this.panel.doc.document_id + '/reject', {
+        method:'POST', headers:{'content-type':'application/json'},
+        body: JSON.stringify({reason}),
+      });
+      this.closePanel();
+      await Promise.all([this.loadList(), this.loadReview()]);
       this.render();
     },
 
@@ -133,12 +320,57 @@ function docsPage() {
 
     render() {
       if (this.table) this.table.destroy();
-      this.table = new Tabulator('#docs-table', {
-        data: this.docs,
-        layout: 'fitDataStretch',
-        height: '60vh',
-        pagination: true, paginationSize: 50,
-        columns: [
+      const _this = this;
+      let data, columns;
+      if (this.tab === 'review') {
+        data = this.review;
+        columns = [
+          { title:'Title', field:'title', widthGrow:3,
+            formatter: c => `<a href="/api/documents/${c.getRow().getData().document_id}/file" target="_blank" class="text-blue-300 hover:text-blue-200">${c.getValue() || ''}</a>` },
+          { title:'Doc type', field:'suggested_doc_type', width:170,
+            formatter: c => c.getValue() ? `<span class="pill-auto">${c.getValue()}</span>` : '<span class="pill-none">—</span>' },
+          { title:'Suggested', field:'suggested_link_table', widthGrow:2,
+            formatter: c => {
+              const r = c.getRow().getData();
+              if (!r.suggested_link_table) return '<span class="muted">none</span>';
+              const lbl = r.suggested_link_label ? ' → ' + r.suggested_link_label : '';
+              return `${r.suggested_link_table}#${r.suggested_link_id || '?'}${lbl}`;
+            } },
+          { title:'Conf', field:'confidence', width:80, hozAlign:'right',
+            formatter: c => {
+              const v = c.getValue(); if (v == null) return '—';
+              const col = v >= 0.85 ? '#86efac' : v >= 0.55 ? '#fcd34d' : '#fca5a5';
+              return `<span style="color:${col}">${Number(v).toFixed(2)}</span>`;
+            } },
+          { title:'Summary', field:'summary', widthGrow:2 },
+          { title:'', field:'document_id', width:90,
+            formatter: c => `<button class="btn-primary" onclick="event.stopPropagation(); window._docsOpenPanel(${JSON.stringify(c.getRow().getData()).replace(/\"/g,'&quot;')})" style="padding:3px 8px;font-size:11px;">review</button>` },
+        ];
+        window._docsOpenPanel = (rowJsonHtml) => {
+          // We stringified the row into the HTML; parse back.
+          const parsed = typeof rowJsonHtml === 'string'
+            ? JSON.parse(rowJsonHtml.replaceAll('&quot;','"'))
+            : rowJsonHtml;
+          _this.openPanel(parsed);
+        };
+      } else if (this.tab === 'linked') {
+        data = this.docs.filter(d => d.linked_table);
+        columns = [
+          { title:'Added', field:'created_at', width:150,
+            formatter: c => (c.getValue() || '').slice(0, 16).replace('T',' ') },
+          { title:'Title', field:'title', widthGrow:3,
+            formatter: c => `<a href="/api/documents/${c.getRow().getData().id}/file" target="_blank" class="text-blue-300 hover:text-blue-200">${c.getValue() || ''}</a>` },
+          { title:'Category', field:'category', width:140 },
+          { title:'Linked to', field:'linked_table', widthGrow:1,
+            formatter: c => {
+              const r = c.getRow().getData();
+              return `<span class="pill-auto">${r.linked_table} #${r.linked_id}</span>`;
+            } },
+          { title:'How', field:'linked_by', width:160 },
+        ];
+      } else {
+        data = this.docs;
+        columns = [
           { title:'Added', field:'created_at', width:150,
             formatter: c => (c.getValue() || '').slice(0, 16).replace('T',' ') },
           { title:'Title', field:'title', widthGrow:3,
@@ -153,11 +385,16 @@ function docsPage() {
               if (!r.linked_table) return '<span class="pill-none">none</span>';
               return `<span class="pill-auto">${r.linked_table} #${r.linked_id}</span>`;
             } },
-          { title:'How', field:'linked_by', width:140,
-            formatter: c => c.getValue() || '' },
-          { title:'Entity', field:'entity_id', width:80, hozAlign:'right' },
+          { title:'How', field:'linked_by', width:160 },
           { title:'Realm', field:'realm', width:80 },
-        ],
+        ];
+      }
+      this.table = new Tabulator('#docs-table', {
+        data,
+        layout: 'fitDataStretch',
+        height: '60vh',
+        pagination: true, paginationSize: 50,
+        columns,
         placeholder: 'No documents uploaded yet.',
       });
     },
