@@ -149,38 +149,29 @@ with sync_playwright() as p:
         except Exception as e:
             print(f'   ! no Export-confirm button found: {e}')
 
-    # Now poll for 3 outcomes: download event, toast, or unchanged state
-    print('-- watching for outcome (download / toast / redirect, up to 180s)')
+    # Just wait passively for the download event. Don't screenshot during
+    # the wait — Dext blocks JS rendering when preparing a large export and
+    # page.screenshot() times out. The download listener is registered, we
+    # just need patience.
+    import time as _t
     downloads = []
     page.on('download', lambda d: downloads.append(d))
-    deadline = __import__('time').time() + 180
-    last_url = page.url
-    last_shot = None
-    try:
-        while __import__('time').time() < deadline:
-            if downloads:
-                dl = downloads[0]
-                dl.save_as(OUT)
-                print(f'-- saved: {OUT}  size={os.path.getsize(OUT)} bytes')
-                break
-            # Snapshot every 15s for visibility
-            now = int(deadline - __import__('time').time())
-            page.screenshot(path=OUT.replace('.csv', f'-poll-{180-now:03d}s.png'))
-            # Toast / banner check
-            try:
-                texts = page.locator('.toaster, .toast, [role="status"], .d-notification').all_inner_texts()
-                if texts:
-                    print(f'   t+{180-now}s toast: {texts[:3]}')
-            except Exception: pass
-            if page.url != last_url:
-                print(f'   t+{180-now}s url changed: {last_url} → {page.url}')
-                last_url = page.url
-            __import__('time').sleep(15)
-        else:
-            print('-- timed out, no download arrived in 180s')
-            page.screenshot(path=OUT.replace('.csv', '-FAIL.png'), full_page=True)
+    print('-- waiting for download event (up to 5 minutes, 8839 items takes time)')
+    deadline = _t.time() + 300
+    while _t.time() < deadline:
+        if downloads:
+            dl = downloads[0]
+            dl.save_as(OUT)
+            print(f'-- saved: {OUT}  size={os.path.getsize(OUT)} bytes')
+            break
+        _t.sleep(2)
+    else:
+        print('-- timed out, no download arrived in 5 min')
+        try:
+            page.screenshot(path=OUT.replace('.csv', '-FAIL.png'), full_page=True, timeout=10000)
             open(OUT.replace('.csv', '-FAIL.html'), 'w').write(page.content())
-            ctx.close(); sys.exit(3)
+        except Exception: pass
+        ctx.close(); sys.exit(3)
     except Exception as e:
         # Save diagnostic snapshot on download timeout / unknown failure
         shot = OUT.replace('.csv', '-FAIL.png')
