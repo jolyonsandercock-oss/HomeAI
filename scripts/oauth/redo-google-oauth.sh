@@ -130,6 +130,8 @@ EOF
 import http.server, socketserver, urllib.parse, sys, os
 PORT = $PORT
 CODE_FILE = "$CODE_FILE"
+class ReusableServer(socketserver.TCPServer):
+    allow_reuse_address = True   # avoid TIME_WAIT bind errors between consecutive rotates
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_): pass
     def do_GET(self):
@@ -151,7 +153,7 @@ class H(http.server.BaseHTTPRequestHandler):
             self.wfile.write(("<h1>Error</h1><pre>" + params.get('error','') + "</pre>").encode())
         else:
             self.send_response(404); self.end_headers()
-with socketserver.TCPServer(("127.0.0.1", PORT), H) as s:
+with ReusableServer(("127.0.0.1", PORT), H) as s:
     s.timeout = 1
     for _ in range(300):  # ~5 min
         s.handle_request()
