@@ -16,7 +16,7 @@ set -uo pipefail
 
 docker exec -i homeai-playwright python <<'PYEOF'
 import os, json, urllib.request, urllib.parse, asyncio, asyncpg
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime as _dt
 
 PG_DSN = os.environ["PG_DSN"]
 
@@ -37,8 +37,8 @@ DAILY_FIELDS = [
     "sunshine_duration",
 ]
 
-# Forecast-only extras u109 needs: WMO code + rain probability
-FORECAST_EXTRA_FIELDS = ["weather_code", "precipitation_probability_max"]
+# Forecast-only extras u109 + dashboard need: WMO code, rain probability, sunrise, sunset
+FORECAST_EXTRA_FIELDS = ["weather_code", "precipitation_probability_max", "sunrise", "sunset"]
 
 MARINE_FIELDS = ["wave_height_max", "wave_period_max", "wave_direction_dominant"]
 
@@ -159,6 +159,8 @@ async def main():
         wmax = days.get("wind_speed_10m_max", [None]*len(dates))[i]
         wcode = days.get("weather_code", [None]*len(dates))[i]
         pp   = days.get("precipitation_probability_max", [None]*len(dates))[i]
+        srise = days.get("sunrise", [None]*len(dates))[i]
+        sset  = days.get("sunset",  [None]*len(dates))[i]
         m    = marine_by_date.get(d, {})
         cats = severity_categories(rain, tmax, wmax)
         await conn.execute("""
@@ -166,9 +168,10 @@ async def main():
             (forecast_date, rain_mm, max_temp_c, min_temp_c, max_wind_mph,
              alert_categories, raw_payload,
              weather_code, precipitation_probability,
-             wave_height_m, wave_period_s, wave_direction_deg)
+             wave_height_m, wave_period_s, wave_direction_deg,
+             sunrise, sunset)
           VALUES ($1, $2, $3, $4, $5, $6::text[], $7::jsonb,
-                  $8, $9, $10, $11, $12)
+                  $8, $9, $10, $11, $12, $13, $14)
           ON CONFLICT (forecast_date, fetched_at) DO NOTHING
         """, fd, rain, tmax, tmin,
              int(wmax) if wmax is not None else None,
@@ -176,11 +179,14 @@ async def main():
              json.dumps({"rain": rain, "tmax": tmax, "tmin": tmin,
                          "wmax_mph": wmax, "code": wcode, "rain_prob": pp,
                          "wave_h": m.get("h"), "wave_p": m.get("p"),
-                         "wave_dir": m.get("dir")}),
+                         "wave_dir": m.get("dir"),
+                         "sunrise": srise, "sunset": sset}),
              int(wcode) if wcode is not None else None,
              int(pp)    if pp    is not None else None,
              m.get("h"), m.get("p"),
-             int(m["dir"]) if m.get("dir") is not None else None)
+             int(m["dir"]) if m.get("dir") is not None else None,
+             _dt.fromisoformat(srise) if srise else None,
+             _dt.fromisoformat(sset)  if sset  else None)
         if cats:
             alerts.append((fd, cats, rain, tmax, wmax))
 

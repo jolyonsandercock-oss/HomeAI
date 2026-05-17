@@ -1,10 +1,19 @@
 'use client';
 
 import { Search } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export function GlobalSearch() {
   const [open, setOpen] = useState(false);
+
+  // Close on Escape, and on clicks outside the modal panel
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
   return (
     <>
       <button
@@ -16,10 +25,17 @@ export function GlobalSearch() {
         <span className="hidden sm:inline">Search</span>
       </button>
       {open && (
-        <div onClick={() => setOpen(false)}
-          className="fixed inset-0 bg-black/60 z-50 flex items-start justify-center pt-24 px-3">
-          <div onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-2xl bg-ink-50 rounded-lg shadow-2xl border border-ink-200 p-4">
+        <div
+          onMouseDown={(e) => {
+            // Close when mousedown is on the backdrop (not bubbling from the panel)
+            if (e.target === e.currentTarget) setOpen(false);
+          }}
+          className="fixed inset-0 bg-black/60 z-50 flex items-start justify-center pt-24 px-3"
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            className="w-full max-w-2xl bg-ink-50 rounded-lg shadow-2xl border border-ink-200 p-4"
+          >
             <input
               autoFocus
               type="text"
@@ -29,8 +45,8 @@ export function GlobalSearch() {
             <div className="mt-3 text-xs text-ink-500">
               Try: <span className="text-ink-700 font-mono">tonight covers</span>,{' '}
               <span className="text-ink-700 font-mono">wage% week</span>,{' '}
-              <span className="text-ink-700 font-mono">arrivals tomorrow</span>.
-              {' '}Search wired to /api/search in next iteration.
+              <span className="text-ink-700 font-mono">arrivals tomorrow</span>.{' '}
+              <span className="opacity-75">Esc or click outside to close.</span>
             </div>
           </div>
         </div>
