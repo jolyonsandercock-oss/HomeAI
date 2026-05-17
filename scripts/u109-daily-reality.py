@@ -439,6 +439,16 @@ async def main():
          ORDER BY due_date, source LIMIT 20
     """)
 
+    # U124-B — repeat-guest detector (arriving today or tomorrow)
+    repeat_arrivals = await conn.fetch("""
+        SELECT DISTINCT ON (known_as)
+               booking_name, known_as, room, checkin_date,
+               prior_visits_completed, lifetime_revenue, segment, preferred_room
+          FROM v_repeat_arrivals
+         WHERE checkin_date <= CURRENT_DATE + 1
+         ORDER BY known_as, lifetime_revenue DESC
+    """)
+
     # U114 — AI usage last 24h (cost + cache hit rate per service)
     ai_usage_rows = await conn.fetch("""
         SELECT
@@ -978,6 +988,39 @@ async def main():
     else:
         body = f'<p style="{STY["empty"]}">No arrivals booked for tomorrow yet.</p>'
     out.append(section(f'Tomorrow — {fmt_day(tomorrow)}', len(tom_arrivals), body))
+
+    # U124-B — repeat guest welcome-back alert
+    if repeat_arrivals:
+        rows_html = []
+        for r in repeat_arrivals:
+            badge = {
+                'vip':      '<span style="color:#f59e0b;font-weight:bold">★ VIP</span>',
+                'frequent': '<span style="color:#16a34a;font-weight:bold">↻ frequent</span>',
+                'regular':  '<span style="color:#16a34a">↻ regular</span>',
+            }.get(r['segment'], '↻')
+            pref = (f' (prefers <em>{h(r["preferred_room"])}</em>)'
+                    if r['preferred_room'] and r['preferred_room'] != r['room'] else '')
+            arr = 'today' if r['checkin_date'] == today else 'tomorrow'
+            rows_html.append(
+                f'<tr>'
+                f'<td style="{STY["td"]}">{badge}</td>'
+                f'<td style="{STY["td"]}"><strong>{h(r["known_as"])}</strong>{pref}</td>'
+                f'<td style="{STY["td"]}">{h(r["room"])}</td>'
+                f'<td style="{STY["td"]};text-align:right">£{float(r["lifetime_revenue"] or 0):,.0f}</td>'
+                f'<td style="{STY["td"]};text-align:center">{r["prior_visits_completed"]}</td>'
+                f'<td style="{STY["td"]}">arriving {h(arr)}</td>'
+                f'</tr>')
+        body = (f'<p style="color:#666;font-size:13px;margin:0 0 6px 0">'
+                f'Returning guests — worth a personal welcome / room upgrade nudge.</p>'
+                f'<table style="{STY["tbl"]}">'
+                f'<tr><th style="{STY["th"]}">Segment</th>'
+                f'<th style="{STY["th"]}">Guest</th>'
+                f'<th style="{STY["th"]}">Room</th>'
+                f'<th style="{STY["th"]};text-align:right">Lifetime</th>'
+                f'<th style="{STY["th"]};text-align:center">Prior</th>'
+                f'<th style="{STY["th"]}">When</th></tr>'
+                + '\n'.join(rows_html) + '</table>')
+        out.append(section('Welcome back — repeat guests', None, body))
 
     # Obligations next 14 days (U121)
     if obligations:
