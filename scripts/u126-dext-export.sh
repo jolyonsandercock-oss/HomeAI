@@ -51,6 +51,30 @@ with sync_playwright() as p:
         print(f'ERR: bounced to {page.url} — session expired, re-pair', file=sys.stderr)
         ctx.close(); sys.exit(2)
 
+    def dismiss_modals():
+        """Close any blocking overlays — Dext shows banners/welcomes/tutorials."""
+        for sel in [
+            'button[aria-label*="close" i]',
+            'button[aria-label*="dismiss" i]',
+            '.d-modal-overlay button',
+            '.modal__close', '.modal-close',
+            'button:has-text("Got it")', 'button:has-text("Close")',
+            'button:has-text("Skip")',   'button:has-text("Dismiss")',
+            'button:has-text("Maybe later")', 'button:has-text("No thanks")',
+        ]:
+            try:
+                while page.locator(sel).first.is_visible(timeout=500):
+                    page.locator(sel).first.click(timeout=2000)
+                    page.wait_for_timeout(300)
+            except Exception:
+                pass
+        # Plus an Escape press for good measure
+        try: page.keyboard.press('Escape')
+        except Exception: pass
+        page.wait_for_timeout(500)
+
+    dismiss_modals()
+
     # Date filter (best-effort — selectors vary)
     try:
         page.click('text=/Date|Filter|Period/i', timeout=3000)
@@ -63,17 +87,45 @@ with sync_playwright() as p:
     except Exception as e:
         print(f'(date filter skipped: {e})')
 
+    dismiss_modals()
+
     print('-- triggering CSV export')
-    with page.expect_download(timeout=60000) as dlinfo:
-        for selector in ['button:has-text("Export")','button:has-text("Download CSV")',
-                         'a:has-text("Export")','[aria-label*="Export" i]']:
-            try: page.click(selector, timeout=4000); break
-            except Exception: continue
-        try: page.click('text=/CSV|Comma/i', timeout=3000)
+    try:
+        with page.expect_download(timeout=60000) as dlinfo:
+            clicked = False
+            for selector in [
+                'button:has-text("Export")', 'button:has-text("Download CSV")',
+                'a:has-text("Export")',      '[aria-label*="Export" i]',
+                'button[title*="Export" i]',
+                'text=/^Export$/i',
+            ]:
+                try:
+                    page.click(selector, timeout=4000)
+                    clicked = True; break
+                except Exception:
+                    continue
+            if not clicked:
+                # Last resort: snapshot the DOM + screenshot so we can fix selectors
+                shot = OUT.replace('.csv', '-FAIL.png')
+                html = OUT.replace('.csv', '-FAIL.html')
+                page.screenshot(path=shot, full_page=True)
+                open(html, 'w').write(page.content())
+                raise RuntimeError(f'Export button not found. See {shot} + {html}')
+            try: page.click('text=/CSV|Comma|\\.csv/i', timeout=4000)
+            except Exception: pass
+        dl = dlinfo.value
+        dl.save_as(OUT)
+        print(f'-- saved: {OUT}  size={os.path.getsize(OUT)} bytes')
+    except Exception as e:
+        # Save diagnostic snapshot on download timeout / unknown failure
+        shot = OUT.replace('.csv', '-FAIL.png')
+        html = OUT.replace('.csv', '-FAIL.html')
+        try:
+            page.screenshot(path=shot, full_page=True)
+            open(html, 'w').write(page.content())
+            print(f'-- failed: {e}\n   snapshot: {shot}\n   dom: {html}')
         except Exception: pass
-    dl = dlinfo.value
-    dl.save_as(OUT)
-    print(f'-- saved: {OUT}  size={os.path.getsize(OUT)} bytes')
+        ctx.close(); sys.exit(3)
     ctx.close()
 PY
 
