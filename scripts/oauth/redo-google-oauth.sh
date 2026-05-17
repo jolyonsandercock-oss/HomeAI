@@ -90,24 +90,99 @@ rotate)
   [ -z "$IDENTITY" ] && { echo "Usage: $0 rotate <identity>"; exit 1; }
   echo "── Rotating OAuth refresh token for: $IDENTITY ──"
   echo
+
+  # Google deprecated OOB (urn:ietf:wg:oauth:2.0:oob) for new auth flows
+  # in Oct 2022. Modern flow: loopback redirect to a local one-shot HTTP
+  # server. Port 54321 is fixed so you only register one Authorized
+  # Redirect URI in Google Cloud Console.
+  PORT=54321
+  REDIRECT="http://127.0.0.1:$PORT/oauth/callback"
+
   CLIENT_ID=$(vault_kv oauth-client | python3 -c "import json,sys;print(json.load(sys.stdin)['client_id'])")
   CLIENT_SECRET=$(vault_kv oauth-client | python3 -c "import json,sys;print(json.load(sys.stdin)['client_secret'])")
   CURRENT=$(vault_kv "$IDENTITY" 2>/dev/null || echo '{}')
   EMAIL=$(echo "$CURRENT" | python3 -c "import json,sys;print(json.load(sys.stdin).get('email_address','?'))")
   SCOPES="https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/documents"
-  REDIRECT="urn:ietf:wg:oauth:2.0:oob"
 
-  AUTH_URL="https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${REDIRECT}&response_type=code&scope=$(python3 -c "import urllib.parse;print(urllib.parse.quote('$SCOPES'))")&access_type=offline&prompt=consent"
+  ENCODED_REDIRECT=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote('$REDIRECT', safe=''))")
+  ENCODED_SCOPES=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote('$SCOPES'))")
+  AUTH_URL="https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${ENCODED_REDIRECT}&response_type=code&scope=${ENCODED_SCOPES}&access_type=offline&prompt=consent"
 
-  echo "1. Open this URL in a browser SIGNED IN AS: $EMAIL"
-  echo
-  echo "   $AUTH_URL"
-  echo
-  echo "2. Grant the permissions."
-  echo "3. Google will display a one-time code. Paste it below."
-  echo
-  read -r -p "Code: " CODE
-  [ -z "$CODE" ] && { echo "No code provided, aborting"; exit 1; }
+  cat <<EOF
+PRE-FLIGHT — one-time setup per OAuth client:
+  1. Open https://console.cloud.google.com/apis/credentials
+  2. Click the OAuth 2.0 Client (the "Web application" one).
+  3. Under "Authorized redirect URIs", add:
+        $REDIRECT
+  4. Save. (Skip if already added — only needs doing once per client.)
+
+PRE-FLIGHT — local prerequisites:
+  Port $PORT must be free. (If running on a remote host, port-forward
+  it back to your laptop with:  ssh -L $PORT:127.0.0.1:$PORT <host>)
+
+EOF
+
+  read -r -p "All pre-flight steps done? Press enter to continue (Ctrl-C to abort) " _
+
+  # Spawn one-shot HTTP server in background, capture code via tempfile
+  CODE_FILE=$(mktemp)
+  python3 - <<PY &
+import http.server, socketserver, urllib.parse, sys, os
+PORT = $PORT
+CODE_FILE = "$CODE_FILE"
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *_): pass
+    def do_GET(self):
+        qs = urllib.parse.urlparse(self.path).query
+        params = dict(urllib.parse.parse_qsl(qs))
+        if 'code' in params:
+            open(CODE_FILE, 'w').write(params['code'])
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b"<html><body style='font:18px sans-serif;padding:40px'>"
+                             b"<h1>Authorised</h1><p>You can close this tab and return to the terminal.</p>"
+                             b"</body></html>")
+        elif 'error' in params:
+            open(CODE_FILE, 'w').write('ERR:' + params.get('error',''))
+            self.send_response(400)
+            self.send_header('Content-Type', 'text/html')
+            self.end_headers()
+            self.wfile.write(("<h1>Error</h1><pre>" + params.get('error','') + "</pre>").encode())
+        else:
+            self.send_response(404); self.end_headers()
+with socketserver.TCPServer(("127.0.0.1", PORT), H) as s:
+    s.timeout = 1
+    for _ in range(300):  # ~5 min
+        s.handle_request()
+        if os.path.exists(CODE_FILE) and os.path.getsize(CODE_FILE) > 0:
+            sys.exit(0)
+PY
+  SERVER_PID=$!
+
+  cat <<EOF
+
+Open this URL in a browser SIGNED IN AS: $EMAIL
+
+   $AUTH_URL
+
+Waiting for Google to redirect back (up to 5 minutes)…
+EOF
+
+  # Wait for the code file to fill
+  for i in $(seq 1 300); do
+    if [ -s "$CODE_FILE" ]; then break; fi
+    sleep 1
+  done
+  kill "$SERVER_PID" 2>/dev/null || true
+
+  CODE=$(cat "$CODE_FILE" 2>/dev/null || echo "")
+  rm -f "$CODE_FILE"
+  if [ -z "$CODE" ] || [[ "$CODE" == ERR:* ]]; then
+    echo "❌ no code received (${CODE:-timeout}). Aborted."
+    exit 1
+  fi
+  echo "✓ Received authorization code from Google."
 
   TOKEN_JSON=$(docker exec -e VAULT_TOKEN homeai-google-fetch python3 -c "
 import httpx
