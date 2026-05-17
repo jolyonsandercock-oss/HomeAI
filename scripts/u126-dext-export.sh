@@ -43,14 +43,13 @@ with sync_playwright() as p:
     )
     page = ctx.new_page()
 
-    print(f'-- navigating to Dext Archive, filtering {FROM} → {TO}')
-    # URL-based date filter — works without clicking the funnel UI which is
-    # brittle, and limits to a date range so the "Please set total amount"
-    # error from rows with missing totals doesn't block the whole export.
-    page.goto(
-        f'https://app.dext.com/delta/costs/archive?'
-        f'filter%5Bdate%5D%5Bgte%5D={FROM}&filter%5Bdate%5D%5Blte%5D={TO}',
-        wait_until='domcontentloaded', timeout=30000)
+    print('-- navigating to Dext Archive (full archive — we filter via UI)')
+    # Dext doesn't support date filtering via URL params on this view.
+    # The funnel has no date filter. Strategy: apply "Without extraction
+    # warnings" to skip incomplete rows (which block the export), then
+    # export everything. We narrow to a date window inside our DB after parse.
+    page.goto('https://app.dext.com/delta/costs/archive',
+              wait_until='domcontentloaded', timeout=30000)
     page.wait_for_load_state('networkidle', timeout=20000)
 
     if 'login' in page.url.lower() or 'sign-in' in page.url.lower():
@@ -81,7 +80,24 @@ with sync_playwright() as p:
 
     dismiss_modals()
 
-    # Date filter is in the URL query string above — no UI click needed.
+    # Open the filter funnel, click "Without extraction warnings", Apply.
+    # This is the only way to exclude the rows that have null totals (which
+    # block "Export all" with "Please set total amount for each of the
+    # items in the export").
+    print('-- applying "Without extraction warnings" filter')
+    try:
+        page.locator('.s-button-filter-transparent').first.click(timeout=5000)
+        page.wait_for_timeout(1200)
+        page.click('button:has-text("Without extraction warnings"), '
+                   'span:has-text("Without extraction warnings")',
+                   timeout=4000)
+        page.wait_for_timeout(400)
+        page.click('button:has-text("Apply")', timeout=4000)
+        page.wait_for_timeout(2500)
+        page.wait_for_load_state('networkidle', timeout=15000)
+    except Exception as e:
+        print(f'(filter apply failed: {e})')
+
     dismiss_modals()
 
     print('-- triggering CSV export')
