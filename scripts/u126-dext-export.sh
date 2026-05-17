@@ -29,7 +29,7 @@ docker run --rm \
   -e TO_DATE="$TODAY" \
   -e OUT_FILE="/exports/dext-$TODAY.csv" \
   --shm-size 2g \
-  mcr.microsoft.com/playwright/python:v1.45.0-jammy \
+  home_ai-playwright-service:latest \
   python3 -c "
 import os, time, sys, glob
 from playwright.sync_api import sync_playwright

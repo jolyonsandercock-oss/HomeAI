@@ -44,7 +44,7 @@ docker run --rm -it \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
   --env-file "$ENV_FILE" \
   --shm-size 2g \
-  mcr.microsoft.com/playwright/python:v1.45.0-jammy \
+  home_ai-playwright-service:latest \
   python3 -c "
 import os, time
 from playwright.sync_api import sync_playwright
