@@ -21,7 +21,7 @@ mkdir -p "$EXPORT_DIR"
   echo "profile empty — pair first: /home_ai/scripts/u126-dext-pair.sh"; exit 1;
 }
 
-DAYS_BACK="${DAYS_BACK:-35}"
+DAYS_BACK="${DAYS_BACK:-30}"
 TODAY=$(date +%Y-%m-%d)
 FROM=$(date -d "$DAYS_BACK days ago" +%Y-%m-%d)
 OUT="$EXPORT_DIR/dext-$TODAY.csv"
@@ -43,8 +43,14 @@ with sync_playwright() as p:
     )
     page = ctx.new_page()
 
-    print('-- navigating to Dext Costs')
-    page.goto('https://app.dext.com/delta/costs/archive', wait_until='domcontentloaded', timeout=30000)
+    print(f'-- navigating to Dext Archive, filtering {FROM} → {TO}')
+    # URL-based date filter — works without clicking the funnel UI which is
+    # brittle, and limits to a date range so the "Please set total amount"
+    # error from rows with missing totals doesn't block the whole export.
+    page.goto(
+        f'https://app.dext.com/delta/costs/archive?'
+        f'filter%5Bdate%5D%5Bgte%5D={FROM}&filter%5Bdate%5D%5Blte%5D={TO}',
+        wait_until='domcontentloaded', timeout=30000)
     page.wait_for_load_state('networkidle', timeout=20000)
 
     if 'login' in page.url.lower() or 'sign-in' in page.url.lower():
@@ -75,18 +81,7 @@ with sync_playwright() as p:
 
     dismiss_modals()
 
-    # Date filter (best-effort — selectors vary)
-    try:
-        page.click('text=/Date|Filter|Period/i', timeout=3000)
-        page.wait_for_timeout(500)
-        page.click('text=/Custom|Date range/i', timeout=2000)
-        page.fill('input[name="from"], input[placeholder*="From" i]', FROM)
-        page.fill('input[name="to"], input[placeholder*="To" i]',     TO)
-        page.click('button:has-text("Apply"), button:has-text("Filter")')
-        page.wait_for_timeout(1500)
-    except Exception as e:
-        print(f'(date filter skipped: {e})')
-
+    # Date filter is in the URL query string above — no UI click needed.
     dismiss_modals()
 
     print('-- triggering CSV export')
