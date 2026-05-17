@@ -37,18 +37,32 @@ TOKEN=$(echo "$CREDS" | python3 -c "import json,sys;print(json.load(sys.stdin)['
 ORG=$(echo "$CREDS"   | python3 -c "import json,sys;print(json.load(sys.stdin)['data']['data'].get('org_id',''))")
 PROJ=$(echo "$CREDS"  | python3 -c "import json,sys;print(json.load(sys.stdin)['data']['data'].get('project_id',''))")
 
-echo "── Installing Vercel CLI (in container) and deploying:"
+echo "── Building + deploying via npx (token passed via env-file, never argv):"
+# Token + IDs in a tmp env file so they NEVER appear in `ps aux`.
+ENV_FILE=$(mktemp)
+trap 'rm -f "$ENV_FILE"' EXIT
+{
+  echo "VERCEL_TOKEN=$TOKEN"
+  [ -n "$ORG" ]  && echo "VERCEL_ORG_ID=$ORG"
+  [ -n "$PROJ" ] && echo "VERCEL_PROJECT_ID=$PROJ"
+  echo "PATH=/usr/local/bin:/usr/bin:/bin:/app/node_modules/.bin"
+} > "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+
 docker run --rm \
   -v "$SCRIPT_DIR":/app -w /app \
-  -e VERCEL_TOKEN="$TOKEN" \
-  ${ORG:+-e VERCEL_ORG_ID="$ORG"} \
-  ${PROJ:+-e VERCEL_PROJECT_ID="$PROJ"} \
-  node:20-alpine sh -c "
-    npm install -g vercel@latest --silent 2>&1 | tail -2
-    vercel pull --yes --environment=production --token=\$VERCEL_TOKEN 2>&1 | tail -3
-    vercel build --prod --token=\$VERCEL_TOKEN 2>&1 | tail -10
-    vercel deploy --prebuilt --prod --token=\$VERCEL_TOKEN
-  " | tee /tmp/vercel-deploy.log
+  --env-file "$ENV_FILE" \
+  node:20-alpine sh -c '
+    set -e
+    apk add --no-cache git >/dev/null 2>&1 || true
+    # Token read from env inside the container — never on argv
+    echo "-- vercel pull --"
+    npx --yes vercel@latest pull --yes --environment=production 2>&1 | tail -5
+    echo "-- vercel build --"
+    npx --yes vercel@latest build --prod 2>&1 | tail -15
+    echo "-- vercel deploy --"
+    npx --yes vercel@latest deploy --prebuilt --prod
+  ' 2>&1 | tee /tmp/vercel-deploy.log
 
 URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.vercel\.app' /tmp/vercel-deploy.log | tail -1)
 if [ -n "$URL" ]; then
