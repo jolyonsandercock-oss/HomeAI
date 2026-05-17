@@ -449,6 +449,16 @@ services:
   # Long-running idle container; host cron invokes responder.py every 5 min.
   # ai-internal: vault, postgres, google-fetch.
   # ai-egress:  api.anthropic.com, api.telegram.org.
+  homeai-data-proxy:
+    build: ./services/homeai-data-proxy
+    container_name: homeai-data-proxy
+    networks: [ai-internal, ai-egress]
+    ports: ["8771:8771"]
+    environment:
+      PG_DSN: "postgresql://homeai_readonly:${HOMEAI_READONLY_PASSWORD}@homeai-postgres:5432/homeai"
+      HOMEAI_DATA_TOKEN: "${HOMEAI_DATA_TOKEN}"
+    restart: unless-stopped
+
   homeai-frontend:
     build: ./services/homeai-frontend
     container_name: homeai-frontend

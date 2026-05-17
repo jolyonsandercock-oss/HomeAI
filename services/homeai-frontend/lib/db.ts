@@ -5,10 +5,17 @@ declare global {
   var _pgPool: Pool | undefined;
 }
 
+// Three runtime modes:
+//   (1) HOMEAI_DATA_URL set       — Vercel + others: HTTPS proxy via Tailscale Funnel
+//   (2) POSTGRES_READONLY_URL set — direct DB (local container, dev)
+//   (3) neither                    — error
+const PROXY_URL   = process.env.HOMEAI_DATA_URL;
+const PROXY_TOKEN = process.env.HOMEAI_DATA_TOKEN;
+
 export function pool(): Pool {
   if (!global._pgPool) {
     const cs = process.env.POSTGRES_READONLY_URL;
-    if (!cs) throw new Error('POSTGRES_READONLY_URL not set');
+    if (!cs) throw new Error('POSTGRES_READONLY_URL not set (and HOMEAI_DATA_URL not set)');
     global._pgPool = new Pool({
       connectionString: cs,
       max: 4,
@@ -18,17 +25,22 @@ export function pool(): Pool {
   return global._pgPool;
 }
 
-export async function withRealm<T>(realm: string, fn: () => Promise<T>): Promise<T> {
-  const client = await pool().connect();
-  try {
-    await client.query(`SELECT home_ai.set_realm($1)`, [realm]);
-    return await fn();
-  } finally {
-    client.release();
+async function runSlugViaProxy(slug: string, params: Record<string, unknown>): Promise<unknown[]> {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== null && v !== undefined) qs.set(k, String(v));
   }
+  const url = `${PROXY_URL}/slug/${slug}${qs.toString() ? `?${qs.toString()}` : ''}`;
+  const r = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${PROXY_TOKEN ?? ''}` },
+    // Vercel edge fetches need explicit cache hint
+    cache: 'no-store',
+  });
+  if (!r.ok) throw new Error(`data-proxy ${slug} ${r.status}`);
+  return r.json();
 }
 
-export async function runSlug(slug: string, params: Record<string, unknown> = {}): Promise<unknown[]> {
+async function runSlugDirect(slug: string, params: Record<string, unknown>): Promise<unknown[]> {
   const p = pool();
   const def = await p.query(
     'SELECT sql_template, param_schema FROM query_whitelist WHERE slug = $1 AND active = true AND approved_at IS NOT NULL',
@@ -40,7 +52,6 @@ export async function runSlug(slug: string, params: Record<string, unknown> = {}
     ? JSON.parse(param_schema)
     : (param_schema || {});
   const args = Object.keys(ps).map((k) => (params as Record<string, unknown>)[k] ?? null);
-  // Run with realm = owner (server-side, never trust client header)
   const client = await p.connect();
   try {
     await client.query(`SELECT home_ai.set_realm('owner')`);
@@ -49,4 +60,66 @@ export async function runSlug(slug: string, params: Record<string, unknown> = {}
   } finally {
     client.release();
   }
+}
+
+export async function runSlug(slug: string, params: Record<string, unknown> = {}): Promise<unknown[]> {
+  if (PROXY_URL) return runSlugViaProxy(slug, params);
+  return runSlugDirect(slug, params);
+}
+
+export interface SandboxCommentPost {
+  component_id: string; comment_text: string;
+  page_path?: string | null; author?: string | null;
+}
+export async function postSandboxComment(body: SandboxCommentPost) {
+  if (PROXY_URL) {
+    const r = await fetch(`${PROXY_URL}/sandbox/comments`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${PROXY_TOKEN ?? ''}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`proxy sandbox POST ${r.status}`);
+    return r.json();
+  }
+  const p = pool();
+  const r = await p.query(
+    `INSERT INTO sandbox_comments (component_id, comment_text, author, page_path)
+     VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+    [body.component_id, body.comment_text, body.author ?? null, body.page_path ?? null]
+  );
+  return r.rows[0];
+}
+
+export async function getSandboxComments(componentId?: string, pagePath?: string) {
+  if (PROXY_URL) {
+    const qs = new URLSearchParams();
+    if (componentId) qs.set('component_id', componentId);
+    if (pagePath)    qs.set('page_path', pagePath);
+    const r = await fetch(`${PROXY_URL}/sandbox/comments${qs.toString() ? `?${qs}` : ''}`, {
+      headers: { 'Authorization': `Bearer ${PROXY_TOKEN ?? ''}` },
+      cache: 'no-store',
+    });
+    if (!r.ok) throw new Error(`proxy sandbox GET ${r.status}`);
+    return r.json();
+  }
+  const where: string[] = [];
+  const args: (string | null)[] = [];
+  if (componentId) { args.push(componentId); where.push(`component_id = $${args.length}`); }
+  if (pagePath)    { args.push(pagePath);    where.push(`page_path = $${args.length}`); }
+  const sql = `SELECT id, component_id, comment_text, author, page_path, created_at, resolved_at FROM sandbox_comments ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT 100`;
+  const r = await pool().query(sql, args);
+  return r.rows;
+}
+
+export async function healthCheck() {
+  if (PROXY_URL) {
+    const r = await fetch(`${PROXY_URL}/healthz`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`proxy /healthz ${r.status}`);
+    return r.json();
+  }
+  const r = await pool().query('SELECT NOW() AS now');
+  return { status: 'ok', db_time: r.rows[0].now };
 }

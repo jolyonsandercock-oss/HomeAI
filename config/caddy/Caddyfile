@@ -107,6 +107,19 @@ https://jolybox.tailc27dff.ts.net {
         respond "ok" 200
     }
 
+    # Data-proxy for Vercel + other external HTTPS callers — bearer-token
+    # auth at the application layer (HOMEAI_DATA_TOKEN), no Authelia cookie.
+    handle_path /data/* {
+        reverse_proxy homeai-data-proxy:8771
+    }
+
+    # Public homeai-frontend mirror (no Authelia — Wix/Vercel iframe target).
+    # Bearer + HMAC-from-Wix-Velo handoff gates page-level access in the
+    # Next.js middleware itself.
+    handle_path /app/* {
+        reverse_proxy homeai-frontend:3000
+    }
+
     # Everything else: forward_auth, then proxy to the dashboard.
     # Remote-Groups carries the realm membership which the dashboard
     # middleware (REALM_ENFORCE=1) reads and maps to app.current_realm.
