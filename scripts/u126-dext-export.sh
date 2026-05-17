@@ -118,37 +118,69 @@ with sync_playwright() as p:
 
     dismiss_modals()
 
-    print('-- triggering CSV export')
+    print('-- opening Export all modal')
+    page.click('button:has-text("Export all")', timeout=5000)
+    page.wait_for_timeout(1000)
+    page.screenshot(path=OUT.replace('.csv', '-pre-export.png'))
+
+    # Verify the error is GONE (filter should have removed problem rows)
     try:
-        # Step 1: open the "Export all items" modal
-        page.click('button:has-text("Export all")', timeout=5000)
-        page.wait_for_timeout(800)
+        err = page.locator('text="Please set total amount"').first
+        if err.is_visible(timeout=1000):
+            print('  ✗ "Please set total amount" still visible — filter did not stop the block')
+        else:
+            print('  ✓ no extraction-warning error on modal')
+    except Exception: pass
 
-        # Step 2: modal has tabs CSV/PDF/ZIP — CSV is default. Confirm it.
-        try:
-            page.click('button:has-text("CSV"), [role="tab"]:has-text("CSV")', timeout=2000)
-        except Exception: pass
-        page.wait_for_timeout(300)
-
-        # Step 3: click the modal's confirm Export button (the small dark one)
-        with page.expect_download(timeout=120000) as dlinfo:
-            # Use role+name to be precise — there are two "Export" buttons
-            # ("Export all" outside the modal, "Export" inside)
-            for sel in [
-                '.d-modal-overlay button:has-text("Export")',
+    print('-- clicking modal Export confirm (no expect_download — will poll instead)')
+    clicked = False
+    for sel in ['.d-modal-overlay button:has-text("Export"):not(:has-text("Export all"))',
                 '[role="dialog"] button:has-text("Export")',
-                'div:has(> :text("Export all items")) button:has-text("Export")',
-                'button[type="submit"]:has-text("Export")',
-            ]:
-                try:
-                    page.click(sel, timeout=3000); break
-                except Exception:
-                    continue
-            else:
-                raise RuntimeError('Modal Export confirm button not found')
-        dl = dlinfo.value
-        dl.save_as(OUT)
-        print(f'-- saved: {OUT}  size={os.path.getsize(OUT)} bytes')
+                'button[type="submit"]:has-text("Export")']:
+        try:
+            page.click(sel, timeout=3000); clicked = True; print(f'   clicked: {sel}'); break
+        except Exception:
+            continue
+    if not clicked:
+        # Fallback: click "Export" exact-text inside the modal
+        try:
+            page.locator('button').filter(has_text='Export').nth(-1).click(timeout=3000)
+            clicked = True; print('   clicked via nth(-1)')
+        except Exception as e:
+            print(f'   ! no Export-confirm button found: {e}')
+
+    # Now poll for 3 outcomes: download event, toast, or unchanged state
+    print('-- watching for outcome (download / toast / redirect, up to 180s)')
+    downloads = []
+    page.on('download', lambda d: downloads.append(d))
+    deadline = __import__('time').time() + 180
+    last_url = page.url
+    last_shot = None
+    try:
+        while __import__('time').time() < deadline:
+            if downloads:
+                dl = downloads[0]
+                dl.save_as(OUT)
+                print(f'-- saved: {OUT}  size={os.path.getsize(OUT)} bytes')
+                break
+            # Snapshot every 15s for visibility
+            now = int(deadline - __import__('time').time())
+            page.screenshot(path=OUT.replace('.csv', f'-poll-{180-now:03d}s.png'))
+            # Toast / banner check
+            try:
+                texts = page.locator('.toaster, .toast, [role="status"], .d-notification').all_inner_texts()
+                if texts:
+                    print(f'   t+{180-now}s toast: {texts[:3]}')
+            except Exception: pass
+            if page.url != last_url:
+                print(f'   t+{180-now}s url changed: {last_url} → {page.url}')
+                last_url = page.url
+            __import__('time').sleep(15)
+        else:
+            print('-- timed out, no download arrived in 180s')
+            page.screenshot(path=OUT.replace('.csv', '-FAIL.png'), full_page=True)
+            open(OUT.replace('.csv', '-FAIL.html'), 'w').write(page.content())
+            ctx.close(); sys.exit(3)
     except Exception as e:
         # Save diagnostic snapshot on download timeout / unknown failure
         shot = OUT.replace('.csv', '-FAIL.png')
