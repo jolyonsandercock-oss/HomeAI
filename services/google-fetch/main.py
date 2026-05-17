@@ -540,6 +540,78 @@ async def send_email(account: str, req: SendEmailRequest):
     }
 
 
+# ─── /forward — preserve attachments via raw RFC822 ────────────
+@app.post("/forward/{account}/{message_id}")
+async def forward_email(account: str, message_id: str,
+                         to: str = Query(..., description="forward recipient"),
+                         prepend_subject: str = Query("Fwd: ", description="subject prefix")):
+    """U128: forward a Gmail message verbatim (with attachments) to `to`.
+    Fetches raw RFC822, rewrites headers (To, From, Subject prefix),
+    posts back via messages.send. Used by u128-forward-orphans.sh to
+    auto-forward invoice emails to malthousepub@dext.cc when Xero doesn't
+    have a matching bill within 7 days."""
+    import base64, email
+    from email.utils import formatdate, make_msgid
+
+    acc = await find_account(account)
+    tok = await access_token(acc)
+
+    t0 = time.time()
+    r = await app.state.http.get(
+        f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
+        params={"format": "raw"},
+        headers={"Authorization": f"Bearer {tok}"},
+    )
+    await log_call(account, "gmail", "messages.get(raw)", r.status_code,
+                   int((time.time() - t0) * 1000),
+                   None if r.status_code == 200 else r.text[:200])
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, r.text)
+
+    raw_b64 = r.json().get("raw", "")
+    raw_bytes = base64.urlsafe_b64decode(raw_b64 + "=" * (-len(raw_b64) % 4))
+    msg = email.message_from_bytes(raw_bytes)
+
+    # Rewrite headers — drop original routing, set new From/To/Subject.
+    for h in ("To", "Cc", "Bcc", "Delivered-To", "Return-Path",
+              "From", "Reply-To", "Sender", "Subject",
+              "Message-ID", "DKIM-Signature", "X-Google-DKIM-Signature",
+              "ARC-Authentication-Results", "ARC-Message-Signature", "ARC-Seal",
+              "Authentication-Results", "Received", "Received-SPF"):
+        del msg[h]
+    orig_subject = email.message_from_bytes(raw_bytes).get("Subject", "(no subject)")
+    msg["From"]       = acc["email"]
+    msg["To"]         = to
+    msg["Subject"]    = f"{prepend_subject}{orig_subject}"
+    msg["Date"]       = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain="malthousetintagel.com")
+
+    encoded = base64.urlsafe_b64encode(msg.as_bytes()).rstrip(b"=").decode("ascii")
+
+    t0 = time.time()
+    r2 = await app.state.http.post(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        json={"raw": encoded},
+        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+    )
+    await log_call(account, "gmail", "messages.send(forward)", r2.status_code,
+                   int((time.time() - t0) * 1000),
+                   None if r2.status_code == 200 else r2.text[:300])
+    if r2.status_code != 200:
+        raise HTTPException(r2.status_code, r2.text)
+
+    body = r2.json()
+    return {
+        "account":           account,
+        "original_id":       message_id,
+        "forwarded_to":      to,
+        "subject":           msg["Subject"],
+        "forwarded_message_id": body.get("id"),
+        "thread_id":         body.get("threadId"),
+        "size":              len(msg.as_bytes()),
+    }
+
+
 # ─── /poll-and-emit ─────────────────────────────────────────────
 @app.post("/poll-and-emit")
 async def poll_and_emit(newer_than: str = Query("1d"), max_per_account: int = Query(50, ge=1, le=200)):
