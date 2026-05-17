@@ -44,7 +44,7 @@ with sync_playwright() as p:
     page = ctx.new_page()
 
     print('-- navigating to Dext Costs')
-    page.goto('https://app.dext.com/costs', wait_until='domcontentloaded', timeout=30000)
+    page.goto('https://app.dext.com/delta/costs/archive', wait_until='domcontentloaded', timeout=30000)
     page.wait_for_load_state('networkidle', timeout=20000)
 
     if 'login' in page.url.lower() or 'sign-in' in page.url.lower():
@@ -94,8 +94,12 @@ with sync_playwright() as p:
         with page.expect_download(timeout=60000) as dlinfo:
             clicked = False
             for selector in [
-                'button:has-text("Export")', 'button:has-text("Download CSV")',
-                'a:has-text("Export")',      '[aria-label*="Export" i]',
+                'button:has-text("Export all")',          # Dext Archive tab
+                'a:has-text("Export all")',
+                'button:has-text("Export")',
+                'button:has-text("Download CSV")',
+                'a:has-text("Export")',
+                '[aria-label*="Export" i]',
                 'button[title*="Export" i]',
                 'text=/^Export$/i',
             ]:
