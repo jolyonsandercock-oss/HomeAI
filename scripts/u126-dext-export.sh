@@ -102,13 +102,17 @@ with sync_playwright() as p:
     print('-- applying "Without extraction warnings" filter')
     try:
         page.locator('.s-button-filter-transparent').first.click(timeout=5000)
-        page.wait_for_timeout(1200)
-        page.click('button:has-text("Without extraction warnings"), '
-                   'span:has-text("Without extraction warnings")',
-                   timeout=4000)
-        page.wait_for_timeout(400)
+        page.wait_for_timeout(1500)
+        # Pills are spans/divs, not <button> — exact text match works
+        page.locator('text="Without extraction warnings"').first.click(timeout=4000)
+        page.wait_for_timeout(500)
         page.click('button:has-text("Apply")', timeout=4000)
-        page.wait_for_timeout(3500)
+        page.wait_for_timeout(4000)
+        # Verify the filter took effect — count should drop
+        try:
+            count_txt = page.locator('text=/of \\d+ items/i').first.inner_text(timeout=2000)
+            print(f'   filtered to: {count_txt}')
+        except Exception: pass
     except Exception as e:
         print(f'(filter apply failed: {e})')
 
