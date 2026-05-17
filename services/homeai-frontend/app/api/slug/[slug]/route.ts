@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { runSlug } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 export async function GET(req: NextRequest, { params }: { params: { slug: string } }) {
   try {

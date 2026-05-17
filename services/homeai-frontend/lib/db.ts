@@ -25,16 +25,37 @@ export function pool(): Pool {
   return global._pgPool;
 }
 
+async function fetchWithRetry(url: string, init: RequestInit, attempts = 3, timeoutMs = 20000): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      const r = await fetch(url, { ...init, signal: ctl.signal, cache: 'no-store' });
+      clearTimeout(t);
+      // Retry on 502/503/504 (likely transient relay issues)
+      if (r.status >= 502 && r.status <= 504 && i < attempts - 1) {
+        await new Promise((res) => setTimeout(res, 500 * (i + 1)));
+        continue;
+      }
+      return r;
+    } catch (e) {
+      clearTimeout(t);
+      lastErr = e;
+      if (i < attempts - 1) await new Promise((res) => setTimeout(res, 500 * (i + 1)));
+    }
+  }
+  throw lastErr ?? new Error('fetch retries exhausted');
+}
+
 async function runSlugViaProxy(slug: string, params: Record<string, unknown>): Promise<unknown[]> {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v !== null && v !== undefined) qs.set(k, String(v));
   }
   const url = `${PROXY_URL}/slug/${slug}${qs.toString() ? `?${qs.toString()}` : ''}`;
-  const r = await fetch(url, {
+  const r = await fetchWithRetry(url, {
     headers: { 'Authorization': `Bearer ${PROXY_TOKEN ?? ''}` },
-    // Vercel edge fetches need explicit cache hint
-    cache: 'no-store',
   });
   if (!r.ok) throw new Error(`data-proxy ${slug} ${r.status}`);
   return r.json();
@@ -116,7 +137,7 @@ export async function getSandboxComments(componentId?: string, pagePath?: string
 
 export async function healthCheck() {
   if (PROXY_URL) {
-    const r = await fetch(`${PROXY_URL}/healthz`, { cache: 'no-store' });
+    const r = await fetchWithRetry(`${PROXY_URL}/healthz`, {});
     if (!r.ok) throw new Error(`proxy /healthz ${r.status}`);
     return r.json();
   }

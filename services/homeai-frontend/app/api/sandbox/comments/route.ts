@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSandboxComments, postSandboxComment } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 export async function GET(req: NextRequest) {
   const cid = new URL(req.url).searchParams.get('component_id') ?? undefined;
