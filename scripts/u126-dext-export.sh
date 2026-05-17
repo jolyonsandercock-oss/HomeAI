@@ -50,7 +50,13 @@ with sync_playwright() as p:
     # export everything. We narrow to a date window inside our DB after parse.
     page.goto('https://app.dext.com/delta/costs/archive',
               wait_until='commit', timeout=60000)
-    page.wait_for_load_state('networkidle', timeout=30000)
+    # Don't wait_for_load_state(networkidle) — Dext has constant background
+    # WS/telemetry traffic so it never goes idle. Wait for a specific
+    # element that indicates the page is interactive instead.
+    try:
+        page.wait_for_selector('button:has-text("Export all")', timeout=30000)
+    except Exception:
+        page.wait_for_timeout(5000)
 
     if 'login' in page.url.lower() or 'sign-in' in page.url.lower():
         print(f'ERR: bounced to {page.url} — session expired, re-pair', file=sys.stderr)
@@ -93,8 +99,7 @@ with sync_playwright() as p:
                    timeout=4000)
         page.wait_for_timeout(400)
         page.click('button:has-text("Apply")', timeout=4000)
-        page.wait_for_timeout(2500)
-        page.wait_for_load_state('networkidle', timeout=15000)
+        page.wait_for_timeout(3500)
     except Exception as e:
         print(f'(filter apply failed: {e})')
 
