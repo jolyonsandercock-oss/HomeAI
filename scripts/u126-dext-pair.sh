@@ -8,6 +8,9 @@ VENV=/home_ai/data/dext-venv
 CHROME=/home_ai/data/playwright-browsers/chromium-1148/chrome-linux/chrome
 mkdir -p "$PROFILE_DIR"
 
+# Clear any stale Singleton locks from previous failed run
+sudo -n rm -f "$PROFILE_DIR/Singleton"* 2>/dev/null || rm -f "$PROFILE_DIR/Singleton"* 2>/dev/null || true
+
 [ -x "$VENV/bin/python" ] || { echo "venv missing at $VENV"; exit 1; }
 [ -x "$CHROME" ]          || { echo "chromium missing at $CHROME"; exit 1; }
 [ -z "${DISPLAY:-}" ]     && { echo "DISPLAY not set — try: export DISPLAY=:0"; exit 1; }
@@ -52,7 +55,16 @@ with sync_playwright() as p:
         args=['--no-sandbox', '--disable-dev-shm-usage'],
     )
     page = ctx.pages[0] if ctx.pages else ctx.new_page()
-    page.goto(URL, wait_until='domcontentloaded', timeout=30000)
+    # Retry navigation — Chromium gets ERR_NETWORK_CHANGED if a host
+    # interface (e.g. Tailscale) flaps during page load
+    for attempt in range(1, 5):
+        try:
+            page.goto(URL, wait_until='domcontentloaded', timeout=30000)
+            break
+        except Exception as e:
+            print(f'goto attempt {attempt}/4 failed: {e}')
+            if attempt == 4: raise
+            time.sleep(3)
     try:
         page.fill('input[type=email], input[name=email]', EMAIL, timeout=8000)
         page.fill('input[type=password], input[name=password]', PASSWORD, timeout=4000)
