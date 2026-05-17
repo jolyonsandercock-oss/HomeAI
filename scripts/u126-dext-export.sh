@@ -91,32 +91,32 @@ with sync_playwright() as p:
 
     print('-- triggering CSV export')
     try:
-        with page.expect_download(timeout=60000) as dlinfo:
-            clicked = False
-            for selector in [
-                'button:has-text("Export all")',          # Dext Archive tab
-                'a:has-text("Export all")',
-                'button:has-text("Export")',
-                'button:has-text("Download CSV")',
-                'a:has-text("Export")',
-                '[aria-label*="Export" i]',
-                'button[title*="Export" i]',
-                'text=/^Export$/i',
+        # Step 1: open the "Export all items" modal
+        page.click('button:has-text("Export all")', timeout=5000)
+        page.wait_for_timeout(800)
+
+        # Step 2: modal has tabs CSV/PDF/ZIP — CSV is default. Confirm it.
+        try:
+            page.click('button:has-text("CSV"), [role="tab"]:has-text("CSV")', timeout=2000)
+        except Exception: pass
+        page.wait_for_timeout(300)
+
+        # Step 3: click the modal's confirm Export button (the small dark one)
+        with page.expect_download(timeout=120000) as dlinfo:
+            # Use role+name to be precise — there are two "Export" buttons
+            # ("Export all" outside the modal, "Export" inside)
+            for sel in [
+                '.d-modal-overlay button:has-text("Export")',
+                '[role="dialog"] button:has-text("Export")',
+                'div:has(> :text("Export all items")) button:has-text("Export")',
+                'button[type="submit"]:has-text("Export")',
             ]:
                 try:
-                    page.click(selector, timeout=4000)
-                    clicked = True; break
+                    page.click(sel, timeout=3000); break
                 except Exception:
                     continue
-            if not clicked:
-                # Last resort: snapshot the DOM + screenshot so we can fix selectors
-                shot = OUT.replace('.csv', '-FAIL.png')
-                html = OUT.replace('.csv', '-FAIL.html')
-                page.screenshot(path=shot, full_page=True)
-                open(html, 'w').write(page.content())
-                raise RuntimeError(f'Export button not found. See {shot} + {html}')
-            try: page.click('text=/CSV|Comma|\\.csv/i', timeout=4000)
-            except Exception: pass
+            else:
+                raise RuntimeError('Modal Export confirm button not found')
         dl = dlinfo.value
         dl.save_as(OUT)
         print(f'-- saved: {OUT}  size={os.path.getsize(OUT)} bytes')
