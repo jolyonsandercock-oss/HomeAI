@@ -76,7 +76,8 @@ TOOL_SCHEMA = {
 
 async def log_ai_usage(conn, model, usage, *, service, trace):
     """Write Anthropic usage (including prompt-cache stats) to ai_usage.
-    Silent on failure — observability shouldn't block extraction."""
+    Silent on failure — observability shouldn't block extraction.
+    trace_id is UUID — passing arbitrary strings was spamming the log."""
     if not usage:
         return
     try:
@@ -86,9 +87,9 @@ async def log_ai_usage(conn, model, usage, *, service, trace):
                prompt_tokens, completion_tokens,
                cache_creation_tokens, cache_read_tokens,
                service, realm, provider, cached)
-            VALUES ($1, 'invoice.line_items', $2, 'cloud',
-                    $3, $4, $5, $6, $7, 'work', 'anthropic', $8)
-        """, trace, model,
+            VALUES (NULL, 'invoice.line_items', $1, 'cloud',
+                    $2, $3, $4, $5, $6, 'work', 'anthropic', $7)
+        """, model,
              usage.get("input_tokens", 0) or 0,
              usage.get("output_tokens", 0) or 0,
              usage.get("cache_creation_input_tokens", 0) or 0,
