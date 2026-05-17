@@ -15,6 +15,24 @@ sudo -n rm -f "$PROFILE_DIR/Singleton"* 2>/dev/null || rm -f "$PROFILE_DIR/Singl
 [ -x "$CHROME" ]          || { echo "chromium missing at $CHROME"; exit 1; }
 [ -z "${DISPLAY:-}" ]     && { echo "DISPLAY not set — try: export DISPLAY=:0"; exit 1; }
 
+# Network pre-flight — wait until app.dext.com is reachable before
+# launching Chromium. Chromium throws ERR_NETWORK_CHANGED if the route
+# table churns mid-request, which it has been doing since Tailscale Funnel.
+echo "── Waiting for app.dext.com to be reachable…"
+for try in 1 2 3 4 5 6 7 8 9 10; do
+  status=$(curl -sI --max-time 8 https://app.dext.com/ -o /dev/null -w "%{http_code}" 2>&1)
+  if [[ "$status" =~ ^(200|301|302|303)$ ]]; then
+    echo "  reachable (HTTP $status)"
+    break
+  fi
+  echo "  attempt $try/10 — status='$status', retrying in 5s…"
+  sleep 5
+  if [ "$try" -eq 10 ]; then
+    echo "❌ app.dext.com unreachable. Check upstream network. Try later."
+    exit 1
+  fi
+done
+
 VAULT_TOKEN=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 CREDS_JSON=$(docker exec -e VAULT_TOKEN="$VAULT_TOKEN" homeai-vault vault kv get -format=json secret/dext 2>/dev/null) || {
   echo "❌ secret/dext not set. Run set-dext-creds.sh first."
