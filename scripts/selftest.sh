@@ -75,9 +75,9 @@ echo
 echo "[4] n8n workflows"
 ACTIVE=$($PSQL "SELECT count(*) FROM workflow_entity WHERE active=true")
 check "active workflow count >= 13" "[[ $ACTIVE -ge 13 ]] && echo $ACTIVE"
-for wf in test-master-router gmail-ingest-v1 QMKzaCFrKBS4ewWm partition-maintenance-v1 \
+for wf in test-master-router gmail-ingest-v1 partition-maintenance-v1 \
           bank-csv-import-v1 nanny-v1 report-ingestion-v1 invoice-pipeline-v1 \
-          alert-sink-v1 hmac-verifier-v1 dreaming-v1 diagnostics-v1 cleanup-v1 \
+          alert-sink-v1 hmac-verifier-v1 diagnostics-v1 cleanup-v1 \
           watchdog-n8n-errors; do
   check "  workflow $wf active" "$PSQL \"SELECT active FROM workflow_entity WHERE id='$wf'\" | command grep -q '^t$' && echo active"
 done

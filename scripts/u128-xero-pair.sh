@@ -55,7 +55,7 @@ echo "CHROME_EXEC=$CHROME"   >> "$ENV_FILE"
 echo "PROFILE_DIR=$PROFILE_DIR" >> "$ENV_FILE"
 
 cat > "$RUNNER" <<'PY'
-import os, time
+import os, sys, time
 from playwright.sync_api import sync_playwright
 
 EMAIL    = os.environ['XERO_EMAIL']
@@ -83,32 +83,79 @@ with sync_playwright() as p:
             print(f'goto attempt {attempt}/4: {e}')
             time.sleep(3)
 
-    # Auto-fill if Xero shows the email/password form (sometimes they
-    # split it across two pages — email then password). Best-effort.
+    # Auto-fill. Xero currently uses a unified form (email + password on
+    # one page). Older split-form layout has email first, then password
+    # on a second page after Continue. Handle both.
     try:
         page.fill('input[type=email], input[name=Username], #xl-form-email',
                   EMAIL, timeout=8000)
-        # Continue button before password page (Xero's split-form flow)
-        for sel in ['button#xl-form-submit', 'button:has-text("Log in")',
-                    'button:has-text("Continue")']:
-            try: page.click(sel, timeout=2000); break
-            except Exception: continue
-        page.wait_for_timeout(1500)
-        page.fill('input[type=password], input[name=Password], #xl-form-password',
-                  PASSWORD, timeout=8000)
+
+        try:
+            page.fill('input[type=password], input[name=Password], #xl-form-password',
+                      PASSWORD, timeout=2500)
+            print('  unified form — filled email + password')
+        except Exception:
+            print('  split form — pressing Continue, waiting for password page')
+            page.click('button#xl-form-submit, button:has-text("Continue")',
+                       timeout=4000)
+            page.wait_for_timeout(2000)
+            page.fill('input[type=password], input[name=Password], #xl-form-password',
+                      PASSWORD, timeout=8000)
+
+        page.wait_for_timeout(500)
+        try:
+            page.click('button#xl-form-submit, button:has-text("Log in")',
+                       timeout=4000)
+            print('  Log in clicked — complete 2FA in the window')
+        except Exception as e:
+            print(f'  could not click final Log in ({e}) — click it manually')
     except Exception as e:
-        print(f'(auto-fill skipped — Xero login form changed or different layout: {e})')
+        print(f'(auto-fill skipped — Xero login form changed: {e}) — fill manually')
 
     print('Browser is open. Click Log in + complete 2FA (SMS or auth app).')
-    print('Once you see the Xero dashboard, close the window.')
+    print('Waiting for redirect off login.xero.com (up to 15 min)…')
     deadline = time.time() + 900
+    reached_post_login = False
     while time.time() < deadline:
-        try: _ = page.title()
-        except Exception: break
+        try:
+            url = page.url
+        except Exception:
+            break
+        if 'login.xero.com' not in url and ('go.xero.com' in url or 'my.xero.com' in url):
+            print(f'  post-login URL detected: {url}')
+            reached_post_login = True
+            break
         time.sleep(2)
+
+    if not reached_post_login:
+        print('✗ Never saw a post-login URL. Did you complete 2FA?', file=sys.stderr)
+        try: ctx.close()
+        except Exception: pass
+        sys.exit(2)
+
+    # Force go.xero.com cookies to be set by navigating to the bills page.
+    print(f'  navigating to bills URL to capture go.xero.com session cookies…')
+    try:
+        page.goto(BILLS_URL, wait_until='domcontentloaded', timeout=60000)
+        page.wait_for_timeout(3000)
+    except Exception as e:
+        print(f'  (bills nav warning: {e})')
+
+    cookies = ctx.cookies()
+    go_cookies = [c for c in cookies if 'go.xero.com' in c.get('domain','')]
+    print(f'  go.xero.com cookies captured: {len(go_cookies)}')
+    for c in go_cookies[:6]:
+        print(f'    {c["domain"]:25s} {c["name"]}')
+
+    if not go_cookies:
+        print('✗ No go.xero.com cookies — session not fully established.', file=sys.stderr)
+        try: ctx.close()
+        except Exception: pass
+        sys.exit(3)
+
     try: ctx.close()
     except Exception: pass
-    print(f'✓ Xero session saved to {PROFILE}')
+    print(f'✓ Xero session saved to {PROFILE} ({len(go_cookies)} go.xero.com cookies)')
 PY
 
 cat <<EOF
@@ -122,8 +169,15 @@ Click Log in → complete 2FA → close window when Xero dashboard loads.
 EOF
 
 set -a; . "$ENV_FILE"; set +a
+set +e
 "$VENV/bin/python" "$RUNNER"
-
+rc=$?
+set -e
 echo
-echo "Pairing done. Try the bills export:"
-echo "    /home_ai/scripts/u128-xero-export.sh"
+if [ $rc -eq 0 ]; then
+  echo "Pairing done. Pull bills CSV now (session is hot):"
+  echo "    DISPLAY=:0 XERO_HEADED=1 /home_ai/scripts/u128-xero-export.sh"
+else
+  echo "✗ Pairing failed (rc=$rc) — see messages above. Retry when ready."
+  exit $rc
+fi

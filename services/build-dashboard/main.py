@@ -5798,45 +5798,15 @@ async def _vault_read(path: str) -> dict | None:
 
 
 async def _load_finance_slugs(conn) -> list[dict]:
-    """Approved finance slugs in query_whitelist, owner realm visible."""
+    """Approved slugs in query_whitelist. Every active+approved slug is
+    surfaced — realm-based RLS at run time controls who sees what data
+    (see _run_slug's home_ai.set_realm call). Adding a new slug to
+    query_whitelist now makes it dashboard-callable without a code change."""
     rows = await conn.fetch("""
         SELECT id, slug, display_name, description, intent_examples,
                sql_template, param_schema, result_format
           FROM query_whitelist
          WHERE active = true AND approved_at IS NOT NULL
-           AND slug IN ('interest_paid_window','fees_paid_window','account_balances',
-                        'owings_summary','monthly_finance_costs','top_vendors_window',
-                        'transfers_recent','spend_by_category_window','credit_card_status',
-                        'recent_finance_events','finance_kpis','top_purchases_window',
-                        'mortgages_summary','mortgages_all','capital_summary',
-                        'net_worth_summary','mortgage_coverage',
-                        -- U84 Phase 2 additions
-                        'today_kpis_work','today_kpis_private','action_queue',
-                        -- U84 Phase 5 additions (build hub)
-                        'build_pipeline_status','build_model_spend_30d',
-                        'build_forensic_summary',
-                        -- U84 Phase 3 additions (work tabs)
-                        'work_docs_kpis','work_staff_kpis','work_email_kpis',
-                        -- U84 Phase 4 additions (private tabs)
-                        'private_family_kpis','private_docs_kpis',
-                        -- U84 Phase 7 additions (telemetry)
-                        'route_telemetry_7d',
-                        -- U84 private docs detail lists
-                        'private_vehicles',
-                        -- U85 Phase D2 (desktop sections)
-                        'today_bookings','today_pub_sales',
-                        -- U85 Phase D3 (docs/vendors)
-                        'recent_invoices','vendor_site_rules',
-                        'noise_senders','cost_centre_breakdown',
-                        -- U85 Phase D9 (placeholder slugs wired)
-                        'children','email_tasks_open','bot_instructions_pending',
-                        'labour_recent_14d','ghost_shifts_recent','daily_gp_recent',
-                        -- U98 source breakdown
-                        'today_bookings_by_source',
-                        -- U101 restaurant reservations
-                        'today_restaurant',
-                        -- U106 breakfast orders
-                        'breakfast_tomorrow')
          ORDER BY slug
     """)
     out = []

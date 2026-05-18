@@ -56,6 +56,14 @@ __pycache__/
 /data/realm-scoped/
 /data/credit-card-inbox/
 /data/paperless-consume/
+/data/dext-exports/
+/data/dext-profile/
+/data/dext-recon/
+/data/xero-exports/
+/data/xero-inbox/
+/data/xero-profile/
+/data/playwright-browsers/
+/data/*.lastsent
 
 # Tailscale cert + key — minted at the box, regenerable; key MUST NOT leave host.
 /config/caddy/tls/
@@ -75,5 +83,6 @@ node_modules/
 
 # Authelia runtime + backups (never commit secrets or session DB)
 /security/authelia-v2/configuration.yml.bak.*
+/security/authelia-v2/configuration.yml.applied-*
 /security/authelia-v2/db.sqlite3
 /security/authelia-v2/notification.txt

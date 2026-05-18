@@ -172,16 +172,6 @@ with sync_playwright() as p:
             open(OUT.replace('.csv', '-FAIL.html'), 'w').write(page.content())
         except Exception: pass
         ctx.close(); sys.exit(3)
-    except Exception as e:
-        # Save diagnostic snapshot on download timeout / unknown failure
-        shot = OUT.replace('.csv', '-FAIL.png')
-        html = OUT.replace('.csv', '-FAIL.html')
-        try:
-            page.screenshot(path=shot, full_page=True)
-            open(html, 'w').write(page.content())
-            print(f'-- failed: {e}\n   snapshot: {shot}\n   dom: {html}')
-        except Exception: pass
-        ctx.close(); sys.exit(3)
     ctx.close()
 PY
 
