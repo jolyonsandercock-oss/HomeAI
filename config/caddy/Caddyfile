@@ -117,7 +117,8 @@ https://jolybox.tailc27dff.ts.net {
     # every emitted asset/route/Link self-prefixes. Caddy does NOT strip the
     # prefix; Next.js sees the full /app/ path and routes correctly.
     # Forward_auth gated (Authelia owner-realm session).
-    handle /app/* {
+    @app path /app /app/*
+    handle @app {
         forward_auth homeai-authelia:9091 {
             uri /api/verify?rd=https://jolybox.tailc27dff.ts.net/auth/
             copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
