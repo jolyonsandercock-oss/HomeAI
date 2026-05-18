@@ -1,5 +1,25 @@
 # U94 — Booking harvest, surface + thread linking (36-month horizon)
 
+> **STATUS: SUPERSEDED — 2026-05-18.** Most of this plan shipped under later sprint numbers rather than as U94 T2-T9. Three small leftovers rolled into [[U130]].
+>
+> | Track | Delivered by | State |
+> |---|---|---|
+> | T1 hotel-email.com | `cbed534`, `f76286f`, `b6037ab` (U94 T1) | ✅ 2,579 rows |
+> | T2 OTAs | `cb825bc` (U96 Airbnb), `9193722` (U97 Caterbook-fwd OTAs), `ff5b905` (U98 cron) | 🟨 Airbnb/Agoda/Ctrip ✓; **Booking.com missing — 33 emails unprocessed → U130** |
+> | T3 Encounter Walking Holidays | — | ⚪ 0 inbox emails — moot until label set up |
+> | T4 Caterbook `/booking/search` | Pre-existing U27/U28 (`u28-caterbook-daily.sh` + `caterbook_room_nights`) | ✅ Covered via older route |
+> | T5 Caterbook `/reports/sales` | — | ❌ `caterbook_booking_sales` table never landed → U130 |
+> | T6 Collins / DesignMyNight | `4e6c434` (U100+U101 `u101-harvest-collins-reservations.py`) | ✅ 3,266 rows |
+> | T7 Amazon → vendor_invoice_inbox | `f2ec94c` (U95 broad invoice harvester) | ✅ 315 amazon rows |
+> | T8 `/bookings` UI | U123 Next.js `app/rooms/page.tsx` | ✅ via frontend |
+> | T9 `/reservations` calendar | U123 Next.js `app/restaurant/page.tsx` | ✅ via frontend |
+>
+> Source naming inconsistency (`airbnb` vs `Airbnb`, `agodaycs` vs `agoda`) also rolled into U130.
+>
+> Original plan retained below for historical reference.
+
+---
+
 **Prereqs**: U92 shipped. `accommodation_bookings` schema exists.
 
 **Realm**: `work` (all data is business).
