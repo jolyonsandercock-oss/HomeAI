@@ -7,7 +7,7 @@ export function useSlug<T = unknown>(slug: string, params: Record<string, string
   return useQuery<T[]>({
     queryKey: ['slug', slug, qs],
     queryFn: async () => {
-      const r = await fetch(`/api/slug/${slug}${qs ? '?' + qs : ''}`);
+      const r = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/api/slug/${slug}${qs ? '?' + qs : ''}`);
       if (!r.ok) throw new Error(`slug ${slug} ${r.status}`);
       return r.json();
     },

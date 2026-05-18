@@ -113,10 +113,15 @@ https://jolybox.tailc27dff.ts.net {
         reverse_proxy homeai-data-proxy:8771
     }
 
-    # Public homeai-frontend mirror (no Authelia — Wix/Vercel iframe target).
-    # Bearer + HMAC-from-Wix-Velo handoff gates page-level access in the
-    # Next.js middleware itself.
-    handle_path /app/* {
+    # homeai-frontend (Next.js, U123/U127) — built with basePath='/app' so
+    # every emitted asset/route/Link self-prefixes. Caddy does NOT strip the
+    # prefix; Next.js sees the full /app/ path and routes correctly.
+    # Forward_auth gated (Authelia owner-realm session).
+    handle /app/* {
+        forward_auth homeai-authelia:9091 {
+            uri /api/verify?rd=https://jolybox.tailc27dff.ts.net/auth/
+            copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+        }
         reverse_proxy homeai-frontend:3000
     }
 

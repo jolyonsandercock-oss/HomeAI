@@ -2,6 +2,8 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
+const BP = process.env.NEXT_PUBLIC_BASE_PATH || '';
+
 export interface SandboxComment {
   id: number;
   component_id: string;
@@ -17,14 +19,14 @@ export function useSandboxComments(componentId: string) {
   const q = useQuery<SandboxComment[]>({
     queryKey: ['sandbox.comments', componentId],
     queryFn: async () => {
-      const r = await fetch(`/api/sandbox/comments?component_id=${encodeURIComponent(componentId)}`);
+      const r = await fetch(`${BP}/api/sandbox/comments?component_id=${encodeURIComponent(componentId)}`);
       if (!r.ok) throw new Error('fetch failed');
       return r.json();
     },
   });
   const addComment = useMutation({
     mutationFn: async (text: string) => {
-      const r = await fetch('/api/sandbox/comments', {
+      const r = await fetch(`${BP}/api/sandbox/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

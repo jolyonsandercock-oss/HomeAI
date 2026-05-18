@@ -467,7 +467,10 @@ services:
     restart: unless-stopped
 
   homeai-frontend:
-    build: ./services/homeai-frontend
+    build:
+      context: ./services/homeai-frontend
+      args:
+        NEXT_PUBLIC_BASE_PATH: "/app"
     container_name: homeai-frontend
     networks: [ai-internal, ai-egress]
     ports: ["3003:3000"]
@@ -475,6 +478,7 @@ services:
       POSTGRES_READONLY_URL: "postgresql://homeai_readonly:${HOMEAI_READONLY_PASSWORD}@homeai-postgres:5432/homeai"
       NEXT_TELEMETRY_DISABLED: "1"
       NODE_ENV: "production"
+      NEXT_PUBLIC_BASE_PATH: "/app"
     restart: unless-stopped
 
   wa-bridge:
