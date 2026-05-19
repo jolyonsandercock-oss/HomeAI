@@ -27,7 +27,7 @@
 
 ---
 
-### T2 — Tide times table + ingest (~60 min, blocked on Jo's email)
+### T2 — Tide times table + weekly scrape from tidetimes.org.uk (~60 min)
 
 **Realm**: `work`. Public data but operationally relevant — beach traffic correlates with low-tide windows for the cafe.
 
@@ -40,24 +40,23 @@
       high_low TEXT NOT NULL CHECK (high_low IN ('high','low')),
       tide_time TIME NOT NULL,
       height_m NUMERIC(4,2),
-      location TEXT NOT NULL DEFAULT 'sandwich_bay',
-      source TEXT NOT NULL,        -- 'jo_email' | 'admiralty_api' | etc.
-      ingested_at TIMESTAMPTZ DEFAULT now(),
+      location TEXT NOT NULL DEFAULT 'boscastle',
+      source TEXT NOT NULL DEFAULT 'tidetimes.org.uk',
+      scraped_at TIMESTAMPTZ DEFAULT now(),
       realm TEXT NOT NULL DEFAULT 'work',
       UNIQUE (location, tide_date, tide_time)
   );
   CREATE INDEX idx_tide_times_date ON tide_times (tide_date);
   ```
-- `scripts/u133-parse-tide-email.py` — accept the email Jo forwards (subject pattern TBD per Jo), parse the tide table, idempotent-upsert into `tide_times`.
-- New slug `dashboard_tide_today_to_week`: returns next 7 days × high/low for the strip.
-- Surface on week strip: 2 small icons per day (↑ for high, ↓ for low) with HH:MM.
+- `scripts/u133-scrape-tides.py` — fetch `https://www.tidetimes.org.uk/boscastle-tide-times`, parse the next 7 days of high/low tide rows, idempotent-upsert into `tide_times`. Pure HTTP + BeautifulSoup (no Playwright — the page is static HTML, no JS gate). Respect robots.txt.
+- Weekly cron Sunday 06:00 via `crontab.d/u133-tides-weekly`. Catches new week before Jo plans Monday.
+- New slug `dashboard_tides_next_7d`: returns next 7 days × all high/low entries for the strip.
+- Surface on week strip: tides inline per day — `H 09:14 · L 15:32` (or icons ↑/↓ if compact).
 
 **Acceptance**:
-- After Jo emails one month of tides: `tide_times` populated for that month, dashboard strip shows the next 7 days' high+low.
-- Re-running the parser is idempotent.
-- If no tide data for a date: strip cell renders nothing in that row (graceful degrade), not "—" clutter.
-
-**Open question for Jo**: which email account + subject pattern do tides arrive on? `jo@` with subject "tides"? A specific sender like `info@tide-times.co.uk`? Same parser hook either way; just need the filter.
+- First run populates ≥7 days × ~4 tide entries per day from boscastle URL.
+- Re-running scraper is idempotent (UNIQUE on location+date+time).
+- Dashboard strip shows tide row per day; days outside the scrape window render nothing.
 
 ---
 
@@ -132,50 +131,44 @@
 
 ---
 
-### T7 — Email slug audit + fix (~30 min, scoped TBD)
+### T7 — DROPPED — email blocker is OAuth, not slug
 
-**Realm**: `work`.
+**Status**: dropped from sprint. The /comms page banner ("Pending Gmail OAuth re-auth — jo/bot/pounana tokens expired") is the real cause; no slug-side work needed. Resolution is operational, not code: Jo runs `scripts/oauth/redo-google-oauth.sh` (interactive, requires browser sign-in). Once re-auth completes, inbound polling resumes and `email_tasks_open` repopulates automatically — the slug + view already work.
 
-**Current**: There's `email_tasks_open` slug → `SELECT * FROM v_email_tasks_open LIMIT 100`. The `/comms` page has a SandboxWrapper placeholder hint saying email integration is queued.
-
-**Build** (assumed scope — confirm with Jo):
-- Audit what `v_email_tasks_open` returns vs what `/comms/page.tsx` should display.
-- If view shape ≠ UI expectation: rewrite the slug to project the right columns (`from`, `subject`, `received_at`, `lane`, `priority`, `link_to_thread`).
-- Surface the slug in `/comms/page.tsx` as a real (not placeholder) tile: "Open email tasks · click row → Gmail thread".
-
-**Acceptance**:
-- `/comms` page shows the live open-email-tasks list with deep-links to Gmail message IDs.
-- Empty state handled.
-
-**Open question for Jo**: what specifically is broken about the email slug? Is it that the data returned is wrong, or that nothing surfaces it on /comms? (T7 above assumes the latter.)
+**Action item (out-of-sprint)**: run `redo-google-oauth.sh` against accounts `jo`, `bot`, `pounana`. The daily 06:00 `diagnose` cron already exists per DR runbook; once tokens are refreshed, no further code change is needed.
 
 ---
 
-### T8 — Reviews scrape (~120 min, biggest track)
+### T8 — Reviews scrape: recent + average + click-through (~90 min)
 
 **Realm**: `work`.
 
-**Current**: `guest_reviews` table exists (schema: review_id, source, location, rating, reviewer_name, body, posted_at, scraped_at, status). 0 rows. `/comms` page has a placeholder. The U120 review-nudge flow drafts WA messages but has no review data to react to.
+**Current**: `guest_reviews` table exists (schema: review_id, source, location, rating, reviewer_name, body, posted_at, scraped_at, status). 0 rows. `/comms` page has a placeholder.
+
+**Scope (revised)**: harvest recent reviews, show them on /comms with average rating, each row linking to the source review page. NO reply drafts, NO nudge integration in this sprint — those stay in U120 and a future U134.
 
 **Build**:
-- `scripts/u133-scrape-reviews.py` — Playwright (uses the existing Dext/Xero scraping pattern). One-time stored creds per source in Vault (`secret/reviews/{google,tripadvisor,booking_com}`).
+- Add `review_url TEXT` to `guest_reviews` if not present (V147 migration).
+- `scripts/u133-scrape-reviews.py` — Playwright scrape (matches Dext/Xero pattern). One source per worker, all idempotent on `(source, review_id)`.
 - Sources, in priority order:
-  1. **Google Business Profile** — Malthouse + Sandwich café listings (`/business.google.com` or the public maps page if scrape-only).
+  1. **Google Business Profile** — Malthouse + Sandwich Bay café (public Maps listing page is sufficient; no login needed for read).
   2. **TripAdvisor** — both listings.
-  3. **Booking.com guest reviews** — extension of existing Caterbook scraping context (different login though).
+  3. **Booking.com guest reviews** — public listing page (no login needed; private dashboard is richer but adds an auth dependency).
 - Daily cron via `crontab.d/u133-reviews-daily`.
-- Idempotent on `(source, review_id)`.
-- New slug `reviews_recent_unanswered`: most recent 50 reviews where `status = 'new'`, joined to the WA-draft from U120 if exists.
+- New slugs:
+  - `reviews_recent`: most recent 50 reviews across all sources. Returns: `posted_at, source, location, rating, reviewer_name, body_excerpt, review_url`.
+  - `reviews_average_30d`: rolling 30-day average rating per source × location. Returns: `source, location, avg_rating, review_count`.
+- `/comms/page.tsx` updates:
+  - Replace placeholder with two panels: "Average rating" (one tile per source-location showing the 30d avg + count) and "Recent reviews" (list, newest first).
+  - Each row in "Recent reviews" is clickable — `<a href={review.review_url} target="_blank">` to the original page on Google/TripAdvisor/Booking.com.
 
 **Acceptance**:
-- After first scrape: `guest_reviews` populated with ≥10 reviews per source.
-- `/comms` reviews panel surfaces the list with rating + body excerpt + "draft reply" button.
-- Daily cron keeps it fresh.
+- After first scrape: ≥10 reviews per source captured into `guest_reviews` with `review_url` populated.
+- `/comms` shows the average-rating tiles and the recent-reviews list.
+- Clicking a review opens the source page in a new tab.
+- Daily cron keeps the data fresh.
 
-**Open question for Jo**:
-1. Which sources are in scope for v1? Recommend Google + TripAdvisor + Booking.com (matches existing guest-channel coverage).
-2. Confirm creds available for each — Google Business needs OAuth or login session; TripAdvisor needs account; Booking.com piggybacks Caterbook auth.
-3. Where do reply DRAFTS go — back into the existing `review_drafts` table from U120, or somewhere new?
+**Open question for Jo**: confirm Google Maps + TripAdvisor + Booking.com public-page scrape is OK (no login = no T&C friction, no cred storage, but rate-limited). If you want richer data (private review-management dashboard for Google/Booking.com), that adds an OAuth dependency — defer to U134.
 
 ---
 
@@ -218,8 +211,9 @@
 | V144 | `u133_tide_times` | T2 |
 | V145 | `u133_specials_strip` | T5 |
 | V146 | `u133_stayovers_slug` | T6 |
+| V147 | `u133_reviews_url_and_slugs` | T8 (adds `review_url` col + reviews_recent + reviews_average_30d slugs) |
 
-V147+ reserved for T7/T8 slug definitions once their shape is locked.
+T7 dropped — OAuth re-auth resolves it without code changes.
 
 ## Anti-regression checks
 
@@ -228,5 +222,9 @@ V147+ reserved for T7/T8 slug definitions once their shape is locked.
 
 ## Follow-on sprints
 
-- **U134** — reply-posting automation: once T8 is harvesting, close the loop with WhatsApp / email replies to reviews.
-- **U135** — full /comms IA pass: email is currently a placeholder; once T7 + T8 land, /comms needs its own layout review.
+- **U134** — review-response loop: once T8 is harvesting, draft replies via Sonnet + post-via-OAuth (Google Business / Booking.com management dashboards), close the loop the U120 nudge already started.
+- **U135** — full /comms IA pass: once Gmail re-auth lands and `email_tasks_open` is repopulating, /comms needs its own layout review (it's currently a placeholder-heavy page).
+
+## Out-of-sprint action items
+
+- **OAuth re-auth (Gmail jo/bot/pounana)**: run `scripts/oauth/redo-google-oauth.sh` interactively. Unblocks /comms email panel and inbound polling. Not a code change — operational task only. (Daily 06:00 `diagnose` cron is already in place per DR runbook.)
