@@ -75,18 +75,26 @@ function bindNamedParams(sql: string, params: Record<string, unknown>): { sql: s
   return { sql: out, args };
 }
 
-async function runSlugDirect(slug: string, params: Record<string, unknown>): Promise<unknown[]> {
+// Realm of the calling page. Default = 'work' for the Next.js mirror at
+// /app/*. The future /app/private/* surface will pass a different realm
+// via the runSlug call; until that exists, owner-realm slugs are denied.
+const DEFAULT_REQUEST_REALM = 'work';
+
+async function runSlugDirect(slug: string, params: Record<string, unknown>, realm: string): Promise<unknown[]> {
   const p = pool();
   const def = await p.query(
-    'SELECT sql_template, param_schema FROM query_whitelist WHERE slug = $1 AND active = true AND approved_at IS NOT NULL',
+    'SELECT sql_template, param_schema, realm FROM query_whitelist WHERE slug = $1 AND active = true AND approved_at IS NOT NULL',
     [slug]
   );
   if (def.rowCount === 0) throw new Error(`slug not found: ${slug}`);
-  const { sql_template } = def.rows[0];
+  const { sql_template, realm: slug_realm } = def.rows[0];
+  if (slug_realm !== realm && slug_realm !== 'shared') {
+    throw new Error(`slug ${slug} is realm=${slug_realm}; refusing to serve to realm=${realm}`);
+  }
   const { sql, args } = bindNamedParams(sql_template, params);
   const client = await p.connect();
   try {
-    await client.query(`SELECT home_ai.set_realm('owner')`);
+    await client.query(`SELECT home_ai.set_realm($1)`, [realm]);
     const r = await client.query(sql, args);
     return r.rows;
   } finally {
@@ -94,9 +102,9 @@ async function runSlugDirect(slug: string, params: Record<string, unknown>): Pro
   }
 }
 
-export async function runSlug(slug: string, params: Record<string, unknown> = {}): Promise<unknown[]> {
+export async function runSlug(slug: string, params: Record<string, unknown> = {}, realm: string = DEFAULT_REQUEST_REALM): Promise<unknown[]> {
   if (PROXY_URL) return runSlugViaProxy(slug, params);
-  return runSlugDirect(slug, params);
+  return runSlugDirect(slug, params, realm);
 }
 
 export interface SandboxCommentPost {
@@ -123,6 +131,70 @@ export async function postSandboxComment(body: SandboxCommentPost) {
     [body.component_id, body.comment_text, body.author ?? null, body.page_path ?? null]
   );
   return r.rows[0];
+}
+
+// Cash-up write endpoints (U135 T6)
+export interface CashupInput {
+  site: 'malthouse' | 'sandwich';
+  cashup_date: string;
+  till_id: string;
+  cash_taken_pence?: number | null;
+  caterpay_pence?: number | null;
+  collins_deposit_pence?: number | null;
+  manual_notes?: string | null;
+  entered_by?: string | null;
+}
+
+export async function upsertCashupInput(body: CashupInput) {
+  const p = pool();
+  const client = await p.connect();
+  try {
+    await client.query(`SELECT home_ai.set_realm('work')`);
+    const r = await client.query(
+      `INSERT INTO cashup_inputs (site, cashup_date, till_id, cash_taken_pence,
+                                  caterpay_pence, collins_deposit_pence,
+                                  manual_notes, entered_by)
+       VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (site, cashup_date, till_id) DO UPDATE
+          SET cash_taken_pence      = EXCLUDED.cash_taken_pence,
+              caterpay_pence        = EXCLUDED.caterpay_pence,
+              collins_deposit_pence = EXCLUDED.collins_deposit_pence,
+              manual_notes          = EXCLUDED.manual_notes,
+              entered_by            = EXCLUDED.entered_by,
+              entered_at            = NOW()
+       RETURNING id, entered_at`,
+      [body.site, body.cashup_date, body.till_id,
+       body.cash_taken_pence ?? null, body.caterpay_pence ?? null,
+       body.collins_deposit_pence ?? null, body.manual_notes ?? null,
+       body.entered_by ?? null]
+    );
+    return r.rows[0];
+  } finally { client.release(); }
+}
+
+export interface SafeMovement {
+  movement_date: string;
+  site: 'malthouse' | 'sandwich';
+  direction: 'to_safe' | 'from_safe';
+  amount_pence: number;
+  notes?: string | null;
+  entered_by?: string | null;
+}
+
+export async function insertSafeMovement(body: SafeMovement) {
+  const p = pool();
+  const client = await p.connect();
+  try {
+    await client.query(`SELECT home_ai.set_realm('work')`);
+    const r = await client.query(
+      `INSERT INTO safe_movements (movement_date, site, direction, amount_pence, notes, entered_by)
+       VALUES ($1::date, $2, $3, $4, $5, $6)
+       RETURNING id, entered_at`,
+      [body.movement_date, body.site, body.direction, body.amount_pence,
+       body.notes ?? null, body.entered_by ?? null]
+    );
+    return r.rows[0];
+  } finally { client.release(); }
 }
 
 export async function getSandboxComments(componentId?: string, pagePath?: string) {

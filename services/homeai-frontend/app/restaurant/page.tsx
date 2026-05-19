@@ -5,6 +5,7 @@ import { KPICard } from '@/components/ui/KPICard';
 import { PlaceholderState } from '@/components/ui/PlaceholderState';
 import { SandboxWrapper } from '@/components/sandbox/SandboxWrapper';
 import { useSlug } from '@/lib/hooks';
+import { gbp } from '@/lib/format';
 
 interface Reservation {
   id: number;
@@ -15,10 +16,25 @@ interface Reservation {
   source_ref: string | null;
 }
 
+interface RotaRow {
+  user_external_id: number;
+  full_name: string;
+  team: string;
+  start_time: string;
+  end_time: string;
+  hours_worked: string;
+  shift_cost: string;
+}
+
 export default function RestaurantPage() {
   const list = useSlug<Reservation>('frontend_restaurant_today', {}, { refetchInterval: 60_000 });
+  const rota = useSlug<RotaRow>('staff_on_rota_today', {}, { refetchInterval: 5 * 60_000 });
   const total = list.data?.length ?? 0;
   const pax   = list.data?.reduce((s, r) => s + (r.party_size ?? 0), 0) ?? 0;
+
+  const kitchen = (rota.data ?? []).filter(r => r.team === 'kitchen');
+  const kitchenHours = kitchen.reduce((s, r) => s + parseFloat(String(r.hours_worked)), 0);
+  const kitchenCost  = kitchen.reduce((s, r) => s + parseFloat(String(r.shift_cost)), 0);
 
   return (
     <div className="space-y-6">
@@ -64,6 +80,41 @@ export default function RestaurantPage() {
           ) : (
             <PlaceholderState message="No reservations on the book for today." />
           )}
+        </Section>
+      </SandboxWrapper>
+
+      <SandboxWrapper id="restaurant.kitchen-rota" label="Kitchen on today">
+        <Section title={`Kitchen team on today (${kitchen.length})`}>
+          {rota.isLoading ? <PlaceholderState message="Loading rota…" /> :
+           kitchen.length > 0 ? (
+            <div className="tile">
+              <div className="flex items-center justify-between mb-2 text-xs">
+                <div className="text-ink-500 uppercase tracking-wider">{kitchenHours.toFixed(1)} hours · {gbp(kitchenCost)}</div>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="text-[10px] text-ink-500 uppercase tracking-wider">
+                  <tr>
+                    <th className="text-left py-1.5 font-medium">Chef</th>
+                    <th className="text-left font-medium">Start</th>
+                    <th className="text-left font-medium">End</th>
+                    <th className="text-right font-medium">Hours</th>
+                    <th className="text-right font-medium">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {kitchen.map(s => (
+                    <tr key={s.user_external_id + s.start_time} className="border-t border-ink-200">
+                      <td className="py-1.5 font-medium text-ink-900">{s.full_name}</td>
+                      <td className="font-mono text-ink-700">{new Date(s.start_time).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</td>
+                      <td className="font-mono text-ink-700">{new Date(s.end_time).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</td>
+                      <td className="text-right font-mono text-ink-700">{parseFloat(String(s.hours_worked)).toFixed(1)}</td>
+                      <td className="text-right font-mono text-ink-700">{gbp(parseFloat(String(s.shift_cost)))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <PlaceholderState message="No kitchen shifts on rota today." />}
         </Section>
       </SandboxWrapper>
 

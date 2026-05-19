@@ -52,6 +52,7 @@ interface Special { kind: string; label: string; detail: number; notes: string }
 interface SpecialWeek {
   day: string; kind: string; label: string;
   party_size: number; payment_status: string | null;
+  deposit_pence?: number | null;
 }
 interface GuestRow {
   guest_name: string; room: string; amount: string | number; payment_status: string | null;
@@ -355,15 +356,18 @@ export default function DashboardPage() {
                         </div>
                       </>
                     )}
-                    {/* Specials */}
+                    {/* Specials + deposit-bearing reservations */}
                     {daySpecials.length > 0 && (
                       <div className="mt-1 pt-1 border-t border-ink-200 text-[10px] text-ink-700">
                         <div className="flex items-center gap-1 text-amber-500 uppercase tracking-wider text-[9px] mb-0.5">
-                          <Wine size={10} />Groups
+                          <Wine size={10} />Groups · Deposits
                         </div>
                         {daySpecials.slice(0, 3).map((s, i) => (
                           <div key={i} className="leading-tight truncate">
                             {s.label} · {s.party_size}
+                            {s.deposit_pence != null && s.deposit_pence > 0 && (
+                              <span className="text-good"> · £{(s.deposit_pence / 100).toFixed(0)}</span>
+                            )}
                           </div>
                         ))}
                         {daySpecials.length > 3 && (
@@ -379,9 +383,23 @@ export default function DashboardPage() {
         </Section>
       </SandboxWrapper>
 
-      {/* ROW 2.5: Rooms — this week */}
+      {/* ROW 2.5: Rooms — this week (bold rooms-left callout) */}
       <SandboxWrapper id="dashboard.rooms_week" label="Rooms this week">
         <Section title={`Rooms — week of ${roomsWeek?.week_start ?? '…'} (Monday-anchored)`}>
+          {/* Prominent callout: rooms still to sell this week */}
+          {roomsWeek && (
+            <div className="mb-3">
+              {roomsWeek.room_nights_unsold > 0 ? (
+                <div className="text-2xl font-bold text-amber-500">
+                  {roomsWeek.room_nights_unsold} room {roomsWeek.room_nights_unsold === 1 ? 'night' : 'nights'} still to sell this week
+                </div>
+              ) : (
+                <div className="text-2xl font-bold text-good">
+                  Fully booked this week 🎉
+                </div>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <KPICard label="Nights sold"
               value={roomsWeek?.room_nights_sold ?? '—'}

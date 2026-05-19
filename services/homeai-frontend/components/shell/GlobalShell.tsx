@@ -1,16 +1,18 @@
 'use client';
 
+import { Suspense } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { BottomTabs } from './BottomTabs';
 import { useEditMode } from '@/components/sandbox/EditModeContext';
 
-export function GlobalShell({ children }: { children: React.ReactNode }) {
+// Inner component does the useSearchParams() read; wrapped in Suspense
+// at export so Next.js's static prerender pass doesn't bail.
+function GlobalShellInner({ children }: { children: React.ReactNode }) {
   const { editing } = useEditMode();
   const pathname = usePathname();
   const sp = useSearchParams();
-  // Day-view mode: dashboard root + ?date=… that isn't today.
   const dateParam = sp.get('date');
   const today = new Date();
   const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -18,7 +20,6 @@ export function GlobalShell({ children }: { children: React.ReactNode }) {
   const bg = dayMode ? 'bg-amber-50/40' : 'bg-ink-0';
   return (
     <div className={`min-h-screen ${bg} ${editing ? 'sandbox-on' : ''}`}>
-      {/* Desktop sidebar */}
       <Sidebar />
       <div className="lg:pl-56">
         <TopBar />
@@ -26,8 +27,15 @@ export function GlobalShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
-      {/* Mobile bottom tabs */}
       <BottomTabs />
     </div>
+  );
+}
+
+export function GlobalShell({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-ink-0" />}>
+      <GlobalShellInner>{children}</GlobalShellInner>
+    </Suspense>
   );
 }
