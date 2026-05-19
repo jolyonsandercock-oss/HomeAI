@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { KPICard } from '@/components/ui/KPICard';
 import { WagePctBadge } from '@/components/ui/WagePctBadge';
 import { Section } from '@/components/ui/Section';
@@ -11,6 +12,7 @@ import { gbp, fmtDay } from '@/lib/format';
 import {
   Sunset, CloudRain, Cloud, Sun, CloudSnow,
   Bed, UtensilsCrossed, Wine, Waves,
+  Users, PoundSterling, ShieldCheck, ArrowLeft,
 } from 'lucide-react';
 
 interface TodayGross { site: string; gross: string; as_of?: string }
@@ -32,8 +34,17 @@ interface WeekDay {
   dinner_count: number;
   sunday_count: number;
 }
+interface WeekDayExtras {
+  day: string;
+  staff_total: number;
+  staff_kitchen: number;  staff_foh: number;
+  staff_accom: number;    staff_cafe: number;
+  rota_cost: string | number;
+  rooms_total: number;    rooms_booked: number;  rooms_left: number;
+}
 interface AccomToday { arrivals: number; departures: number; staying: number }
 interface CoversToday {
+  breakfast_count: number;
   lunch_count: number; dinner_count: number; sunday_count: number;
   lunch_pax: number | null; dinner_pax: number | null; group_count: number;
 }
@@ -50,8 +61,26 @@ interface TideRow {
   day: string; high_low: 'high' | 'low';
   tide_time: string; height_m: string | number;
 }
+interface TrailReport {
+  trail_report_id: string;
+  location: string;
+  report_name: string;
+  cadence: string;
+  score_pct: string | number | null;
+  tasks_total: number | null;
+  tasks_completed: number | null;
+  tasks_overdue: number | null;
+}
+interface RoomsWeek {
+  week_start: string;
+  room_nights_sold: number;
+  room_nights_capacity: number;
+  pct_occupied: string | number | null;
+  avg_stay_nights: string | number | null;
+  room_nights_unsold: number;
+}
 
-// WMO code → short label + lucide icon
+// WMO code → icon + label
 function weatherIcon(code: number | null) {
   if (code === null) return Cloud;
   if (code === 0 || code === 1) return Sun;
@@ -87,9 +116,12 @@ function timeShort(t: string | null): string {
   if (!t) return '—';
   return t.length >= 5 ? t.substring(0, 5) : t;
 }
+function todayIsoLocal(): string {
+  const t = new Date();
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+}
 
-// Traffic-light thresholds. Tuned to Olde Malthouse run-rate; tweak in static_context
-// later if Jo wants them server-driven.
+// Traffic-light thresholds.
 function grossClass(total: number): string {
   if (total >= 2000) return 'text-good';
   if (total >= 1500) return 'text-amber-500';
@@ -101,25 +133,43 @@ function labourClass(pct: number | null): string {
   if (pct <= 35) return 'text-amber-500';
   return 'text-warn';
 }
+function trailClass(pct: number | null): string {
+  if (pct == null) return 'text-ink-500';
+  if (pct >= 95) return 'text-good';
+  if (pct >= 80) return 'text-amber-500';
+  return 'text-warn';
+}
 
 export default function DashboardPage() {
-  const today    = useSlug<TodayGross>('frontend_today_gross', {}, { refetchInterval: 60_000 });
+  const sp = useSearchParams();
+  const today = todayIsoLocal();
+  const dateParam = sp.get('date');
+  const viewDate = dateParam || today;
+  const isToday = viewDate === today;
+  // Slug params: only pass `date` if it's a non-today view; otherwise leave
+  // empty so slug COALESCEs to CURRENT_DATE on the server (avoids client/
+  // server TZ drift around midnight).
+  const dateArg: Record<string, string> = isToday ? {} : { date: viewDate };
+
+  const gross    = useSlug<TodayGross>('frontend_today_gross', dateArg, { refetchInterval: 60_000 });
   const labour   = useSlug<LabourRow>('dashboard_labour_yesterday');
   const week     = useSlug<WeekDay>('dashboard_week_strip', {}, { refetchInterval: 5 * 60_000 });
+  const extras   = useSlug<WeekDayExtras>('dashboard_week_strip_extras', {}, { refetchInterval: 5 * 60_000 });
   const tides    = useSlug<TideRow>('dashboard_tides_next_7d', {}, { refetchInterval: 60 * 60_000 });
   const specials = useSlug<SpecialWeek>('dashboard_specials_next_7d', {}, { refetchInterval: 5 * 60_000 });
-  const accom    = useSlug<AccomToday>('frontend_accommodation_today', {}, { refetchInterval: 60_000 });
-  const covers   = useSlug<CoversToday>('dashboard_covers_today', {}, { refetchInterval: 60_000 });
-  const special  = useSlug<Special>('dashboard_special_today');
-  const checkins  = useSlug<GuestRow>('dashboard_checkins_today');
-  const stayovers = useSlug<GuestRow>('dashboard_stayovers_today');
-  const checkouts = useSlug<GuestRow>('dashboard_checkouts_today');
+  const accom    = useSlug<AccomToday>('frontend_accommodation_today', dateArg, { refetchInterval: 60_000 });
+  const covers   = useSlug<CoversToday>('dashboard_covers_today', dateArg, { refetchInterval: 60_000 });
+  const special  = useSlug<Special>('dashboard_special_today', dateArg);
+  const checkins  = useSlug<GuestRow>('dashboard_checkins_today', dateArg);
+  const stayovers = useSlug<GuestRow>('dashboard_stayovers_today', dateArg);
+  const checkouts = useSlug<GuestRow>('dashboard_checkouts_today', dateArg);
+  const trail    = useSlug<TrailReport>('trail_reports_today', dateArg, { refetchInterval: 10 * 60_000 });
+  const roomsWk  = useSlug<RoomsWeek>('rooms_week_economics', dateArg);
 
-  const pub  = today.data?.find(r => r.site === 'malthouse');
-  const cafe = today.data?.find(r => r.site === 'sandwich');
+  const pub  = gross.data?.find(r => r.site === 'malthouse');
+  const cafe = gross.data?.find(r => r.site === 'sandwich');
   const total = (parseFloat(pub?.gross ?? '0') + parseFloat(cafe?.gross ?? '0')) || 0;
 
-  // Labour rows are keyed by window_days = 1 (yesterday), 7, 30
   const lab = (w: number) => labour.data?.find(r => Number(r.window_days) === w);
 
   function ratio(c: string | null | undefined, s: string | null | undefined): number | null {
@@ -128,26 +178,26 @@ export default function DashboardPage() {
     return (cn / sn) * 100;
   }
 
-  // Group week-strip context by day for tide + specials lookup
+  // Group week-strip context by day for tide + specials + extras lookup
   const tidesByDay: Record<string, TideRow[]> = {};
-  (tides.data ?? []).forEach(t => {
-    (tidesByDay[t.day] ||= []).push(t);
-  });
+  (tides.data ?? []).forEach(t => { (tidesByDay[t.day] ||= []).push(t); });
   const specialsByDay: Record<string, SpecialWeek[]> = {};
-  (specials.data ?? []).forEach(s => {
-    (specialsByDay[s.day] ||= []).push(s);
-  });
+  (specials.data ?? []).forEach(s => { (specialsByDay[s.day] ||= []).push(s); });
+  const extrasByDay: Record<string, WeekDayExtras> = {};
+  (extras.data ?? []).forEach(e => { extrasByDay[e.day] = e; });
+
+  const roomsWeek = roomsWk.data?.[0];
 
   return (
     <div className="space-y-5">
       {/* ROW 1: Revenue tile + Labour tile */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <SandboxWrapper id="dashboard.revenue" label="Revenue today">
-          <Link href="/sales" className="block">
+          <Link href={isToday ? '/sales' : `/sales?date=${viewDate}`} className="block">
             <div className="tile group">
-              <div className="label">Gross today</div>
-              <div className={'kpi-xl mt-1 ' + (today.isLoading ? '' : grossClass(total))}>
-                {today.isLoading ? <span className="inline-block w-32 h-10 bg-ink-200 rounded animate-pulse" /> : gbp(total)}
+              <div className="label">{isToday ? 'Gross today' : `Gross — ${viewDate}`}</div>
+              <div className={'kpi-xl mt-1 ' + (gross.isLoading ? '' : grossClass(total))}>
+                {gross.isLoading ? <span className="inline-block w-32 h-10 bg-ink-200 rounded animate-pulse" /> : gbp(total)}
               </div>
               <div className="mt-2 flex gap-5 text-sm font-mono">
                 <span><span className="text-ink-500">Pub</span> <strong className="text-ink-900">{gbp(pub?.gross ?? 0)}</strong></span>
@@ -200,28 +250,42 @@ export default function DashboardPage() {
         </SandboxWrapper>
       </div>
 
-      {/* ROW 2: 7-day week strip (today + 6 forward) */}
+      {/* ROW 2: 7-day week strip (today + 6 forward) — each day is a Link */}
       <SandboxWrapper id="dashboard.week" label="Week strip">
-        <Section title="Week ahead — weather · tides · bookings">
+        <Section title="Week ahead — click a day to drill in">
           {week.isLoading ? <PlaceholderState message="Loading week strip…" /> :
            week.data && week.data.length > 0 ? (
             <div className="grid grid-cols-7 gap-2">
               {week.data.map((d) => {
-                const isToday = new Date(d.day).toDateString() === new Date().toDateString();
+                const dIsToday = d.day === today;
+                const dIsActive = d.day === viewDate;
                 const cls = weatherClass(d.weather_code, d.rain_mm ? parseFloat(d.rain_mm) : null, d.max_temp ? parseFloat(d.max_temp) : null);
                 const Icon = weatherIcon(d.weather_code);
-                const ring = cls === 'good' ? 'ring-1 ring-good/70' :
-                             cls === 'bad'  ? 'ring-1 ring-warn/70' :
-                             isToday ? 'ring-2 ring-amber-500' : '';
+                // "Today" tile is special when we're in day-view: highlight as
+                // CTA (green) for "back to today". Otherwise normal ring rules.
+                const ring = (dIsToday && !isToday) ? 'ring-2 ring-good' :
+                             dIsActive ? 'ring-2 ring-amber-500' :
+                             cls === 'good' ? 'ring-1 ring-good/70' :
+                             cls === 'bad'  ? 'ring-1 ring-warn/70' : '';
+                const href = dIsToday ? '/' : `/?date=${d.day}`;
                 const dayTides    = tidesByDay[d.day] ?? [];
                 const daySpecials = specialsByDay[d.day] ?? [];
+                const dayExtras   = extrasByDay[d.day];
                 return (
-                  <div key={d.day} className={`tile flex flex-col text-[11px] gap-1 ${ring}`}>
+                  <Link key={d.day} href={href} className={`tile flex flex-col text-[11px] gap-1 cursor-pointer transition-shadow hover:ring-2 hover:ring-amber-500 ${ring}`}>
                     {/* Day header + weather icon */}
                     <div className="flex items-center justify-between">
-                      <span className={'label ' + (isToday ? 'text-amber-500' : '')}>{fmtDay(d.day)}</span>
+                      <span className={'label ' + (dIsActive ? 'text-amber-500' : dIsToday && !isToday ? 'text-good font-semibold' : '')}>
+                        {fmtDay(d.day)}
+                      </span>
                       <Icon size={14} className={cls === 'good' ? 'text-amber-500' : cls === 'bad' ? 'text-warn' : 'text-ink-500'} />
                     </div>
+                    {/* Back-to-today CTA on today-tile when in day-view */}
+                    {dIsToday && !isToday && (
+                      <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-good font-semibold">
+                        <ArrowLeft size={9} /> Back to today
+                      </div>
+                    )}
                     {/* Temp + rain */}
                     <div className="font-mono text-ink-900">
                       {d.max_temp ? `${parseFloat(d.max_temp).toFixed(0)}°` : '—'}{' '}
@@ -231,7 +295,7 @@ export default function DashboardPage() {
                       </span>
                     </div>
                     <div className="text-[10px] text-ink-500">{weatherLabel(d.weather_code)}</div>
-                    {/* Sunset (prominent, sunrise dropped) */}
+                    {/* Sunset */}
                     <div className="flex items-center gap-1 text-[10px] text-ink-700">
                       <Sunset size={11} className="text-amber-500" />
                       <span className="font-mono">{timeOnly(d.sunset)}</span>
@@ -249,13 +313,17 @@ export default function DashboardPage() {
                         </div>
                       </div>
                     )}
-                    {/* Labelled occupancy / covers */}
-                    {d.rooms_booked > 0 && (
+                    {/* Rooms — booked / total with "left to sell" suffix */}
+                    {dayExtras && dayExtras.rooms_total > 0 && (
                       <div className="flex items-center gap-1 text-[10px] text-ink-700">
                         <Bed size={11} className="text-ink-500" />
-                        <span>{d.rooms_booked} {d.rooms_booked === 1 ? 'room' : 'rooms'}</span>
+                        <span>
+                          {dayExtras.rooms_booked}/{dayExtras.rooms_total}
+                          {dayExtras.rooms_left > 0 && <span className="text-amber-500"> · {dayExtras.rooms_left} left</span>}
+                        </span>
                       </div>
                     )}
+                    {/* Covers */}
                     {(d.lunch_count > 0 || d.dinner_count > 0) && (
                       <div className="flex items-center gap-1 text-[10px] text-ink-700">
                         <UtensilsCrossed size={11} className="text-ink-500" />
@@ -266,7 +334,28 @@ export default function DashboardPage() {
                         </span>
                       </div>
                     )}
-                    {/* Specials inline */}
+                    {/* Staff on rota + rota cost */}
+                    {dayExtras && dayExtras.staff_total > 0 && (
+                      <>
+                        <div className="flex items-center gap-1 text-[10px] text-ink-700">
+                          <Users size={11} className="text-ink-500" />
+                          <span>
+                            {dayExtras.staff_total} on rota
+                            <span className="text-ink-500 ml-1">
+                              {dayExtras.staff_kitchen > 0 && `K${dayExtras.staff_kitchen} `}
+                              {dayExtras.staff_foh > 0 && `F${dayExtras.staff_foh} `}
+                              {dayExtras.staff_accom > 0 && `A${dayExtras.staff_accom} `}
+                              {dayExtras.staff_cafe > 0 && `C${dayExtras.staff_cafe}`}
+                            </span>
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 text-[10px] text-ink-700">
+                          <PoundSterling size={11} className="text-ink-500" />
+                          <span className="font-mono">{gbp(dayExtras.rota_cost, 0)}</span>
+                        </div>
+                      </>
+                    )}
+                    {/* Specials */}
                     {daySpecials.length > 0 && (
                       <div className="mt-1 pt-1 border-t border-ink-200 text-[10px] text-ink-700">
                         <div className="flex items-center gap-1 text-amber-500 uppercase tracking-wider text-[9px] mb-0.5">
@@ -282,7 +371,7 @@ export default function DashboardPage() {
                         )}
                       </div>
                     )}
-                  </div>
+                  </Link>
                 );
               })}
             </div>
@@ -290,13 +379,35 @@ export default function DashboardPage() {
         </Section>
       </SandboxWrapper>
 
-      {/* ROW 3: Quick counts */}
+      {/* ROW 2.5: Rooms — this week */}
+      <SandboxWrapper id="dashboard.rooms_week" label="Rooms this week">
+        <Section title={`Rooms — week of ${roomsWeek?.week_start ?? '…'} (Monday-anchored)`}>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPICard label="Nights sold"
+              value={roomsWeek?.room_nights_sold ?? '—'}
+              loading={roomsWk.isLoading}
+              rollingAvg={roomsWeek ? [{ label: 'of', value: roomsWeek.room_nights_capacity }] : undefined} />
+            <KPICard label="Nights unsold"
+              value={roomsWeek?.room_nights_unsold ?? '—'}
+              loading={roomsWk.isLoading} />
+            <KPICard label="% occupied"
+              value={roomsWeek?.pct_occupied != null ? `${roomsWeek.pct_occupied}%` : '—'}
+              loading={roomsWk.isLoading} />
+            <KPICard label="Avg stay"
+              value={roomsWeek?.avg_stay_nights != null ? `${parseFloat(String(roomsWeek.avg_stay_nights)).toFixed(1)} nights` : '—'}
+              loading={roomsWk.isLoading} />
+          </div>
+        </Section>
+      </SandboxWrapper>
+
+      {/* ROW 3: Quick counts — now 6 cards (added Breakfast) */}
       <SandboxWrapper id="dashboard.counts" label="Today counts">
-        <Section title="Today at a glance">
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <Section title={isToday ? 'Today at a glance' : `${viewDate} at a glance`}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <KPICard label="Rooms booked" value={accom.data?.[0]?.staying ?? '—'} loading={accom.isLoading} />
             <KPICard label="Arrivals"    value={accom.data?.[0]?.arrivals ?? '—'} loading={accom.isLoading} />
             <KPICard label="Departures"  value={accom.data?.[0]?.departures ?? '—'} loading={accom.isLoading} />
+            <KPICard label="Breakfast"   value={covers.data?.[0]?.breakfast_count ?? 0} loading={covers.isLoading} />
             <KPICard label="Lunches"
               value={covers.data?.[0]?.lunch_count ?? 0}
               loading={covers.isLoading}
@@ -329,47 +440,77 @@ export default function DashboardPage() {
                 </div>
               ))}
             </div>
-           ) : <PlaceholderState message="No special occasions today." />}
-          <p className="mt-2 text-[10px] text-ink-500">Bank holidays via gov.uk API: pending integration.</p>
+           ) : <PlaceholderState message="No special occasions for this day." />}
         </Section>
       </SandboxWrapper>
 
       {/* ROW 5: Check-in / Stayover / Check-out lists */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <SandboxWrapper id="dashboard.checkins" label="Check-ins">
-          <Section title={`Check-ins today (${checkins.data?.length ?? 0})`}>
-            <GuestList data={checkins.data} loading={checkins.isLoading} emptyMessage="No check-ins today." />
+          <Section title={`Check-ins ${isToday ? 'today' : viewDate} (${checkins.data?.length ?? 0})`}>
+            <GuestList data={checkins.data} loading={checkins.isLoading} emptyMessage="No check-ins." />
           </Section>
         </SandboxWrapper>
-
         <SandboxWrapper id="dashboard.stayovers" label="Stayovers">
           <Section title={`Stayovers tonight (${stayovers.data?.length ?? 0})`}>
-            <GuestList data={stayovers.data} loading={stayovers.isLoading} emptyMessage="No stayovers tonight." />
+            <GuestList data={stayovers.data} loading={stayovers.isLoading} emptyMessage="No stayovers." />
           </Section>
         </SandboxWrapper>
-
         <SandboxWrapper id="dashboard.checkouts" label="Check-outs">
-          <Section title={`Check-outs today (${checkouts.data?.length ?? 0})`}>
-            <GuestList data={checkouts.data} loading={checkouts.isLoading} emptyMessage="No check-outs today." />
+          <Section title={`Check-outs ${isToday ? 'today' : viewDate} (${checkouts.data?.length ?? 0})`}>
+            <GuestList data={checkouts.data} loading={checkouts.isLoading} emptyMessage="No check-outs." />
           </Section>
         </SandboxWrapper>
       </div>
 
-      {/* ROW 6: Email + reviews */}
+      {/* ROW 6: Trail compliance */}
+      <SandboxWrapper id="dashboard.trail" label="Trail compliance">
+        <Section title={`Trail — ${isToday ? 'today' : viewDate}`}>
+          {trail.isLoading ? <PlaceholderState message="Loading…" /> :
+           trail.data && trail.data.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {trail.data.map((r) => {
+                const pct = r.score_pct != null ? parseFloat(String(r.score_pct)) : null;
+                return (
+                  <div key={r.trail_report_id} className="tile">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs text-ink-500 uppercase tracking-wider">{r.location}</div>
+                      <ShieldCheck size={14} className={trailClass(pct)} />
+                    </div>
+                    <div className="mt-1 font-medium text-ink-900 text-sm">{r.report_name}</div>
+                    <div className={'mt-2 text-2xl font-mono font-semibold ' + trailClass(pct)}>
+                      {pct != null ? `${pct.toFixed(0)}%` : '—'}
+                    </div>
+                    <div className="mt-1 text-[11px] text-ink-500 font-mono">
+                      {r.tasks_completed ?? 0}/{r.tasks_total ?? 0} tasks
+                      {(r.tasks_overdue ?? 0) > 0 && <span className="text-warn"> · {r.tasks_overdue} overdue</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <PlaceholderState
+              message="No Trail reports yet"
+              hint="Once the Trail API endpoint is verified and the cron runs (scripts/u134-trail-poll.py), reports populate here. Key already stashed in Vault at secret/trail." />
+          )}
+        </Section>
+      </SandboxWrapper>
+
+      {/* ROW 7: Email + reviews placeholders */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <SandboxWrapper id="dashboard.email" label="info@ inbox">
           <Section title="info@malthousetintagel.com">
             <PlaceholderState
               message="Unread count pending Gmail OAuth for info@ identity"
-              hint="info account isn't in Vault (admin/info Workspace accounts need DWD migration — see GMAIL_OAUTH_RUNBOOK §B). Once seeded, /api/slug/info_unread_count returns the live number." />
+              hint="info account isn't in Vault. Once seeded, /api/slug/info_unread_count returns the live number." />
           </Section>
         </SandboxWrapper>
-
         <SandboxWrapper id="dashboard.reviews" label="Reviews">
-          <Section title="Reviews trend — last 3 days">
+          <Section title="Reviews trend">
             <PlaceholderState
-              message="Review aggregation surfaces in /comms"
-              hint="Reviews scraper (U133 T8) lands data in guest_reviews. /comms shows recent reviews + 30d average per source. Add listings via review_listings table." />
+              message="Reviews surface in /comms"
+              hint="Reviews scraper (U133 T8) lands data in guest_reviews. Add listings via review_listings table." />
           </Section>
         </SandboxWrapper>
       </div>
@@ -377,7 +518,7 @@ export default function DashboardPage() {
   );
 }
 
-// Shared 3-column guest list component (check-ins / stayovers / check-outs).
+// Shared 3-column guest list component.
 function GuestList({ data, loading, emptyMessage }: {
   data: GuestRow[] | undefined;
   loading: boolean;

@@ -5838,6 +5838,7 @@ def _bind_params(param_schema: dict, supplied: dict) -> tuple[bool, Any]:
         else:
             continue
         t = spec.get("type", "string")
+        fmt = spec.get("format", "")
         try:
             if   t == "int":   v = int(v)
             elif t == "float": v = float(v)
@@ -5845,6 +5846,11 @@ def _bind_params(param_schema: dict, supplied: dict) -> tuple[bool, Any]:
             elif t == "enum":
                 if v not in spec.get("values", []):
                     return False, f"{name}={v!r} not in {spec.get('values')}"
+            elif fmt == "date":
+                # asyncpg's date codec needs a date object, not a string.
+                if isinstance(v, str):
+                    import datetime as _dt
+                    v = _dt.date.fromisoformat(v)
             else:
                 v = str(v)
         except (ValueError, TypeError) as e:
@@ -5868,7 +5874,10 @@ async def _run_slug(slug_row: dict, bound: dict) -> dict:
             seen.append(n)
         return f"${seen.index(n) + 1}"
     sql_pg = _NAMED_PARAM_RE.sub(repl, sql)
-    args = [bound[n] for n in seen]
+    # Optional params absent from `bound` bind as NULL — the slug's COALESCE
+    # handles the default. Avoids a KeyError on every date-aware slug call
+    # made without ?date=.
+    args = [bound.get(n) for n in seen]
     p = await pool()
     async with p.acquire() as c:
         async with c.transaction(readonly=True):

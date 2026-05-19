@@ -61,6 +61,20 @@ async function runSlugViaProxy(slug: string, params: Record<string, unknown>): P
   return r.json();
 }
 
+// Translate :named params into $1, $2, ... in source order. Mirrors the
+// build-dashboard FastAPI slug runner so slug SQL is portable between
+// both consumers. Lookbehind ensures `::cast` syntax is left alone.
+const NAMED_PARAM_RE = /(?<!:):([a-zA-Z_][a-zA-Z0-9_]*)/g;
+function bindNamedParams(sql: string, params: Record<string, unknown>): { sql: string; args: unknown[] } {
+  const seen: string[] = [];
+  const out = sql.replace(NAMED_PARAM_RE, (_m, name: string) => {
+    if (!seen.includes(name)) seen.push(name);
+    return `$${seen.indexOf(name) + 1}`;
+  });
+  const args = seen.map(n => (params as Record<string, unknown>)[n] ?? null);
+  return { sql: out, args };
+}
+
 async function runSlugDirect(slug: string, params: Record<string, unknown>): Promise<unknown[]> {
   const p = pool();
   const def = await p.query(
@@ -68,15 +82,12 @@ async function runSlugDirect(slug: string, params: Record<string, unknown>): Pro
     [slug]
   );
   if (def.rowCount === 0) throw new Error(`slug not found: ${slug}`);
-  const { sql_template, param_schema } = def.rows[0];
-  const ps = param_schema && typeof param_schema === 'string'
-    ? JSON.parse(param_schema)
-    : (param_schema || {});
-  const args = Object.keys(ps).map((k) => (params as Record<string, unknown>)[k] ?? null);
+  const { sql_template } = def.rows[0];
+  const { sql, args } = bindNamedParams(sql_template, params);
   const client = await p.connect();
   try {
     await client.query(`SELECT home_ai.set_realm('owner')`);
-    const r = await client.query(sql_template, args);
+    const r = await client.query(sql, args);
     return r.rows;
   } finally {
     client.release();
