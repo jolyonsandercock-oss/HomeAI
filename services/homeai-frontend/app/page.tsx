@@ -8,9 +8,12 @@ import { PlaceholderState } from '@/components/ui/PlaceholderState';
 import { SandboxWrapper } from '@/components/sandbox/SandboxWrapper';
 import { useSlug } from '@/lib/hooks';
 import { gbp, fmtDay } from '@/lib/format';
-import { Sunrise, Sunset, CloudRain, Cloud, Sun, CloudSnow, Wind } from 'lucide-react';
+import {
+  Sunset, CloudRain, Cloud, Sun, CloudSnow,
+  Bed, UtensilsCrossed, Wine, Waves,
+} from 'lucide-react';
 
-interface TodayGross { site: string; gross: string }
+interface TodayGross { site: string; gross: string; as_of?: string }
 interface LabourRow {
   window_days: number;
   pub_labour_avg: string | null;  pub_sales_avg: string | null;
@@ -35,9 +38,17 @@ interface CoversToday {
   lunch_pax: number | null; dinner_pax: number | null; group_count: number;
 }
 interface Special { kind: string; label: string; detail: number; notes: string }
+interface SpecialWeek {
+  day: string; kind: string; label: string;
+  party_size: number; payment_status: string | null;
+}
 interface GuestRow {
   guest_name: string; room: string; amount: string | number; payment_status: string | null;
   party_size?: number | null;
+}
+interface TideRow {
+  day: string; high_low: 'high' | 'low';
+  tide_time: string; height_m: string | number;
 }
 
 // WMO code → short label + lucide icon
@@ -62,7 +73,6 @@ function weatherLabel(code: number | null) {
   return '—';
 }
 function weatherClass(code: number | null, rain: number | null, temp: number | null) {
-  // Pub-quality: warm + dry = great, wet+cold = bad
   if (temp != null && temp >= 18 && (rain == null || parseFloat(String(rain)) < 1)) return 'good';
   if (rain != null && parseFloat(String(rain)) > 5) return 'bad';
   if (temp != null && temp < 8) return 'bad';
@@ -73,15 +83,36 @@ function timeOnly(iso: string | null): string {
   const d = new Date(iso);
   return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
+function timeShort(t: string | null): string {
+  if (!t) return '—';
+  return t.length >= 5 ? t.substring(0, 5) : t;
+}
+
+// Traffic-light thresholds. Tuned to Olde Malthouse run-rate; tweak in static_context
+// later if Jo wants them server-driven.
+function grossClass(total: number): string {
+  if (total >= 2000) return 'text-good';
+  if (total >= 1500) return 'text-amber-500';
+  return 'text-warn';
+}
+function labourClass(pct: number | null): string {
+  if (pct == null) return 'text-ink-500';
+  if (pct < 30) return 'text-good';
+  if (pct <= 35) return 'text-amber-500';
+  return 'text-warn';
+}
 
 export default function DashboardPage() {
-  const today  = useSlug<TodayGross>('frontend_today_gross', {}, { refetchInterval: 60_000 });
-  const labour = useSlug<LabourRow>('dashboard_labour_yesterday');
-  const week   = useSlug<WeekDay>('dashboard_week_strip', {}, { refetchInterval: 5 * 60_000 });
-  const accom  = useSlug<AccomToday>('frontend_accommodation_today', {}, { refetchInterval: 60_000 });
-  const covers = useSlug<CoversToday>('dashboard_covers_today', {}, { refetchInterval: 60_000 });
-  const special = useSlug<Special>('dashboard_special_today');
+  const today    = useSlug<TodayGross>('frontend_today_gross', {}, { refetchInterval: 60_000 });
+  const labour   = useSlug<LabourRow>('dashboard_labour_yesterday');
+  const week     = useSlug<WeekDay>('dashboard_week_strip', {}, { refetchInterval: 5 * 60_000 });
+  const tides    = useSlug<TideRow>('dashboard_tides_next_7d', {}, { refetchInterval: 60 * 60_000 });
+  const specials = useSlug<SpecialWeek>('dashboard_specials_next_7d', {}, { refetchInterval: 5 * 60_000 });
+  const accom    = useSlug<AccomToday>('frontend_accommodation_today', {}, { refetchInterval: 60_000 });
+  const covers   = useSlug<CoversToday>('dashboard_covers_today', {}, { refetchInterval: 60_000 });
+  const special  = useSlug<Special>('dashboard_special_today');
   const checkins  = useSlug<GuestRow>('dashboard_checkins_today');
+  const stayovers = useSlug<GuestRow>('dashboard_stayovers_today');
   const checkouts = useSlug<GuestRow>('dashboard_checkouts_today');
 
   const pub  = today.data?.find(r => r.site === 'malthouse');
@@ -90,15 +121,22 @@ export default function DashboardPage() {
 
   // Labour rows are keyed by window_days = 1 (yesterday), 7, 30
   const lab = (w: number) => labour.data?.find(r => Number(r.window_days) === w);
-  const yest = lab(1);
-  const w7   = lab(7);
-  const w30  = lab(30);
 
   function ratio(c: string | null | undefined, s: string | null | undefined): number | null {
     const cn = parseFloat(c ?? ''); const sn = parseFloat(s ?? '');
     if (!Number.isFinite(cn) || !Number.isFinite(sn) || sn === 0) return null;
     return (cn / sn) * 100;
   }
+
+  // Group week-strip context by day for tide + specials lookup
+  const tidesByDay: Record<string, TideRow[]> = {};
+  (tides.data ?? []).forEach(t => {
+    (tidesByDay[t.day] ||= []).push(t);
+  });
+  const specialsByDay: Record<string, SpecialWeek[]> = {};
+  (specials.data ?? []).forEach(s => {
+    (specialsByDay[s.day] ||= []).push(s);
+  });
 
   return (
     <div className="space-y-5">
@@ -108,7 +146,7 @@ export default function DashboardPage() {
           <Link href="/sales" className="block">
             <div className="tile group">
               <div className="label">Gross today</div>
-              <div className="kpi-xl mt-1">
+              <div className={'kpi-xl mt-1 ' + (today.isLoading ? '' : grossClass(total))}>
                 {today.isLoading ? <span className="inline-block w-32 h-10 bg-ink-200 rounded animate-pulse" /> : gbp(total)}
               </div>
               <div className="mt-2 flex gap-5 text-sm font-mono">
@@ -121,40 +159,50 @@ export default function DashboardPage() {
         </SandboxWrapper>
 
         <SandboxWrapper id="dashboard.labour" label="Labour vs sales">
-          <div className="tile">
-            <div className="label flex items-center gap-2">Labour vs sales <span className="text-ink-600 text-[10px] normal-case tracking-normal">yesterday + rolling avg</span></div>
-            <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-              {[{w: 1, name: 'Yesterday'}, {w: 7, name: '7 day avg'}, {w: 30, name: '30 day avg'}].map(({w, name}) => {
-                const r = lab(w);
-                const pubR = ratio(r?.pub_labour_avg, r?.pub_sales_avg);
-                const cafR = ratio(r?.cafe_labour_avg, r?.cafe_sales_avg);
-                const combL = (parseFloat(r?.pub_labour_avg ?? '0') + parseFloat(r?.cafe_labour_avg ?? '0'));
-                const combS = (parseFloat(r?.pub_sales_avg ?? '0') + parseFloat(r?.cafe_sales_avg ?? '0'));
-                const combR = combS > 0 ? (combL / combS) * 100 : null;
-                return (
-                  <div key={w} className="bg-ink-100 rounded p-2">
-                    <div className="text-[10px] text-ink-500 uppercase tracking-wider">{name}</div>
-                    <div className="mt-1 text-sm font-mono text-ink-900">
-                      {combR === null ? '—' : `${combR.toFixed(1)}%`}
+          <Link href="/staff" className="block">
+            <div className="tile group">
+              <div className="label flex items-center gap-2">Labour vs sales <span className="text-ink-600 text-[10px] normal-case tracking-normal">yesterday + rolling avg</span></div>
+              <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                {[{w: 1, name: 'Yesterday'}, {w: 7, name: '7 day avg'}, {w: 30, name: '30 day avg'}].map(({w, name}) => {
+                  const r = lab(w);
+                  const pubR = ratio(r?.pub_labour_avg, r?.pub_sales_avg);
+                  const cafR = ratio(r?.cafe_labour_avg, r?.cafe_sales_avg);
+                  const combL = (parseFloat(r?.pub_labour_avg ?? '0') + parseFloat(r?.cafe_labour_avg ?? '0'));
+                  const combS = (parseFloat(r?.pub_sales_avg ?? '0') + parseFloat(r?.cafe_sales_avg ?? '0'));
+                  const combR = combS > 0 ? (combL / combS) * 100 : null;
+                  return (
+                    <div key={w} className="bg-ink-100 rounded p-2">
+                      <div className="text-[10px] text-ink-500 uppercase tracking-wider">{name}</div>
+                      <div className={'mt-1 text-base font-mono font-semibold ' + labourClass(combR)}>
+                        {combR === null ? '—' : `${combR.toFixed(1)}%`}
+                      </div>
+                      <div className="mt-1 grid grid-cols-2 gap-1 text-[10px] leading-tight">
+                        <div>
+                          <div className="text-ink-500 uppercase tracking-wider">Labour</div>
+                          <div className="font-mono text-ink-900">{combS > 0 ? gbp(combL, 0) : '—'}</div>
+                        </div>
+                        <div>
+                          <div className="text-ink-500 uppercase tracking-wider">Sales</div>
+                          <div className="font-mono text-ink-900">{combS > 0 ? gbp(combS, 0) : '—'}</div>
+                        </div>
+                      </div>
+                      <div className="mt-1 flex gap-2 text-[10px]">
+                        <WagePctBadge pct={pubR} label="pub" />
+                        <WagePctBadge pct={cafR} label="cafe" />
+                      </div>
                     </div>
-                    <div className="mt-1 text-[10px] text-ink-500 font-mono leading-tight">
-                      {combS > 0 ? gbp(combL, 0) + ' / ' + gbp(combS, 0) : '—'}
-                    </div>
-                    <div className="mt-1 flex gap-2 text-[10px]">
-                      <WagePctBadge pct={pubR} label="pub" />
-                      <WagePctBadge pct={cafR} label="cafe" />
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
+              <div className="mt-2 text-[11px] text-amber-500 group-hover:text-amber-400">→ Click for Staff detail</div>
             </div>
-          </div>
+          </Link>
         </SandboxWrapper>
       </div>
 
-      {/* ROW 2: 7-day week strip */}
+      {/* ROW 2: 7-day week strip (today + 6 forward) */}
       <SandboxWrapper id="dashboard.week" label="Week strip">
-        <Section title="Week strip — weather + bookings">
+        <Section title="Week ahead — weather · tides · bookings">
           {week.isLoading ? <PlaceholderState message="Loading week strip…" /> :
            week.data && week.data.length > 0 ? (
             <div className="grid grid-cols-7 gap-2">
@@ -164,13 +212,17 @@ export default function DashboardPage() {
                 const Icon = weatherIcon(d.weather_code);
                 const ring = cls === 'good' ? 'ring-1 ring-good/70' :
                              cls === 'bad'  ? 'ring-1 ring-warn/70' :
-                             isToday ? 'ring-1 ring-amber-500' : '';
+                             isToday ? 'ring-2 ring-amber-500' : '';
+                const dayTides    = tidesByDay[d.day] ?? [];
+                const daySpecials = specialsByDay[d.day] ?? [];
                 return (
-                  <div key={d.day} className={`tile flex flex-col text-[11px] gap-0.5 ${ring}`}>
+                  <div key={d.day} className={`tile flex flex-col text-[11px] gap-1 ${ring}`}>
+                    {/* Day header + weather icon */}
                     <div className="flex items-center justify-between">
-                      <span className="label">{fmtDay(d.day)}</span>
+                      <span className={'label ' + (isToday ? 'text-amber-500' : '')}>{fmtDay(d.day)}</span>
                       <Icon size={14} className={cls === 'good' ? 'text-amber-500' : cls === 'bad' ? 'text-warn' : 'text-ink-500'} />
                     </div>
+                    {/* Temp + rain */}
                     <div className="font-mono text-ink-900">
                       {d.max_temp ? `${parseFloat(d.max_temp).toFixed(0)}°` : '—'}{' '}
                       <span className="text-ink-500 text-[10px]">
@@ -179,24 +231,62 @@ export default function DashboardPage() {
                       </span>
                     </div>
                     <div className="text-[10px] text-ink-500">{weatherLabel(d.weather_code)}</div>
-                    <div className="mt-1 flex items-center gap-1 text-[10px] text-ink-500">
-                      <Sunrise size={10} />{timeOnly(d.sunrise)}
-                      <Sunset size={10} className="ml-1" />{timeOnly(d.sunset)}
+                    {/* Sunset (prominent, sunrise dropped) */}
+                    <div className="flex items-center gap-1 text-[10px] text-ink-700">
+                      <Sunset size={11} className="text-amber-500" />
+                      <span className="font-mono">{timeOnly(d.sunset)}</span>
                     </div>
-                    <div className="mt-1 text-[10px] text-ink-600 leading-tight">
-                      🛏 {d.rooms_booked}
-                      {d.lunch_count > 0 && <> · L {d.lunch_count}</>}
-                      {d.dinner_count > 0 && <> · D {d.dinner_count}</>}
-                      {d.sunday_count > 0 && <> · S {d.sunday_count}</>}
-                    </div>
+                    {/* Tides */}
+                    {dayTides.length > 0 && (
+                      <div className="text-[10px] text-ink-600 leading-tight flex items-start gap-1">
+                        <Waves size={11} className="text-info mt-0.5 shrink-0" />
+                        <div className="font-mono">
+                          {dayTides.map((t, i) => (
+                            <span key={i} className="block">
+                              {t.high_low === 'high' ? 'H' : 'L'} {timeShort(t.tide_time)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* Labelled occupancy / covers */}
+                    {d.rooms_booked > 0 && (
+                      <div className="flex items-center gap-1 text-[10px] text-ink-700">
+                        <Bed size={11} className="text-ink-500" />
+                        <span>{d.rooms_booked} {d.rooms_booked === 1 ? 'room' : 'rooms'}</span>
+                      </div>
+                    )}
+                    {(d.lunch_count > 0 || d.dinner_count > 0) && (
+                      <div className="flex items-center gap-1 text-[10px] text-ink-700">
+                        <UtensilsCrossed size={11} className="text-ink-500" />
+                        <span>
+                          {d.lunch_count > 0 && `${d.lunch_count} lunch`}
+                          {d.lunch_count > 0 && d.dinner_count > 0 && ' · '}
+                          {d.dinner_count > 0 && `${d.dinner_count} dinner`}
+                        </span>
+                      </div>
+                    )}
+                    {/* Specials inline */}
+                    {daySpecials.length > 0 && (
+                      <div className="mt-1 pt-1 border-t border-ink-200 text-[10px] text-ink-700">
+                        <div className="flex items-center gap-1 text-amber-500 uppercase tracking-wider text-[9px] mb-0.5">
+                          <Wine size={10} />Groups
+                        </div>
+                        {daySpecials.slice(0, 3).map((s, i) => (
+                          <div key={i} className="leading-tight truncate">
+                            {s.label} · {s.party_size}
+                          </div>
+                        ))}
+                        {daySpecials.length > 3 && (
+                          <div className="text-[10px] text-ink-500">+{daySpecials.length - 3} more</div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           ) : <PlaceholderState message="No week data — weather forecast cache may need refresh." />}
-          <p className="mt-2 text-[10px] text-ink-500">
-            Tide times: no working free API yet — placeholder. Sunrise/sunset via open-meteo (cache refreshed by u46-weather-daily).
-          </p>
         </Section>
       </SandboxWrapper>
 
@@ -244,65 +334,23 @@ export default function DashboardPage() {
         </Section>
       </SandboxWrapper>
 
-      {/* ROW 5: Check-in / check-out lists */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      {/* ROW 5: Check-in / Stayover / Check-out lists */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <SandboxWrapper id="dashboard.checkins" label="Check-ins">
           <Section title={`Check-ins today (${checkins.data?.length ?? 0})`}>
-            {checkins.isLoading ? <PlaceholderState message="Loading…" /> :
-             checkins.data && checkins.data.length > 0 ? (
-              <div className="tile">
-                <table className="w-full text-sm">
-                  <thead className="text-[10px] text-ink-500 uppercase tracking-wider">
-                    <tr><th className="text-left py-1.5 font-medium">Guest</th>
-                        <th className="text-left font-medium">Room</th>
-                        <th className="text-right font-medium">£</th>
-                        <th className="text-right font-medium">Pay</th></tr>
-                  </thead>
-                  <tbody>
-                    {checkins.data.map((g, i) => (
-                      <tr key={i} className="border-t border-ink-200">
-                        <td className="py-1.5 font-medium text-ink-900">{g.guest_name}</td>
-                        <td className="text-ink-700 text-xs">{g.room}</td>
-                        <td className="text-right font-mono text-ink-700">{gbp(g.amount)}</td>
-                        <td className={'text-right text-xs ' + (g.payment_status === 'paid' ? 'text-good' : g.payment_status === 'unpaid' ? 'text-warn' : 'text-ink-500')}>
-                          {g.payment_status ?? '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-             ) : <PlaceholderState message="No check-ins today." />}
+            <GuestList data={checkins.data} loading={checkins.isLoading} emptyMessage="No check-ins today." />
+          </Section>
+        </SandboxWrapper>
+
+        <SandboxWrapper id="dashboard.stayovers" label="Stayovers">
+          <Section title={`Stayovers tonight (${stayovers.data?.length ?? 0})`}>
+            <GuestList data={stayovers.data} loading={stayovers.isLoading} emptyMessage="No stayovers tonight." />
           </Section>
         </SandboxWrapper>
 
         <SandboxWrapper id="dashboard.checkouts" label="Check-outs">
           <Section title={`Check-outs today (${checkouts.data?.length ?? 0})`}>
-            {checkouts.isLoading ? <PlaceholderState message="Loading…" /> :
-             checkouts.data && checkouts.data.length > 0 ? (
-              <div className="tile">
-                <table className="w-full text-sm">
-                  <thead className="text-[10px] text-ink-500 uppercase tracking-wider">
-                    <tr><th className="text-left py-1.5 font-medium">Guest</th>
-                        <th className="text-left font-medium">Room</th>
-                        <th className="text-right font-medium">£</th>
-                        <th className="text-right font-medium">Pay</th></tr>
-                  </thead>
-                  <tbody>
-                    {checkouts.data.map((g, i) => (
-                      <tr key={i} className="border-t border-ink-200">
-                        <td className="py-1.5 font-medium text-ink-900">{g.guest_name}</td>
-                        <td className="text-ink-700 text-xs">{g.room}</td>
-                        <td className="text-right font-mono text-ink-700">{gbp(g.amount)}</td>
-                        <td className={'text-right text-xs ' + (g.payment_status === 'paid' ? 'text-good' : g.payment_status === 'unpaid' ? 'text-warn' : 'text-ink-500')}>
-                          {g.payment_status ?? '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-             ) : <PlaceholderState message="No check-outs today." />}
+            <GuestList data={checkouts.data} loading={checkouts.isLoading} emptyMessage="No check-outs today." />
           </Section>
         </SandboxWrapper>
       </div>
@@ -320,11 +368,47 @@ export default function DashboardPage() {
         <SandboxWrapper id="dashboard.reviews" label="Reviews">
           <Section title="Reviews trend — last 3 days">
             <PlaceholderState
-              message="TripAdvisor + Google review aggregation pending"
-              hint="Both have free read APIs but need OAuth setup. Roadmapped — will surface daily rating + count + sparkline trend." />
+              message="Review aggregation surfaces in /comms"
+              hint="Reviews scraper (U133 T8) lands data in guest_reviews. /comms shows recent reviews + 30d average per source. Add listings via review_listings table." />
           </Section>
         </SandboxWrapper>
       </div>
+    </div>
+  );
+}
+
+// Shared 3-column guest list component (check-ins / stayovers / check-outs).
+function GuestList({ data, loading, emptyMessage }: {
+  data: GuestRow[] | undefined;
+  loading: boolean;
+  emptyMessage: string;
+}) {
+  if (loading) return <PlaceholderState message="Loading…" />;
+  if (!data || data.length === 0) return <PlaceholderState message={emptyMessage} />;
+  return (
+    <div className="tile">
+      <table className="w-full text-sm">
+        <thead className="text-[10px] text-ink-500 uppercase tracking-wider">
+          <tr>
+            <th className="text-left py-1.5 font-medium">Guest</th>
+            <th className="text-left font-medium">Room</th>
+            <th className="text-right font-medium">£</th>
+            <th className="text-right font-medium">Pay</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((g, i) => (
+            <tr key={i} className="border-t border-ink-200">
+              <td className="py-1.5 font-medium text-ink-900">{g.guest_name}</td>
+              <td className="text-ink-700 text-xs">{g.room}</td>
+              <td className="text-right font-mono text-ink-700">{gbp(g.amount)}</td>
+              <td className={'text-right text-xs ' + (g.payment_status === 'paid' ? 'text-good' : g.payment_status === 'unpaid' ? 'text-warn' : 'text-ink-500')}>
+                {g.payment_status ?? '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
