@@ -1,15 +1,19 @@
 # STATUS
 
-_generated: 2026-05-21T13:14:27+01:00_
+_generated: 2026-05-21T13:57:00+01:00_
 _by: scripts/u89-regen-status.sh_
 
 ## Current branch
 
-`main` at `8d7862a`
+`main` at `38e006f`
 
 ## Recent commits (last 20)
 
 ```
+38e006f U151 T2 + U153 + U154 + U155 autonomous work
+0156391 U151 T1: Invoice Pipeline robustness patch (in n8n, no file diff)
+f458a71 U151-U155 plan files: staff-rollout roadmap
+d0c773b U147/U148/U149/U150: pen-tests, audits, plans, in-person packet, Phase 6 ADR
 8d7862a U146: close auto-pause loop
 7d860c5 U146-U150 plan files: 5-sprint forward roadmap
 fa5e4b5 U138-U145 retrospective sprint doc
@@ -26,17 +30,13 @@ f592257 U143 + U144: LiteLLM cost gateway + quota allocations
 8af037b U134: Trail · day-view drilldown · staff/rota strip · rooms-this-week · breakfast
 26fef1e U134 plan: Trail · day-view drilldown · staff/rota strip · rooms-this-week
 2fbd744 U133: dashboard week-strip polish + tide scrape + reviews scaffold
-e790cad U133 plan: revise per Jo — public tide scrape, drop email slug T7, simpler reviews
-047079e U133 plan: dashboard week-strip polish + tide times + reviews scrape
-d0ee032 U132: get all slugs on the website up and running
-667025a Caddy: match bare /app as well as /app/* (sidebar Dashboard link fix)
 ```
 
 ## Open work signals
 
 - Pending bot_instructions: 0
 - Open CRITICAL exceptions: 0
-- Working-tree state: 5 files modified/untracked
+- Working-tree state: 1 files modified/untracked
 
 ## Audit log recent entries
 
