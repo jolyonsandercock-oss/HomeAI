@@ -1,15 +1,16 @@
 # STATUS
 
-_generated: 2026-05-21T21:00:32+01:00_
+_generated: 2026-05-21T21:50:52+01:00_
 _by: scripts/u89-regen-status.sh_
 
 ## Current branch
 
-`main` at `80f0b3c`
+`main` at `fe3be98`
 
 ## Recent commits (last 20)
 
 ```
+fe3be98 U168-U172: cron self-heal + auto-docs + backfill + vendor intelligence + Phase 6 close
 80f0b3c U163-U167: 5 autonomous sprints + critical backup bug fix
 e374394 U162: fix Gmail action-queue gap + wire menu-performance slugs
 32eca9e gitignore: data/trail-profile (populated by u156-trail-pair)
@@ -29,14 +30,13 @@ b80ab0a U138: admin invoice drilldown + feedback rule promotion
 d4db599 U141 + U143 service implementations (presidio, litellm, vault-agent)
 8a0d4cd U145 (DRAFT): per-realm Postgres roles for RLS connection partitioning
 f592257 U143 + U144: LiteLLM cost gateway + quota allocations
-265f5cc U141: Presidio PII redaction hard-fail for cloud calls
 ```
 
 ## Open work signals
 
 - Pending bot_instructions: 1
 - Open CRITICAL exceptions: 0
-- Working-tree state: 12 files modified/untracked
+- Working-tree state: 9 files modified/untracked
 
 ## Audit log recent entries
 
