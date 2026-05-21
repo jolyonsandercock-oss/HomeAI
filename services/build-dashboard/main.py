@@ -527,6 +527,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 #   X-Realm: owner   → DB realm 'owner'    (legacy alias accepted)
 _REALM_EXEMPT_PREFIXES = (
     "/api/healthz",
+    "/api/whoami",                            # U153 — diagnostic, no realm needed
     "/static",
     "/api/documents/ingest-from-paperless",  # U70 — webhook from Paperless, auth'd by shared secret
     "/api/breakfast/submit",                  # U106 — public form-submit from guest email; auth'd by signed token
@@ -643,6 +644,33 @@ async def legacy_index():
 async def healthz():
     """Shallow liveness — selftest checks this at startup."""
     return {"status": "ok"}
+
+
+@app.get("/api/whoami")
+async def whoami(request: Request):
+    """U153 diagnostic: echo the Authelia forward_auth identity headers so we
+    can verify caddy → authelia → here is wired right before staff land.
+
+    Headers: Remote-User, Remote-Groups (comma-separated), Remote-Name,
+    Remote-Email, plus X-Forwarded-For / X-Real-IP for the source.
+
+    Returns 'anonymous' when no Authelia headers are present (e.g. direct
+    inside-tailnet IP hit, no forward_auth)."""
+    h = {k.lower(): v for k, v in request.headers.items()}
+    user   = h.get("remote-user")
+    groups = h.get("remote-groups", "")
+    name   = h.get("remote-name")
+    email  = h.get("remote-email")
+    ip     = h.get("x-forwarded-for") or h.get("x-real-ip") or (request.client.host if request.client else None)
+    return {
+        "user":       user or "anonymous",
+        "roles":      [g.strip() for g in groups.split(",") if g.strip()] if groups else [],
+        "name":       name,
+        "email":      email,
+        "source_ip":  ip,
+        "realm":      _current_realm.get(),
+        "authelia_present": user is not None,
+    }
 
 
 @app.get("/api/healthz-deep")
