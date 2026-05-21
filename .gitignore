@@ -91,3 +91,7 @@ services/homeai-vault-agent/secrets/
 # U151 — data inboxes
 data/dojo-inbox/Transactions_*.csv
 data/dojo-inbox/processed/
+
+# U151b — vision-OCR workspace
+data/mortgage-vision-ocr/_pages_*
+data/mortgage-vision-ocr/paperless-*.pdf
