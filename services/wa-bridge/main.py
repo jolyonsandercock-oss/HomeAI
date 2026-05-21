@@ -45,7 +45,7 @@ HOURLY_CAP = int(os.environ.get('WA_HOURLY_CAP', '30'))       # max sends/hr per
 WA_URL = "https://web.whatsapp.com"
 
 # Realm mapping
-ACCOUNT_REALM = {'personal': 'family', 'pub': 'work'}
+ACCOUNT_REALM = {'personal': 'personal', 'pub': 'work'}
 
 
 @asynccontextmanager

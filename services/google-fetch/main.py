@@ -60,8 +60,8 @@ _MAILBOX_REALM: dict[str, str] = {
     "info":    "work",
     "admin":   "work",
     "stay":    "work",
-    "jo":      "family",
-    "pounana": "family",
+    "jo":      "personal",
+    "pounana": "personal",
     "bot":     "owner",
 }
 

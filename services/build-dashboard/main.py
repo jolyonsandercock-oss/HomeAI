@@ -520,11 +520,11 @@ app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 # exempt so liveness checks don't 401 when REALM_ENFORCE=1 without a header.
 #
 # U84 — UI vocabulary is now [Work | All]. Map at the middleware boundary:
-#   X-Realm: all   → DB realm 'owner'   (unfiltered; owner sees everything)
-#   X-Realm: work  → DB realm 'work'    (work-only)
-#   X-Realm: family → DB realm 'family' (kept for backwards compat with
-#                     the Private bucket and existing scripts)
-#   X-Realm: owner → DB realm 'owner'   (legacy alias accepted)
+#   X-Realm: all     → DB realm 'owner'    (unfiltered; owner sees everything)
+#   X-Realm: work    → DB realm 'work'     (work-only)
+#   X-Realm: personal→ DB realm 'personal' (ARE + Personal + Family entities; U139 rename)
+#   X-Realm: family  → DB realm 'personal' (deprecated alias, kept for backwards compat)
+#   X-Realm: owner   → DB realm 'owner'    (legacy alias accepted)
 _REALM_EXEMPT_PREFIXES = (
     "/api/healthz",
     "/static",
@@ -533,10 +533,11 @@ _REALM_EXEMPT_PREFIXES = (
 )
 
 _UI_TO_DB_REALM = {
-    "all":    "owner",
-    "owner":  "owner",
-    "work":   "work",
-    "family": "family",
+    "all":      "owner",
+    "owner":    "owner",
+    "work":     "work",
+    "personal": "personal",
+    "family":   "personal",   # U139 alias: family → personal
 }
 
 # U84 Phase 7: page-view telemetry. We log every nav hit to /work/*, /private/*,
@@ -626,7 +627,7 @@ async def root(request: Request):
         # 'all' realm: send to /work/today as the primary daily surface.
         # Jo can navigate to /private/today via the IA.
         return RedirectResponse(url="/work/today", status_code=302)
-    if cookie_realm == "family":
+    if cookie_realm in ("family", "personal"):  # U139 alias
         return RedirectResponse(url="/private/today", status_code=302)
     # Default: work realm
     return RedirectResponse(url="/work/today", status_code=302)
@@ -3559,7 +3560,7 @@ async def api_documents_ingest_from_paperless(payload: dict = Body(...)):
                 VALUES ($1, $2, $3, 'active',
                         $4, $5, $6, $7, $8,
                         $9, $10, $11, 'paperless',
-                        COALESCE($12, 'family'))
+                        COALESCE($12, 'personal'))
                 RETURNING id
             """, ent_id, category, title,
                  paperless_id, payload.get("original_path"), mime, sha, ocr_text,
@@ -3757,11 +3758,11 @@ async def api_documents_upload(
                 VALUES ($1, $2, $3, 'active',
                         $4, $5, $6, $7,
                         $8, $9, $10, 'jo',
-                        COALESCE($11, 'family'))
+                        COALESCE($11, 'personal'))
                 RETURNING id
             """, ent_id, category, title, file_path, mime, sha, ocr_text,
                  linked_table, linked_id, linked_by,
-                 # realm derived from linked entity if known, else family
+                 # realm derived from linked entity if known, else personal
                  None)
     return {
         "ok": True, "id": doc_id, "sha256": sha,
