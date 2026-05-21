@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Calendar } from 'lucide-react';
 
-type Preset = 'today' | 'yesterday' | '7d' | '30d' | 'custom';
+type Preset = 'today' | 'yesterday' | '7d' | '30d' | '90d' | 'ytd' | '12m' | 'custom';
 
 export interface DateRange {
   preset: Preset;
@@ -16,34 +16,48 @@ function daysAgo(n: number) {
   const d = new Date(); d.setDate(d.getDate() - n);
   return d.toISOString().slice(0, 10);
 }
+function startOfYear() {
+  return new Date().toISOString().slice(0, 4) + '-01-01';
+}
 
 const PRESETS: Record<Preset, () => DateRange> = {
   today:     () => ({ preset: 'today',     start: today(),       end: today() }),
   yesterday: () => ({ preset: 'yesterday', start: daysAgo(1),    end: daysAgo(1) }),
   '7d':      () => ({ preset: '7d',        start: daysAgo(6),    end: today() }),
   '30d':     () => ({ preset: '30d',       start: daysAgo(29),   end: today() }),
+  '90d':     () => ({ preset: '90d',       start: daysAgo(89),   end: today() }),
+  ytd:       () => ({ preset: 'ytd',       start: startOfYear(), end: today() }),
+  '12m':     () => ({ preset: '12m',       start: daysAgo(364),  end: today() }),
   custom:    () => ({ preset: 'custom',    start: daysAgo(6),    end: today() }),
 };
 
 export function DateRangePicker({
   value,
   onChange,
+  presets = ['today', 'yesterday', '7d', '30d'],
 }: {
   value: DateRange;
   onChange: (v: DateRange) => void;
+  presets?: Preset[];
 }) {
   const [showCustom, setShowCustom] = useState(false);
+  const presetLabel = (p: Preset) =>
+    p === 'today' ? 'Today' :
+    p === 'yesterday' ? 'Yest.' :
+    p === 'ytd' ? 'YTD' :
+    p === '12m' ? '12m' :
+    p;
   return (
     <div className="flex items-center gap-2">
       <div className="flex bg-ink-100 border border-ink-200 rounded-md overflow-hidden text-xs">
-        {(['today', 'yesterday', '7d', '30d'] as Preset[]).map((p) => (
+        {presets.map((p) => (
           <button key={p}
             onClick={() => { setShowCustom(false); onChange(PRESETS[p]()); }}
             className={
               'px-2.5 py-1.5 ' +
               (value.preset === p ? 'bg-amber-500 text-ink-0' : 'text-ink-600 hover:text-ink-800')
             }>
-            {p === 'today' ? 'Today' : p === 'yesterday' ? 'Yest.' : p}
+            {presetLabel(p)}
           </button>
         ))}
         <button

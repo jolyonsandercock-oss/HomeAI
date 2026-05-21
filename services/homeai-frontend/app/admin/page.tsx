@@ -1,8 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { Section } from '@/components/ui/Section';
 import { PlaceholderState } from '@/components/ui/PlaceholderState';
 import { SandboxWrapper } from '@/components/sandbox/SandboxWrapper';
+import { ExpenseRollup } from '@/components/admin/ExpenseRollup';
+import { OrphanTile } from '@/components/admin/OrphanTile';
+import { QuotaStatusTile } from '@/components/admin/QuotaStatusTile';
 import { useSlug } from '@/lib/hooks';
 import { gbp } from '@/lib/format';
 
@@ -22,6 +26,18 @@ export default function AdminPage() {
 
   return (
     <div className="space-y-6">
+      <SandboxWrapper id="admin.quota" label="AI quota">
+        <QuotaStatusTile />
+      </SandboxWrapper>
+
+      <SandboxWrapper id="admin.orphans" label="Xero orphans">
+        <OrphanTile />
+      </SandboxWrapper>
+
+      <SandboxWrapper id="admin.expense-rollup" label="Expense rollup">
+        <ExpenseRollup />
+      </SandboxWrapper>
+
       <SandboxWrapper id="admin.invoices" label="Invoices">
         <Section title="Recent invoices (30d)">
           {invs.isLoading ? (
@@ -39,11 +55,17 @@ export default function AdminPage() {
                 </thead>
                 <tbody>
                   {invs.data.map((r) => (
-                    <tr key={r.id} className="border-t border-ink-200">
+                    <tr key={r.id} className="border-t border-ink-200 hover:bg-ink-50">
                       <td className="py-1.5 font-mono text-xs text-ink-700">
-                        {new Date(r.invoice_date).toLocaleDateString('en-GB')}
+                        <Link href={`/admin/invoices/${r.id}`} className="hover:text-amber-500">
+                          {new Date(r.invoice_date).toLocaleDateString('en-GB')}
+                        </Link>
                       </td>
-                      <td className="text-ink-800">{r.vendor_name ?? '—'}</td>
+                      <td className="text-ink-800">
+                        <Link href={`/admin/invoices/${r.id}`} className="hover:text-amber-500">
+                          {r.vendor_name ?? '—'}
+                        </Link>
+                      </td>
                       <td className="text-right font-mono text-ink-700">{gbp(r.gross_amount)}</td>
                       <td className="text-xs text-ink-500">{r.status}</td>
                     </tr>
