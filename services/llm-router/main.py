@@ -14,10 +14,64 @@ import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+import urllib.request
+
 OLLAMA_HOST = os.environ["OLLAMA_HOST"]
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 REDIS_HOST = os.environ["REDIS_HOST"]
 REDIS_PASSWORD = os.environ["REDIS_PASSWORD"]
+
+
+def _vault_get(path: str) -> dict:
+    """Fetch a secret from Vault. Mirrors bot-responder's helper."""
+    addr = os.environ.get("VAULT_ADDR", "http://vault:8200")
+    token = os.environ.get("VAULT_TOKEN", "")
+    req = urllib.request.Request(
+        f"{addr}/v1/secret/data/{path}",
+        headers={"X-Vault-Token": token},
+    )
+    return json.loads(urllib.request.urlopen(req, timeout=5).read())["data"]["data"]
+
+
+def _resolve_anthropic_key() -> str:
+    """Resolution order (U140 pilot):
+       1. ANTHROPIC_API_KEY_FILE — Vault Agent-rendered file (preferred)
+       2. ANTHROPIC_API_KEY env var (legacy fallback)
+       3. Direct Vault fetch (last-resort fallback)
+    """
+    fpath = os.environ.get("ANTHROPIC_API_KEY_FILE", "").strip()
+    if fpath and os.path.exists(fpath):
+        try:
+            with open(fpath) as f:
+                key = f.read().strip()
+            if key:
+                print(f"[llm-router] loaded ANTHROPIC_API_KEY from {fpath}")
+                return key
+        except Exception as e:
+            print(f"[llm-router] WARN: failed to read {fpath}: {e}")
+    env = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if env:
+        print("[llm-router] loaded ANTHROPIC_API_KEY from env")
+        return env
+    try:
+        key = _vault_get("anthropic")["api_key"]
+        print("[llm-router] loaded ANTHROPIC_API_KEY from Vault HTTP")
+        return key
+    except Exception as e:
+        print(f"[llm-router] WARN: could not fetch anthropic key: {e}")
+        return ""
+
+
+ANTHROPIC_API_KEY = _resolve_anthropic_key()
+
+# U141: cloud-bound calls (i.e. any path that hits _call_claude) are
+# routed through homeai-presidio for PII redaction first. If the redactor
+# is unreachable or errors, this is a HARD FAIL — the Claude call does
+# NOT proceed, and the caller gets a 503. No soft pass-through.
+# The Telegram bot is exempt: it doesn't use this router at all, it talks
+# to anthropic.Anthropic directly. Other conversational/agent loops that
+# go through here are NOT exempt.
+PRESIDIO_URL = os.environ.get("PRESIDIO_URL", "http://homeai-presidio:8765")
+PRESIDIO_REQUIRED = os.environ.get("PRESIDIO_REQUIRED", "1") == "1"
 
 TASK_TIER_DEFAULT = {
     "email.classify": "hot",
@@ -152,7 +206,73 @@ async def _call_ollama(http: httpx.AsyncClient, model: str, prompt: str) -> tupl
         raise HTTPException(502, f"ollama error: {e}")
 
 
-async def _call_claude(http: httpx.AsyncClient, model: str, prompt: str) -> tuple[str, int, int, int]:
+async def _redact_via_presidio(
+    http: httpx.AsyncClient, prompt: str, task_type: str
+) -> str:
+    """U141: HARD-FAIL redaction gate for cloud-bound calls.
+
+    Returns the redacted prompt on success. Raises HTTPException(503) if
+    Presidio is unreachable or returns non-200 — caller MUST NOT then
+    proceed to call Claude. The intent is to make it impossible for any
+    cloud-bound LLM call to bypass redaction silently.
+
+    On failure we also write a hard_fail row to redaction_audit_log
+    ourselves (since Presidio is the normal writer and obviously can't
+    write when it's the one being down).
+    """
+    if not PRESIDIO_REQUIRED:
+        return prompt
+    try:
+        r = await http.post(
+            f"{PRESIDIO_URL}/redact",
+            json={
+                "text": prompt,
+                "workflow_id": f"llm-router:{task_type}",
+                "capability_tag": task_type,
+                "realm": "work",
+            },
+            timeout=10.0,
+        )
+        r.raise_for_status()
+        return r.json()["redacted_text"]
+    except Exception as e:
+        # Log the hard-fail event directly from llm-router. Best-effort —
+        # if the DB is also down we still want to raise the 503.
+        try:
+            sha = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+            conn = await asyncpg.connect(
+                host=os.environ["POSTGRES_HOST"],
+                port=int(os.environ["POSTGRES_PORT"]),
+                user=os.environ["POSTGRES_USER"],
+                password=os.environ["POSTGRES_PASSWORD"],
+                database=os.environ["POSTGRES_DB"],
+            )
+            try:
+                await conn.execute("SELECT home_ai.set_realm('work')")
+                await conn.execute(
+                    """INSERT INTO redaction_audit_log
+                       (sha256_input, recognisers_hit, redacted_token_count,
+                        input_length, status, workflow_id, capability_tag,
+                        error_message, realm)
+                       VALUES ($1, '{}'::jsonb, 0, $2,
+                               'hard_fail', $3, $4, $5, 'work')""",
+                    sha, len(prompt),
+                    f"llm-router:{task_type}", task_type, str(e)[:500],
+                )
+            finally:
+                await conn.close()
+        except Exception as audit_err:
+            # never block the 503 on audit-log write failure
+            print(f"[u141] hard_fail audit-log write failed: {audit_err}")
+        # No soft pass-through. Cloud-bound call is killed; caller sees 503.
+        raise HTTPException(503, f"presidio redaction hard-fail: {e}")
+
+
+async def _call_claude(http: httpx.AsyncClient, model: str, prompt: str,
+                       task_type: str = "unknown") -> tuple[str, int, int, int]:
+    # U141: redact BEFORE the API call. HARD-FAIL on Presidio outage.
+    redacted_prompt = await _redact_via_presidio(http, prompt, task_type)
+
     start_time = time.time()
     try:
         response = await http.post(
@@ -164,7 +284,7 @@ async def _call_claude(http: httpx.AsyncClient, model: str, prompt: str) -> tupl
             json={
                 "model": model,
                 "max_tokens": 1024,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": [{"role": "user", "content": redacted_prompt}],
             },
             timeout=30.0,
         )
@@ -175,6 +295,9 @@ async def _call_claude(http: httpx.AsyncClient, model: str, prompt: str) -> tupl
         completion_tokens = data["usage"]["output_tokens"]
         latency_ms = int((time.time() - start_time) * 1000)
         return text, prompt_tokens, completion_tokens, latency_ms
+    except HTTPException:
+        # Re-raise our own (e.g. 503 from redactor) untouched
+        raise
     except Exception as e:
         raise HTTPException(502, f"claude error: {e}")
 
@@ -241,7 +364,7 @@ async def route(req: RouteRequest) -> RouteResponse:
     if req.task_type in CLAUDE_DIRECT:
         model_to_use = CLAUDE_DIRECT[req.task_type]
         text, prompt_tokens, completion_tokens, latency_ms = await _call_claude(
-            app.state.http, model_to_use, req.prompt
+            app.state.http, model_to_use, req.prompt, task_type=req.task_type
         )
         response = RouteResponse(
             text=text,
@@ -323,7 +446,7 @@ async def route(req: RouteRequest) -> RouteResponse:
         model_to_use = "claude-haiku-4-5-20251001"
         try:
             text, prompt_tokens, completion_tokens, latency_ms = await _call_claude(
-                app.state.http, model_to_use, req.prompt
+                app.state.http, model_to_use, req.prompt, task_type=req.task_type
             )
         except HTTPException as e:
             asyncio.create_task(

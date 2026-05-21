@@ -225,7 +225,9 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD}"
       GF_USERS_ALLOW_SIGN_UP: "false"
     depends_on: [prometheus]
-    ports: ["3003:3000"]
+    # 3003 collides with homeai-frontend (Next.js); Grafana goes on 3001.
+    # Phase 5 dashboard: http://localhost:3001/d/home-ai-phase5-health
+    ports: ["3001:3000"]
     restart: unless-stopped
 
   prometheus:
@@ -381,19 +383,79 @@ services:
   llm-router:
     build: ./services/llm-router
     container_name: homeai-llm-router
-    networks: [ai-internal]
+    networks: [ai-internal, ai-egress]
+    volumes:
+      # U140 pilot: read secrets from Vault Agent-rendered files instead of env.
+      - homeai_secrets:/run/secrets:ro
     environment:
       <<: *postgres-env
       OLLAMA_HOST: "http://ollama:11434"
-      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      # *_FILE swarm-compat convention. llm-router's secret_loader reads file.
+      ANTHROPIC_API_KEY_FILE: "/run/secrets/anthropic-api-key"
+      # Fall-backs for transitional period — read directly from env if file missing.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      VAULT_ADDR: "http://vault:8200"
+      VAULT_TOKEN: "${VAULT_SERVICES_TOKEN}"
       REDIS_HOST: "redis"
       REDIS_PASSWORD: "${REDIS_PASSWORD}"
       PAYLOAD_HMAC_KEY: "${PAYLOAD_HMAC_KEY}"
     depends_on:
       postgres: {condition: service_healthy}
       ollama:   {condition: service_started}
+      homeai-vault-agent: {condition: service_started}
       redis:    {condition: service_started}
     ports: ["8001:8001"]
+    restart: unless-stopped
+
+  homeai-presidio:
+    build: ./services/homeai-presidio
+    image: homeai-presidio:1.0
+    container_name: homeai-presidio
+    networks: [ai-internal]
+    environment:
+      <<: *postgres-env
+    depends_on:
+      postgres: {condition: service_healthy}
+    # No published ports: only callers on ai-internal reach it via DNS
+    # (homeai-presidio:8765). Avoids the 8765 collision with homeai-mcp.
+    restart: unless-stopped
+
+  # U142 — LiteLLM gateway. Single instance for now; primary/secondary pair
+  # behind Caddy is a follow-up. All cloud-bound LLM calls SHOULD go through
+  # this proxy so Presidio redaction + ai_usage logging happen in one place.
+  # Workflows hit /v1/chat/completions with model="cap_<capability>".
+  homeai-litellm:
+    build: ./services/homeai-litellm
+    container_name: homeai-litellm
+    networks: [ai-internal, ai-egress]
+    volumes:
+      - homeai_secrets:/run/secrets:ro
+    environment:
+      <<: *postgres-env
+      ANTHROPIC_API_KEY_FILE: "/run/secrets/anthropic-api-key"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:-sk-homeai-internal}"
+      PRESIDIO_URL: "http://homeai-presidio:8765"
+      PRESIDIO_REQUIRED: "1"
+    depends_on:
+      postgres: {condition: service_healthy}
+      homeai-presidio:    {condition: service_started}
+      homeai-vault-agent: {condition: service_started}
+    restart: unless-stopped
+
+  # U140 — Vault Agent: AppRole auto-auth, renders /run/secrets/* via
+  # templates into a tmpfs volume shared with consumer services. Consumers
+  # read secrets from files via *_FILE env-var convention.
+  homeai-vault-agent:
+    build: ./services/homeai-vault-agent
+    container_name: homeai-vault-agent
+    networks: [ai-internal, ai-services]
+    volumes:
+      - ./services/homeai-vault-agent/secrets/role_id:/etc/vault-agent/role_id:ro
+      - ./services/homeai-vault-agent/secrets/secret_id:/etc/vault-agent/secret_id:ro
+      - homeai_secrets:/run/secrets
+    depends_on:
+      - vault
     restart: unless-stopped
 
   garmin-service:
@@ -594,6 +656,13 @@ services:
 volumes:
   postgres_data:
   qdrant_data:
+  # U140 — tmpfs-backed volume for Vault Agent-rendered secrets.
+  homeai_secrets:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=4m,mode=0755"
   n8n_data:
   ollama_data:
   vault_data:
