@@ -1,15 +1,17 @@
 # STATUS
 
-_generated: 2026-05-21T14:44:45+01:00_
+_generated: 2026-05-21T15:58:54+01:00_
 _by: scripts/u89-regen-status.sh_
 
 ## Current branch
 
-`main` at `36c1154`
+`main` at `89e2284`
 
 ## Recent commits (last 20)
 
 ```
+89e2284 U151b: vision-OCR mortgage statements
+ca422ec Session 2026-05-21 close: Karl+Staff provisioned, Dojo + reviews wired
 36c1154 STATUS regen — end of autonomous session
 38e006f U151 T2 + U153 + U154 + U155 autonomous work
 0156391 U151 T1: Invoice Pipeline robustness patch (in n8n, no file diff)
@@ -28,15 +30,13 @@ f592257 U143 + U144: LiteLLM cost gateway + quota allocations
 4669f18 U135-followup + U138: expense rollup + RLS fix + admin slugs
 49b471d U135: staff page · daily reconciliation · realm enforcement · restaurant rota
 33959c0 U135 plan: staff page · daily reconciliation · realm enforcement · restaurant rota
-8af037b U134: Trail · day-view drilldown · staff/rota strip · rooms-this-week · breakfast
-26fef1e U134 plan: Trail · day-view drilldown · staff/rota strip · rooms-this-week
 ```
 
 ## Open work signals
 
 - Pending bot_instructions: 1
 - Open CRITICAL exceptions: 0
-- Working-tree state: 2 files modified/untracked
+- Working-tree state: 12 files modified/untracked
 
 ## Audit log recent entries
 

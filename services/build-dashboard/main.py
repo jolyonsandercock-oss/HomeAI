@@ -3580,19 +3580,43 @@ async def api_documents_ingest_from_paperless(payload: dict = Body(...)):
 
             linked_table, linked_id, linked_by, ent_id = await _link_to_entity(
                 c, ocr_text, f"{title} {correspondent}")
+
+            # U161: detect image-only PDFs (CamScanner watermarks).
+            _ocr_strip = (ocr_text or "").strip().lower()
+            _ocr_collapsed = re.sub(r"\s+", " ", _ocr_strip)
+            _ocr_no_cs = re.sub(r"\bcamscanner\b", "", _ocr_collapsed).strip()
+            needs_vision = (
+                mime == "application/pdf" and (
+                    len(_ocr_strip) < 80 or _ocr_no_cs == ""
+                )
+            )
             doc_id = await c.fetchval("""
                 INSERT INTO documents
                     (entity_id, category, title, status,
                      paperless_id, file_path, mime_type, sha256, ocr_text,
-                     linked_table, linked_id, linked_by, uploaded_by, realm)
+                     linked_table, linked_id, linked_by, uploaded_by, realm,
+                     needs_vision_ocr)
                 VALUES ($1, $2, $3, 'active',
                         $4, $5, $6, $7, $8,
                         $9, $10, $11, 'paperless',
-                        COALESCE($12, 'personal'))
+                        COALESCE($12, 'personal'),
+                        $13)
                 RETURNING id
             """, ent_id, category, title,
                  paperless_id, payload.get("original_path"), mime, sha, ocr_text,
-                 linked_table, linked_id, linked_by, None)
+                 linked_table, linked_id, linked_by, None, needs_vision)
+
+            # U161: queue vision-OCR job for image-only PDFs.
+            # RLS context: 'app.current_entity = all' set earlier (~line 3569),
+            # set_realm called too. Re-asserting here for hook visibility.
+            if needs_vision:
+                await c.execute("SET LOCAL app.current_entity = 'all'")
+                await c.execute("""
+                    INSERT INTO vision_ocr_jobs (document_id, paperless_id, status, realm)
+                    VALUES ($1, $2, 'pending', 'owner')
+                    ON CONFLICT (document_id) DO NOTHING
+                """, doc_id, paperless_id)
+                log.info(f"U161: queued vision-OCR doc_id={doc_id} paperless_id={paperless_id}")
 
             # U70 T2: invoice-shaped Paperless docs flow into vendor_invoice_inbox
             # so the existing Haiku line-extractor picks them up. NOT NULLs:
