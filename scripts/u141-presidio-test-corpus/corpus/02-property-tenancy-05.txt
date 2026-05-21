@@ -1,0 +1,18 @@
+# EXPECT: PERSON:1,EMAIL_ADDRESS:1,PHONE_NUMBER:1,UK_POSTCODE:1,UK_SORT_CODE:1,UK_ACCOUNT_NUMBER:1
+ASSURED SHORTHOLD TENANCY AGREEMENT
+
+Landlord: Atlantic Road Estates Limited
+Property: 4 Castle Road, Tintagel, PL1 1AA
+Tenant:   Mia Phillips
+Email:    supplier@example.co.uk
+Phone:    07911 890123
+
+Term: 6 months from 1 June 2026.
+Rent: £950 pcm.
+
+Rent paid by standing order to:
+  Account name: Atlantic Road Estates Ltd
+  Sort code:    23-14-70
+  Account no:   22334455
+
+Deposit £950 lodged with the DPS.

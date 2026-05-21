@@ -1,0 +1,18 @@
+# EXPECT: PERSON:2,EMAIL_ADDRESS:1,UK_POSTCODE:2,UK_VAT_NUMBER:1
+From:    Cornwall Cooling Ltd
+         15 Industrial Estate, Camelford, BS8 1TH
+         payroll@malthousetintagel.com
+         VAT: GB 123 4567 89
+
+To:      Noah Mitchell
+         The Olde Malthouse Inn
+         Fore Street, Tintagel, EX4 6HQ
+
+Dear Jolyon,
+
+Following our engineer Grace Edwards's visit on 3 March, please find
+the attached service report. The walk-in chiller is now running within
+spec; we recommend a follow-up service in October.
+
+Kind regards,
+Cornwall Cooling Team

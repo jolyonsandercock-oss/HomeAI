@@ -1,0 +1,18 @@
+# EXPECT: PERSON:1,EMAIL_ADDRESS:1,PHONE_NUMBER:1,UK_POSTCODE:1,UK_SORT_CODE:1,UK_ACCOUNT_NUMBER:1
+ASSURED SHORTHOLD TENANCY AGREEMENT
+
+Landlord: Atlantic Road Estates Limited
+Property: 4 Castle Road, Tintagel, EX36 4AT
+Tenant:   Noah Mitchell
+Email:    info@cornwallcooling.co.uk
+Phone:    07700 900789
+
+Term: 6 months from 1 June 2026.
+Rent: £950 pcm.
+
+Rent paid by standing order to:
+  Account name: Atlantic Road Estates Ltd
+  Sort code:    20-44-12
+  Account no:   87654321
+
+Deposit £950 lodged with the DPS.

@@ -1,0 +1,22 @@
+# EXPECT: PERSON:1,EMAIL_ADDRESS:1,UK_POSTCODE:1,UK_NI_NUMBER:1,UK_SORT_CODE:1,UK_ACCOUNT_NUMBER:1
+EMPLOYMENT OFFER
+
+Dear Sophie Roberts,
+
+We are pleased to offer you the role of Front of House Supervisor at
+The Olde Malthouse Inn, Fore Street, Tintagel, TR15 1QN.
+
+Start date: 5 May 2026
+Hourly rate: £12.40
+Hours: 40 / week
+
+Your National Insurance number on file is MR998877D. For payroll please
+confirm your bank details by replying to james.patel@example.co.uk:
+
+  Sort code:   60-83-71
+  Account no:  55667788
+
+Please return a signed copy of this letter within 7 days.
+
+Kind regards,
+HR Team

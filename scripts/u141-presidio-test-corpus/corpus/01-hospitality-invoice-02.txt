@@ -1,0 +1,29 @@
+# EXPECT: PERSON:1,EMAIL_ADDRESS:1,UK_POSTCODE:1,UK_SORT_CODE:1,UK_ACCOUNT_NUMBER:1,UK_VAT_NUMBER:1
+INVOICE 2026-04-001
+
+From:   Bidvest Foodservice Ltd
+        12 Albion Way, Newton Abbot, PL32 9TX
+        VAT number: GB 555 1234 67
+
+To:     The Olde Malthouse Inn
+        Fore Street, Tintagel, EX36 4AT
+        Account: MAL125
+
+Date: 12 April 2026
+Due:  26 April 2026
+
+Items:
+  - Atlantic salmon fillet 2kg     £45.00
+  - Olive oil 5L                   £28.50
+  - Vegetable stock concentrate    £12.20
+
+Subtotal:  £85.70
+VAT (20%): £17.14
+Total:     £102.84
+
+Pay via bank transfer:
+  Account name: Bidvest Foodservice Ltd
+  Sort code:    04-00-04
+  Account no:   98765432
+
+Queries: info@cornwallcooling.co.uk

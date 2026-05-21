@@ -1,0 +1,94 @@
+# LiteLLM proxy config — capability-tag routing
+# ===============================================================
+# Workflows hit /v1/chat/completions with model="cap_*" — LiteLLM
+# dispatches to the right Anthropic model. Presidio redaction is
+# enforced via a pre-call callback (registered in proxy_config.py).
+#
+# Pair-HA: a sibling homeai-litellm-secondary mirrors this config.
+# Caddy fronts both with active-passive failover.
+
+model_list:
+  # ---- Capability tags ----
+  - model_name: cap_invoice_extract
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 1024
+
+  - model_name: cap_email_classify
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 512
+
+  - model_name: cap_report_classify
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 512
+
+  - model_name: cap_child_classify
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 512
+
+  - model_name: cap_daily_digest
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 2048
+
+  - model_name: cap_dreaming
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 2048
+
+  - model_name: cap_compliance
+    litellm_params:
+      model: anthropic/claude-opus-4-7
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 1024
+
+  - model_name: cap_cashflow
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 2048
+
+  # ---- Pass-through for any caller that still names a model directly ----
+  - model_name: claude-haiku-4-5-20251001
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 1024
+
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 2048
+
+  - model_name: claude-opus-4-7
+    litellm_params:
+      model: anthropic/claude-opus-4-7
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 1024
+
+# Logging + telemetry
+litellm_settings:
+  # Drop telemetry to LiteLLM's own external endpoint; we log to ai_usage
+  telemetry: false
+  set_verbose: false
+  drop_params: true
+  # Pre/post hooks — see proxy_config.py. Path must resolve to an INSTANCE,
+  # not a class (LiteLLM uses pyimport(module.attr), not class instantiation).
+  callbacks: proxy_config.presidio_gate_instance
+
+# General proxy settings
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Workers can hit /v1/chat/completions without a key when on the
+  # internal network. External access is via Caddy with bearer-token auth.
+  # database_url: os.environ/LITELLM_DATABASE_URL    # enable for budget mgmt in U144 v2

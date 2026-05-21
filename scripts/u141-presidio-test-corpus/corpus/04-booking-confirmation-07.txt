@@ -1,0 +1,16 @@
+# EXPECT: PERSON:1,EMAIL_ADDRESS:1,PHONE_NUMBER:1,UK_POSTCODE:1
+Booking confirmation 2026-05-14-002
+
+Guest:    Mr Mark Henderson
+Email:    billing@suppliesco.com
+Phone:    07911 234567
+Address:  78 Mill Lane, Bristol, TQ1 1AB
+
+Arrival:  Fri 19 June 2026, 16:00
+Departure: Sun 21 June 2026, 11:00
+Room:     Garden Suite
+Adults:   2  Children: 0
+
+Two nights B&B at £165 / night. Total £330.
+
+We look forward to welcoming you.

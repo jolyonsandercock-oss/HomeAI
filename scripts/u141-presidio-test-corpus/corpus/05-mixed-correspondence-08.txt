@@ -1,0 +1,18 @@
+# EXPECT: PERSON:2,EMAIL_ADDRESS:1,UK_POSTCODE:2,UK_VAT_NUMBER:1
+From:    Cornwall Cooling Ltd
+         15 Industrial Estate, Camelford, PL34 0DQ
+         sarah.thompson@bidvest.co.uk
+         VAT: GB 123 4567 89
+
+To:      Jolyon Sandercock
+         The Olde Malthouse Inn
+         Fore Street, Tintagel, TQ12 4DH
+
+Dear Jolyon,
+
+Following our engineer Olivia Carter's visit on 3 March, please find
+the attached service report. The walk-in chiller is now running within
+spec; we recommend a follow-up service in October.
+
+Kind regards,
+Cornwall Cooling Team
