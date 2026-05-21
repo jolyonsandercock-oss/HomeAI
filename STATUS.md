@@ -1,15 +1,19 @@
 # STATUS
 
-_generated: 2026-05-21T09:47:14+01:00_
+_generated: 2026-05-21T13:14:27+01:00_
 _by: scripts/u89-regen-status.sh_
 
 ## Current branch
 
-`main` at `b80ab0a`
+`main` at `8d7862a`
 
 ## Recent commits (last 20)
 
 ```
+8d7862a U146: close auto-pause loop
+7d860c5 U146-U150 plan files: 5-sprint forward roadmap
+fa5e4b5 U138-U145 retrospective sprint doc
+c775cee STATUS regen post Phase A safety lock-in
 b80ab0a U138: admin invoice drilldown + feedback rule promotion
 d4db599 U141 + U143 service implementations (presidio, litellm, vault-agent)
 8a0d4cd U145 (DRAFT): per-realm Postgres roles for RLS connection partitioning
@@ -26,17 +30,13 @@ e790cad U133 plan: revise per Jo — public tide scrape, drop email slug T7, sim
 047079e U133 plan: dashboard week-strip polish + tide times + reviews scrape
 d0ee032 U132: get all slugs on the website up and running
 667025a Caddy: match bare /app as well as /app/* (sidebar Dashboard link fix)
-0ab4e4e U131: serve homeai-frontend at /app via FQDN with Authelia + Next.js basePath
-49d9682 Close U94 as superseded + file U130 plan for the leftovers
-47e9078 Fix V107 migration number collision — u68 doc_classifier → V109
-4615699 U129: tidy post-merge — selftest fix, gitignore, dext recon + xero scripts
 ```
 
 ## Open work signals
 
 - Pending bot_instructions: 0
 - Open CRITICAL exceptions: 0
-- Working-tree state: 1 files modified/untracked
+- Working-tree state: 5 files modified/untracked
 
 ## Audit log recent entries
 
