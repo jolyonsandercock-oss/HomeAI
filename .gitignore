@@ -87,3 +87,7 @@ node_modules/
 /security/authelia-v2/db.sqlite3
 /security/authelia-v2/notification.txt
 services/homeai-vault-agent/secrets/
+
+# U151 — data inboxes
+data/dojo-inbox/Transactions_*.csv
+data/dojo-inbox/processed/

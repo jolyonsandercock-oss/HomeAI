@@ -1,15 +1,16 @@
 # STATUS
 
-_generated: 2026-05-21T13:57:00+01:00_
+_generated: 2026-05-21T14:44:45+01:00_
 _by: scripts/u89-regen-status.sh_
 
 ## Current branch
 
-`main` at `38e006f`
+`main` at `36c1154`
 
 ## Recent commits (last 20)
 
 ```
+36c1154 STATUS regen — end of autonomous session
 38e006f U151 T2 + U153 + U154 + U155 autonomous work
 0156391 U151 T1: Invoice Pipeline robustness patch (in n8n, no file diff)
 f458a71 U151-U155 plan files: staff-rollout roadmap
@@ -29,14 +30,13 @@ f592257 U143 + U144: LiteLLM cost gateway + quota allocations
 33959c0 U135 plan: staff page · daily reconciliation · realm enforcement · restaurant rota
 8af037b U134: Trail · day-view drilldown · staff/rota strip · rooms-this-week · breakfast
 26fef1e U134 plan: Trail · day-view drilldown · staff/rota strip · rooms-this-week
-2fbd744 U133: dashboard week-strip polish + tide scrape + reviews scaffold
 ```
 
 ## Open work signals
 
-- Pending bot_instructions: 0
+- Pending bot_instructions: 1
 - Open CRITICAL exceptions: 0
-- Working-tree state: 1 files modified/untracked
+- Working-tree state: 2 files modified/untracked
 
 ## Audit log recent entries
 
