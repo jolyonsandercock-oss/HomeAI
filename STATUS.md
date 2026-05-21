@@ -1,40 +1,40 @@
 # STATUS
 
-_generated: 2026-05-15T23:05:31+01:00_
+_generated: 2026-05-21T09:47:14+01:00_
 _by: scripts/u89-regen-status.sh_
 
 ## Current branch
 
-`u73-hd-samba-paperless` at `f2ec94c`
+`main` at `b80ab0a`
 
 ## Recent commits (last 20)
 
 ```
-f2ec94c U95: broad invoice harvester (jo + info + admin × invoice/receipt/bill + overdue)
-f76286f U94 T1 fix: HTML-entity decoding + non-overlapping window slicing
-f333ea9 STATUS regen — U94 T1 backfill in flight
-cbed534 U94 T1: hotel-email.com bookings harvester + V100 schema
-b5639d1 U94 plan: booking harvest + surface (36-mo horizon, 9 tracks)
-1fca2a7 U93 T0: corrections from boxbot bi#59 + bi#60
-313248f STATUS regen after U92
-488f2ec U92 final: Qwen bench rerun + stretch-lock recommendations
-892ccb1 U92 progress: U89 deferred items + 400d backfill + percentages audit + cash-recon flow review
-3728d21 U92 plan: overnight ops finesse (email/invoice 400d + Qwen bench + pct audit + cash-recon flow + recommendations)
-c3d4205 U91: STATUS.md regen post-tidy
-ace3102 U91: tidy — sprint renames + parallel-session catchup + day's decisions
-4bb5b13 U90: in-person packet — consolidated sudo + external checklist + verify script
-a1efedd U89: tidy — auto-doc generation + untracked sweep + STATUS regen + entropy-hook tightening
-1b7f8e7 U88: fix-and-forget — 4 tracks done (T1 retire + T2 disable + T6 cron + T7 TODOs)
-0e63b3f U87: secure — RLS coverage + Vault rotation calendar + entropy hook + sprint-number guard
-731bdf2 U86: data-integrity audit (bank coverage / FK orphans / idempotency / schema drift / dead-letters / hunters)
-fe94f66 U79-U83 plans: secure-and-fix overnight arc (no new functionality)
-b1c2beb U80: auto-parse mortgage statements in ingest-from-paperless webhook
-03a6d01 U79: mortgage statement coverage view + Stmt coverage tab
+b80ab0a U138: admin invoice drilldown + feedback rule promotion
+d4db599 U141 + U143 service implementations (presidio, litellm, vault-agent)
+8a0d4cd U145 (DRAFT): per-realm Postgres roles for RLS connection partitioning
+f592257 U143 + U144: LiteLLM cost gateway + quota allocations
+265f5cc U141: Presidio PII redaction hard-fail for cloud calls
+5ed07b0 U139: realm rename FAMILY → PERSONAL
+4669f18 U135-followup + U138: expense rollup + RLS fix + admin slugs
+49b471d U135: staff page · daily reconciliation · realm enforcement · restaurant rota
+33959c0 U135 plan: staff page · daily reconciliation · realm enforcement · restaurant rota
+8af037b U134: Trail · day-view drilldown · staff/rota strip · rooms-this-week · breakfast
+26fef1e U134 plan: Trail · day-view drilldown · staff/rota strip · rooms-this-week
+2fbd744 U133: dashboard week-strip polish + tide scrape + reviews scaffold
+e790cad U133 plan: revise per Jo — public tide scrape, drop email slug T7, simpler reviews
+047079e U133 plan: dashboard week-strip polish + tide times + reviews scrape
+d0ee032 U132: get all slugs on the website up and running
+667025a Caddy: match bare /app as well as /app/* (sidebar Dashboard link fix)
+0ab4e4e U131: serve homeai-frontend at /app via FQDN with Authelia + Next.js basePath
+49d9682 Close U94 as superseded + file U130 plan for the leftovers
+47e9078 Fix V107 migration number collision — u68 doc_classifier → V109
+4615699 U129: tidy post-merge — selftest fix, gitignore, dext recon + xero scripts
 ```
 
 ## Open work signals
 
-- Pending bot_instructions: 1
+- Pending bot_instructions: 0
 - Open CRITICAL exceptions: 0
 - Working-tree state: 1 files modified/untracked
 
