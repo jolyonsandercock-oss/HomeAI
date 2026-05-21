@@ -44,3 +44,42 @@ html, body {
 .sandbox-on .sandbox-target:hover {
   outline-color: rgba(245, 158, 11, 0.85);
 }
+
+/* U192 — anomaly pulse for week strip / KPI cells */
+@keyframes anomaly-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5); }
+  50%      { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0); }
+}
+.anomaly-pulse {
+  animation: anomaly-pulse 2s ease-in-out infinite;
+  border: 1px solid rgba(245, 158, 11, 0.7);
+}
+
+/* U193 — print-friendly view: monochrome A4 with nav stripped */
+@media print {
+  :root { color-scheme: light; }
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+    font-size: 10pt;
+  }
+  /* Hide chrome */
+  nav, aside, header.no-print, .no-print, .breadcrumb, [data-no-print="true"] {
+    display: none !important;
+  }
+  /* Force panels to plain */
+  .panel, .panel-raised, .tile {
+    background: #fff !important;
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+    page-break-inside: avoid;
+  }
+  .label, .text-ink-500, .text-ink-700 { color: #333 !important; }
+  .text-amber-500, .text-amber-400 { color: #000 !important; }
+  /* Page break helpers */
+  .print-break-before { page-break-before: always; }
+  .print-break-after  { page-break-after: always; }
+  .print-avoid-break  { page-break-inside: avoid; }
+  /* Standard A4 margins */
+  @page { size: A4; margin: 1.5cm; }
+}

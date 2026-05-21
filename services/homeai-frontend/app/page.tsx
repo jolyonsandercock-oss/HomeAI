@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { KPICard } from '@/components/ui/KPICard';
+import { SparkLine } from '@/components/ui/SparkLine';
 import { WagePctBadge } from '@/components/ui/WagePctBadge';
 import { Section } from '@/components/ui/Section';
 import { PlaceholderState } from '@/components/ui/PlaceholderState';
@@ -156,6 +157,12 @@ export default function DashboardPage() {
   const labour   = useSlug<LabourRow>('dashboard_labour_yesterday');
   const week     = useSlug<WeekDay>('dashboard_week_strip', {}, { refetchInterval: 5 * 60_000 });
   const extras   = useSlug<WeekDayExtras>('dashboard_week_strip_extras', {}, { refetchInterval: 5 * 60_000 });
+  // U192 — anomaly pulse: rows with { day, daily, dow_mean, dow_sd, z_score, anomalous }
+  const anomalies = useSlug<{ day: string; z_score: string | null; anomalous: boolean }>('week_strip_anomalies_7d', {}, { refetchInterval: 5 * 60_000 });
+  // U185 — sparklines: 7-day arrays { values: number[] }
+  const revSpark    = useSlug<{ values: number[] }>('revenue_spark_7d',    {}, { refetchInterval: 10 * 60_000 });
+  const labSpark    = useSlug<{ values: number[] }>('labour_pct_spark_7d', {}, { refetchInterval: 10 * 60_000 });
+  const occSpark    = useSlug<{ values: number[] }>('occupancy_spark_7d',  {}, { refetchInterval: 10 * 60_000 });
   const tides    = useSlug<TideRow>('dashboard_tides_next_7d', {}, { refetchInterval: 60 * 60_000 });
   const specials = useSlug<SpecialWeek>('dashboard_specials_next_7d', {}, { refetchInterval: 5 * 60_000 });
   const accom    = useSlug<AccomToday>('frontend_accommodation_today', dateArg, { refetchInterval: 60_000 });
@@ -186,6 +193,14 @@ export default function DashboardPage() {
   (specials.data ?? []).forEach(s => { (specialsByDay[s.day] ||= []).push(s); });
   const extrasByDay: Record<string, WeekDayExtras> = {};
   (extras.data ?? []).forEach(e => { extrasByDay[e.day] = e; });
+  const anomaliesByDay: Record<string, { z: number }> = {};
+  (anomalies.data ?? []).forEach(a => {
+    if (!a.anomalous) return;
+    const z = parseFloat(a.z_score ?? '0');
+    // Slug returns ISO timestamps for `day`; normalise to YYYY-MM-DD
+    const key = (a.day || '').slice(0, 10);
+    if (key) anomaliesByDay[key] = { z };
+  });
 
   const roomsWeek = roomsWk.data?.[0];
 
@@ -204,6 +219,12 @@ export default function DashboardPage() {
                 <span><span className="text-ink-500">Pub</span> <strong className="text-ink-900">{gbp(pub?.gross ?? 0)}</strong></span>
                 <span><span className="text-ink-500">Café</span> <strong className="text-ink-900">{gbp(cafe?.gross ?? 0)}</strong></span>
               </div>
+              {/* U185 — 7-day sparkline */}
+              {revSpark.data?.[0]?.values && revSpark.data[0].values.length > 1 && (
+                <div className="mt-2 h-6 opacity-60">
+                  <SparkLine values={revSpark.data[0].values.map(v => Number(v) || 0)} />
+                </div>
+              )}
               <div className="mt-2 text-[11px] text-amber-500 group-hover:text-amber-400">→ Click for Sales detail</div>
             </div>
           </Link>
@@ -245,6 +266,12 @@ export default function DashboardPage() {
                   );
                 })}
               </div>
+              {/* U185 — 7-day labour% sparkline */}
+              {labSpark.data?.[0]?.values && labSpark.data[0].values.length > 1 && (
+                <div className="mt-2 h-6 opacity-60">
+                  <SparkLine values={labSpark.data[0].values.map(v => Number(v) || 0)} colour="#fbbf24" />
+                </div>
+              )}
               <div className="mt-2 text-[11px] text-amber-500 group-hover:text-amber-400">→ Click for Staff detail</div>
             </div>
           </Link>
@@ -272,8 +299,11 @@ export default function DashboardPage() {
                 const dayTides    = tidesByDay[d.day] ?? [];
                 const daySpecials = specialsByDay[d.day] ?? [];
                 const dayExtras   = extrasByDay[d.day];
+                const dayAnomaly  = anomaliesByDay[d.day];
+                const pulse       = dayAnomaly ? 'anomaly-pulse' : '';
+                const anomTitle   = dayAnomaly ? `Revenue anomaly (z=${dayAnomaly.z.toFixed(2)} vs same-DoW baseline)` : undefined;
                 return (
-                  <Link key={d.day} href={href} className={`tile flex flex-col text-[11px] gap-1 cursor-pointer transition-shadow hover:ring-2 hover:ring-amber-500 ${ring}`}>
+                  <Link key={d.day} href={href} className={`tile flex flex-col text-[11px] gap-1 cursor-pointer transition-shadow hover:ring-2 hover:ring-amber-500 ${ring} ${pulse}`} title={anomTitle}>
                     {/* Day header + weather icon */}
                     <div className="flex items-center justify-between">
                       <span className={'label ' + (dIsActive ? 'text-amber-500' : dIsToday && !isToday ? 'text-good font-semibold' : '')}>
@@ -410,7 +440,8 @@ export default function DashboardPage() {
               loading={roomsWk.isLoading} />
             <KPICard label="% occupied"
               value={roomsWeek?.pct_occupied != null ? `${roomsWeek.pct_occupied}%` : '—'}
-              loading={roomsWk.isLoading} />
+              loading={roomsWk.isLoading}
+              spark={occSpark.data?.[0]?.values?.map(v => Number(v) || 0)} />
             <KPICard label="Avg stay"
               value={roomsWeek?.avg_stay_nights != null ? `${parseFloat(String(roomsWeek.avg_stay_nights)).toFixed(1)} nights` : '—'}
               loading={roomsWk.isLoading} />
