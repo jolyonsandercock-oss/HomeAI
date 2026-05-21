@@ -61,7 +61,11 @@ echo "→ snapshotting config tree + staged blobs"
 restic backup \
   --tag homeai-nightly \
   --tag "phase=1" \
-  --exclude '/home_ai/backups' \
+  --exclude '/home_ai/backups/restic-local' \
+  --exclude '/home_ai/backups/weekly' \
+  --exclude '/home_ai/backups/cron.log' \
+  --exclude '/home_ai/backups/last-backup.log' \
+  --exclude '/home_ai/backups/selftest-*.log' \
   --exclude '/home_ai/.git' \
   --exclude 'node_modules' \
   --exclude '*.pyc' \

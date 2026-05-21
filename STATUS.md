@@ -1,15 +1,18 @@
 # STATUS
 
-_generated: 2026-05-21T15:58:54+01:00_
+_generated: 2026-05-21T20:09:07+01:00_
 _by: scripts/u89-regen-status.sh_
 
 ## Current branch
 
-`main` at `89e2284`
+`main` at `e374394`
 
 ## Recent commits (last 20)
 
 ```
+e374394 U162: fix Gmail action-queue gap + wire menu-performance slugs
+32eca9e gitignore: data/trail-profile (populated by u156-trail-pair)
+d6f07c6 U156 + U159 + U160 + U161: parallel backend work (UX postponed)
 89e2284 U151b: vision-OCR mortgage statements
 ca422ec Session 2026-05-21 close: Karl+Staff provisioned, Dojo + reviews wired
 36c1154 STATUS regen — end of autonomous session
@@ -27,16 +30,13 @@ d4db599 U141 + U143 service implementations (presidio, litellm, vault-agent)
 f592257 U143 + U144: LiteLLM cost gateway + quota allocations
 265f5cc U141: Presidio PII redaction hard-fail for cloud calls
 5ed07b0 U139: realm rename FAMILY → PERSONAL
-4669f18 U135-followup + U138: expense rollup + RLS fix + admin slugs
-49b471d U135: staff page · daily reconciliation · realm enforcement · restaurant rota
-33959c0 U135 plan: staff page · daily reconciliation · realm enforcement · restaurant rota
 ```
 
 ## Open work signals
 
 - Pending bot_instructions: 1
 - Open CRITICAL exceptions: 0
-- Working-tree state: 12 files modified/untracked
+- Working-tree state: 15 files modified/untracked
 
 ## Audit log recent entries
 
