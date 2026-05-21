@@ -171,3 +171,120 @@ events_processing_lease_age:
     - oldest_seconds:
         usage: "GAUGE"
         description: "Age in seconds of the oldest in-flight processing lease (0 when no in-flight events)"
+
+# =============================================================================
+# Phase 5 (U141+U143+U144): AI spend, redaction events, quota status.
+# =============================================================================
+
+ai_spend_today_by_tier:
+  query: |
+    SELECT COALESCE(business_priority, 'untagged') AS tier,
+           COALESCE(SUM(cost_gbp), 0)::float AS spent_gbp
+      FROM ai_usage
+     WHERE "timestamp" >= CURRENT_DATE
+     GROUP BY 1
+  master: true
+  metrics:
+    - tier:
+        usage: "LABEL"
+    - spent_gbp:
+        usage: "GAUGE"
+        description: "GBP spent on AI calls today, per priority tier"
+
+ai_call_count_today_by_tier:
+  query: |
+    SELECT COALESCE(business_priority, 'untagged') AS tier,
+           COUNT(*)::float AS calls
+      FROM ai_usage
+     WHERE "timestamp" >= CURRENT_DATE
+     GROUP BY 1
+  master: true
+  metrics:
+    - tier:
+        usage: "LABEL"
+    - calls:
+        usage: "GAUGE"
+        description: "Number of AI calls today, per priority tier"
+
+ai_spend_7d_by_tier:
+  query: |
+    SELECT COALESCE(business_priority, 'untagged') AS tier,
+           COALESCE(SUM(cost_gbp), 0)::float AS spent_gbp
+      FROM ai_usage
+     WHERE "timestamp" >= NOW() - INTERVAL '7 days'
+     GROUP BY 1
+  master: true
+  metrics:
+    - tier:
+        usage: "LABEL"
+    - spent_gbp:
+        usage: "GAUGE"
+        description: "GBP spent on AI calls last 7 days, per priority tier"
+
+ai_quota_ceiling:
+  query: |
+    SELECT business_priority AS tier,
+           daily_cost_ceiling_gbp::float AS ceiling_gbp,
+           CASE WHEN enforce_mode THEN 1.0 ELSE 0.0 END AS enforce_mode
+      FROM quota_allocations
+  master: true
+  metrics:
+    - tier:
+        usage: "LABEL"
+    - ceiling_gbp:
+        usage: "GAUGE"
+        description: "Daily GBP ceiling per priority tier"
+    - enforce_mode:
+        usage: "GAUGE"
+        description: "1 = enforce mode active (429 on exhaustion); 0 = shadow mode"
+
+ai_quota_shadow_blocked_today:
+  query: |
+    SELECT COALESCE(business_priority, 'untagged') AS tier,
+           COUNT(*) FILTER (WHERE would_block_reason IS NOT NULL)::float AS shadow_blocked
+      FROM ai_usage
+     WHERE "timestamp" >= CURRENT_DATE
+     GROUP BY 1
+  master: true
+  metrics:
+    - tier:
+        usage: "LABEL"
+    - shadow_blocked:
+        usage: "GAUGE"
+        description: "Today's count of would-have-blocked calls (shadow mode logging)"
+
+redaction_24h_by_status:
+  query: |
+    SELECT status, COUNT(*)::float AS events
+      FROM redaction_audit_log
+     WHERE ts >= NOW() - INTERVAL '24 hours'
+     GROUP BY 1
+  master: true
+  metrics:
+    - status:
+        usage: "LABEL"
+    - events:
+        usage: "GAUGE"
+        description: "Count of redaction events last 24h by status (ok/hard_fail/degraded/bypass)"
+
+redaction_avg_latency_ms_24h:
+  query: |
+    SELECT COALESCE(ROUND(AVG(latency_ms))::float, 0) AS avg_ms
+      FROM redaction_audit_log
+     WHERE ts >= NOW() - INTERVAL '24 hours' AND status='ok'
+  master: true
+  metrics:
+    - avg_ms:
+        usage: "GAUGE"
+        description: "Average Presidio /redact latency in ms over last 24h (status=ok)"
+
+redaction_hard_fail_today:
+  query: |
+    SELECT COUNT(*)::float AS hard_fails
+      FROM redaction_audit_log
+     WHERE ts >= CURRENT_DATE AND status='hard_fail'
+  master: true
+  metrics:
+    - hard_fails:
+        usage: "GAUGE"
+        description: "Count of redaction hard-fail events today — non-zero means a cloud-bound LLM call was blocked because Presidio was unreachable. Pages oncall if >0."

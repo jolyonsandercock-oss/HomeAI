@@ -1,0 +1,145 @@
+{
+  "uid": "home-ai-phase5-health",
+  "title": "Home AI — Phase 5 Health (PII redaction + AI spend + quota)",
+  "tags": ["home-ai", "phase-5", "u141", "u143", "u144"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "PII redaction (Presidio)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Redaction hard-fails today",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "redaction_hard_fail_today_hard_fails", "legendFormat": "hard_fail" }],
+      "fieldConfig": { "defaults": {
+        "color": { "mode": "thresholds" },
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "red",   "value": 1 }
+        ]},
+        "unit": "short",
+        "noValue": "0"
+      }}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Redactions OK (24h)",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "redaction_24h_by_status_events{status=\"ok\"}", "legendFormat": "ok" }],
+      "fieldConfig": { "defaults": {
+        "color": { "mode": "thresholds" },
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "yellow", "value": null },
+          { "color": "green", "value": 1 }
+        ]}
+      }}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Avg redaction latency (24h ok)",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "redaction_avg_latency_ms_24h_avg_ms" }],
+      "fieldConfig": { "defaults": {
+        "unit": "ms",
+        "color": { "mode": "thresholds" },
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 100 },
+          { "color": "red",    "value": 500 }
+        ]}
+      }}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Redaction events by status (24h)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{
+        "expr": "redaction_24h_by_status_events",
+        "legendFormat": "{{status}}"
+      }],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 } } }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "AI quota — today vs ceiling (£3/day cap)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "collapsed": false
+    },
+    {
+      "id": 11,
+      "type": "bargauge",
+      "title": "Spent today vs daily ceiling — by tier",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "ai_spend_today_by_tier_spent_gbp", "legendFormat": "{{tier}} spent", "refId": "A" },
+        { "expr": "ai_quota_ceiling_ceiling_gbp",     "legendFormat": "{{tier}} ceil",  "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": {
+        "unit": "currencyGBP",
+        "min": 0,
+        "max": 1.1,
+        "color": { "mode": "thresholds" },
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "green", "value": null },
+          { "color": "yellow", "value": 0.6 },
+          { "color": "red",    "value": 0.9 }
+        ]}
+      }},
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Cumulative £ spent today by tier (live)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "ai_spend_today_by_tier_spent_gbp", "legendFormat": "{{tier}}" }],
+      "fieldConfig": { "defaults": { "unit": "currencyGBP", "custom": { "drawStyle": "line", "stacking": { "mode": "normal" }, "fillOpacity": 30 } } }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "7-day £ spent by tier",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 23 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "ai_spend_7d_by_tier_spent_gbp", "legendFormat": "{{tier}}" }],
+      "fieldConfig": { "defaults": { "unit": "currencyGBP", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 } } }
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Shadow-mode would-have-blocked",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 },
+      "collapsed": false
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Shadow-blocked calls today (when 0 for 7d, safe to enforce)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "ai_quota_shadow_blocked_today_shadow_blocked", "legendFormat": "{{tier}}" }],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "lineWidth": 2 } } }
+    }
+  ]
+}

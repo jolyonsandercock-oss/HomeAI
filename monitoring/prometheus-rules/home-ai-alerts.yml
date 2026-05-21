@@ -77,3 +77,56 @@ groups:
         annotations:
           summary: "n8n event loop p50 lag is {{ $value | humanizeDuration }}"
           description: "Sustained event loop lag indicates n8n is overloaded. Check active workflow count and execution rate."
+
+  - name: home-ai-phase5
+    interval: 30s
+    rules:
+      # U141 — Presidio hard-fail: any cloud-bound LLM call that was blocked
+      # because Presidio was unreachable. Should always be zero in steady state.
+      - alert: PresidioHardFail
+        expr: redaction_hard_fail_today_hard_fails > 0
+        for: 1m
+        labels: { severity: critical, component: presidio }
+        annotations:
+          summary: "Presidio redactor hard-fail — cloud LLM calls being blocked"
+          description: "{{ $value }} hard_fail events today. Cloud-bound LLM calls are returning 503 instead of leaking unredacted PII. Investigate homeai-presidio container; until restored, the invoice pipeline + any cloud RAG paths are halted. Bot-responder is unaffected (it bypasses llm-router)."
+
+      # U141 — Presidio latency degradation
+      - alert: PresidioSlow
+        expr: redaction_avg_latency_ms_24h_avg_ms > 500
+        for: 10m
+        labels: { severity: warning, component: presidio }
+        annotations:
+          summary: "Presidio redaction avg latency >500ms (24h avg)"
+          description: "Avg /redact latency is {{ $value }}ms over 24h. Healthy is 5-20ms. Check homeai-presidio CPU + spaCy model size."
+
+      # U144 — shadow-mode would-have-blocked: signals that flipping
+      # enforce_mode=true would start denying calls. Useful as a
+      # readiness check before the operator flips to enforce mode.
+      - alert: QuotaWouldBlock
+        expr: ai_quota_shadow_blocked_today_shadow_blocked > 0
+        for: 5m
+        labels: { severity: info, component: quota }
+        annotations:
+          summary: "Tier {{ $labels.tier }} would have been quota-throttled ({{ $value }} calls today)"
+          description: "If enforce_mode were true, {{ $value }} calls to tier {{ $labels.tier }} would have returned 429. Shadow mode is doing its job — review whether enforce_mode is safe to flip yet."
+
+      # U143 — tier ceiling actually breached (enforce mode would 429)
+      - alert: TierCeilingBreached
+        expr: ai_spend_today_by_tier_spent_gbp > on(tier) ai_quota_ceiling_ceiling_gbp
+        for: 1m
+        labels: { severity: warning, component: quota }
+        annotations:
+          summary: "AI spend tier {{ $labels.tier }} exceeded daily ceiling"
+          description: "Spent £{{ $value }} > tier ceiling. In shadow mode this is a warning; in enforce mode the gateway is now returning 429 to {{ $labels.tier }} workflows."
+
+      # U143 — P0 floor being eaten
+      # Fires when P0 has used ≥80% of its floor — gives time to investigate
+      # before financial-recon workflows actually start to fail.
+      - alert: P0FloorRunningLow
+        expr: ai_spend_today_by_tier_spent_gbp{tier="P0"} > 0.72
+        for: 5m
+        labels: { severity: warning, component: quota }
+        annotations:
+          summary: "P0 (financial) spend at £{{ $value }} of £0.90 floor"
+          description: "P0 floor is reserved for bank recon + invoice extraction + compliance. >80% used means a heavy day for those flows. Check what's running."
