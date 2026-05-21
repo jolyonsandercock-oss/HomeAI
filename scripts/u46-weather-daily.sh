@@ -131,8 +131,8 @@ async def main():
                  json.dumps(day_payload))
         print(f"  upserted {len(dates)} actuals")
 
-    # ── 5-day forecast (+marine) ──
-    fc_end = today + timedelta(days=5)
+    # ── 7-day forecast (+marine) ── U206: extended from 5 → 7 so week strip fills
+    fc_end = today + timedelta(days=7)
     print(f"fetching forecast {today} → {fc_end}")
     fc_data = fetch_daily(today, fc_end, base=BASE, extra_fields=FORECAST_EXTRA_FIELDS)
     days   = fc_data.get("daily", {})
@@ -195,7 +195,7 @@ async def main():
 
     # Telegram alert summary if anything severe in forecast
     if alerts:
-        lines = ["🌦 Weather alerts — next 5 days (PL34 0DA):"]
+        lines = ["🌦 Weather alerts — next 7 days (PL34 0DA):"]
         for fd, cats, rain, tmax, wmax in alerts:
             parts = []
             if "heavy_rain"  in cats: parts.append(f"rain {rain:.0f}mm")

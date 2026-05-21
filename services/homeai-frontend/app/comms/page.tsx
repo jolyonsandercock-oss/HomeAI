@@ -5,6 +5,7 @@ import { PlaceholderState } from '@/components/ui/PlaceholderState';
 import { SandboxWrapper } from '@/components/sandbox/SandboxWrapper';
 import { KPICard } from '@/components/ui/KPICard';
 import { useSlug } from '@/lib/hooks';
+import { SparkLine } from '@/components/ui/SparkLine';
 import { Star, ExternalLink } from 'lucide-react';
 
 interface ReviewRow {
@@ -23,6 +24,17 @@ interface ReviewAvg {
   avg_rating: string | number | null;
   review_count: number;
 }
+interface ReviewSpark {
+  rating_spark: number[];
+  count_spark: string[];
+  total_reviews_30d: number;
+  avg_rating_30d: string | null;
+}
+interface EmailKpis {
+  tasks_open: string;
+  instructions_pending: string;
+  last_instruction_at: string | null;
+}
 
 function sourceLabel(src: string): string {
   if (src === 'google') return 'Google';
@@ -40,9 +52,41 @@ function stars(rating: number | null): string {
 export default function CommsPage() {
   const recent = useSlug<ReviewRow>('reviews_recent', {}, { refetchInterval: 10 * 60_000 });
   const avg30  = useSlug<ReviewAvg>('reviews_average_30d', {}, { refetchInterval: 10 * 60_000 });
+  const spark  = useSlug<ReviewSpark>('reviews_rating_spark_30d', {}, { refetchInterval: 10 * 60_000 });
+  const email  = useSlug<EmailKpis>('work_email_kpis', {}, { refetchInterval: 5 * 60_000 });
+  const sp     = spark.data?.[0];
+  const ek     = email.data?.[0];
+  const ratingSeries = (sp?.rating_spark ?? []).map(v => Number(v) || 0);
+  const countSeries  = (sp?.count_spark  ?? []).map(v => Number(v) || 0);
 
   return (
     <div className="space-y-6">
+      <SandboxWrapper id="comms.reviews-trend" label="Reviews trend">
+        <Section title="Reviews — 30-day trend">
+          {spark.isLoading ? <PlaceholderState message="Loading trend…" /> :
+           sp && sp.total_reviews_30d > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="tile">
+                <div className="label">30d avg rating</div>
+                <div className="kpi-xl mt-1">{sp.avg_rating_30d ? `${parseFloat(sp.avg_rating_30d).toFixed(2)}★` : '—'}</div>
+                <div className="text-[10px] text-ink-500 mt-0.5">days with reviews only</div>
+                <div className="mt-2 h-10 opacity-70">
+                  <SparkLine values={ratingSeries} colour="#f59e0b" />
+                </div>
+              </div>
+              <div className="tile">
+                <div className="label">30d review count</div>
+                <div className="kpi-xl mt-1">{sp.total_reviews_30d}</div>
+                <div className="text-[10px] text-ink-500 mt-0.5">total this window</div>
+                <div className="mt-2 h-10 opacity-70">
+                  <SparkLine values={countSeries} colour="#06b6d4" />
+                </div>
+              </div>
+            </div>
+          ) : <PlaceholderState message="No reviews in the last 30 days." />}
+        </Section>
+      </SandboxWrapper>
+
       <SandboxWrapper id="comms.reviews" label="Reviews">
         <Section title="Reviews — 30-day averages">
           {avg30.isLoading ? <PlaceholderState message="Loading…" /> :
@@ -101,13 +145,13 @@ export default function CommsPage() {
       <SandboxWrapper id="comms.email" label="Email summary">
         <Section title="Email">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <KPICard label="Inbox queue" value="—" />
-            <KPICard label="Email tasks open" value="—" />
-            <KPICard label="Classifier uncertain" value="—" />
+            <KPICard label="Email tasks open" value={ek?.tasks_open ?? '—'} loading={email.isLoading} />
+            <KPICard label="Bot instructions pending" value={ek?.instructions_pending ?? '—'} loading={email.isLoading} />
+            <KPICard
+              label="Last instruction"
+              value={ek?.last_instruction_at ? new Date(ek.last_instruction_at).toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '—'}
+              loading={email.isLoading} />
           </div>
-          <PlaceholderState
-            message="Pending Gmail OAuth re-auth"
-            hint="3 consumer Gmail OAuth tokens expired (jo, bot, pounana). Rotate with /home_ai/scripts/oauth/redo-google-oauth.sh — see runbook. Until then no inbound polling." />
         </Section>
       </SandboxWrapper>
 

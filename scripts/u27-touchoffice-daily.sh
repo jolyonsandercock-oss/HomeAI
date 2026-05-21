@@ -26,10 +26,17 @@ if ! docker ps --filter "name=$ENDPOINT_HOST" --filter status=running --format '
 fi
 
 overall_rc=0
+# U207 — retry up to 3 times with 30s backoff on transient (DNS / 5xx) failures.
+# 2026-05-20 cron hit net::ERR_NAME_NOT_RESOLVED for touchoffice.net once and
+# silently lost the day; this loop catches that class of transient.
+MAX_ATTEMPTS=3
 for site in "${SITES[@]}"; do
   echo -e "${YEL}→${NC} $site / $DATE"
   url="http://localhost:${ENDPOINT_PORT}/ingest/touchoffice?site=${site}&date=${DATE}"
-  resp=$(docker exec "$ENDPOINT_HOST" python -c "
+  attempt=0
+  while :; do
+    attempt=$((attempt+1))
+    resp=$(docker exec "$ENDPOINT_HOST" python -c "
 import urllib.request, json, urllib.error, sys
 req = urllib.request.Request('$url', method='POST')
 try:
@@ -39,8 +46,18 @@ except urllib.error.HTTPError as e:
     print(json.dumps({'_http': e.code, '_error': e.read().decode()[:600]}))
     sys.exit(2)
 ")
-  rc=$?
-  if [[ $rc -eq 0 ]]; then
+    rc=$?
+    # Retry on rc != 0 (HTTP error) OR success but body contains 'scrape failed'
+    if [[ $rc -ne 0 ]] || echo "$resp" | grep -q 'scrape failed\|ERR_NAME_NOT_RESOLVED'; then
+      if [[ $attempt -lt $MAX_ATTEMPTS ]]; then
+        echo -e "  ${YEL}↺${NC} attempt $attempt failed, retrying in 30s…"
+        sleep 30
+        continue
+      fi
+    fi
+    break
+  done
+  if [[ $rc -eq 0 ]] && ! echo "$resp" | grep -q 'scrape failed\|ERR_NAME_NOT_RESOLVED'; then
     summary=$(echo "$resp" | python3 -c "
 import json,sys
 o=json.load(sys.stdin)

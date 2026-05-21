@@ -163,6 +163,10 @@ export default function DashboardPage() {
   const revSpark    = useSlug<{ values: number[] }>('revenue_spark_7d',    {}, { refetchInterval: 10 * 60_000 });
   const labSpark    = useSlug<{ values: number[] }>('labour_pct_spark_7d', {}, { refetchInterval: 10 * 60_000 });
   const occSpark    = useSlug<{ values: number[] }>('occupancy_spark_7d',  {}, { refetchInterval: 10 * 60_000 });
+  // U211 — reviews 30d
+  const reviewsSpk  = useSlug<{ rating_spark: number[]; count_spark: string[]; total_reviews_30d: number; avg_rating_30d: string | null }>('reviews_rating_spark_30d', {}, { refetchInterval: 30 * 60_000 });
+  // U212 — email tasks (OAuth confirmed healthy)
+  const emailKpis   = useSlug<{ tasks_open: string; instructions_pending: string; last_instruction_at: string | null }>('work_email_kpis', {}, { refetchInterval: 5 * 60_000 });
   const tides    = useSlug<TideRow>('dashboard_tides_next_7d', {}, { refetchInterval: 60 * 60_000 });
   const specials = useSlug<SpecialWeek>('dashboard_specials_next_7d', {}, { refetchInterval: 5 * 60_000 });
   const accom    = useSlug<AccomToday>('frontend_accommodation_today', dateArg, { refetchInterval: 60_000 });
@@ -415,7 +419,7 @@ export default function DashboardPage() {
 
       {/* ROW 2.5: Rooms — this week (bold rooms-left callout) */}
       <SandboxWrapper id="dashboard.rooms_week" label="Rooms this week">
-        <Section title={`Rooms — week of ${roomsWeek?.week_start ?? '…'} (Monday-anchored)`}>
+        <Section title={`Rooms — next 7 nights from ${roomsWeek?.week_start ? new Date(roomsWeek.week_start).toLocaleDateString('en-GB', {day:'2-digit', month:'short'}) : '…'}`}>
           {/* Prominent callout: rooms still to sell this week */}
           {roomsWeek && (
             <div className="mb-3">
@@ -469,31 +473,7 @@ export default function DashboardPage() {
         </Section>
       </SandboxWrapper>
 
-      {/* ROW 4: Special occasions */}
-      <SandboxWrapper id="dashboard.special" label="Special occasions">
-        <Section title="Special occasions">
-          {special.isLoading ? <PlaceholderState message="Loading…" /> :
-           special.data && special.data.length > 0 ? (
-            <div className="tile space-y-2 text-sm">
-              {special.data.map((s, i) => (
-                <div key={i} className="flex items-center gap-3 border-b border-ink-200 pb-2 last:border-0 last:pb-0">
-                  <span className={
-                    'px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-mono ' +
-                    (s.kind === 'group_booking' ? 'bg-amber-500/20 text-amber-500' : 'bg-info/20 text-info')
-                  }>
-                    {s.kind === 'group_booking' ? 'group booking' : 'group stay'}
-                  </span>
-                  <strong className="text-ink-900">{s.label}</strong>
-                  <span className="text-ink-500 font-mono">{s.detail} pax</span>
-                  <span className="text-xs text-ink-500 ml-auto">{s.notes}</span>
-                </div>
-              ))}
-            </div>
-           ) : <PlaceholderState message="No special occasions for this day." />}
-        </Section>
-      </SandboxWrapper>
-
-      {/* ROW 5: Check-in / Stayover / Check-out lists */}
+      {/* ROW 4: Check-in / Stayover / Check-out lists */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <SandboxWrapper id="dashboard.checkins" label="Check-ins">
           <Section title={`Check-ins ${isToday ? 'today' : viewDate} (${checkins.data?.length ?? 0})`}>
@@ -540,26 +520,51 @@ export default function DashboardPage() {
             </div>
           ) : (
             <PlaceholderState
-              message="No Trail reports yet"
-              hint="Once the Trail API endpoint is verified and the cron runs (scripts/u134-trail-poll.py), reports populate here. Key already stashed in Vault at secret/trail." />
+              message="Trail OIDC poll pending U156b"
+              hint="Trail moved to Access Group SSO (identity.accessacloud.com OIDC). u134-trail-poll.py is REST-style and no longer applies; awaiting Playwright OIDC rewrite. Credentials live in Vault at secret/trail." />
           )}
         </Section>
       </SandboxWrapper>
 
       {/* ROW 7: Email + reviews placeholders */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <SandboxWrapper id="dashboard.email" label="info@ inbox">
-          <Section title="info@malthousetintagel.com">
-            <PlaceholderState
-              message="Unread count pending Gmail OAuth for info@ identity"
-              hint="info account isn't in Vault. Once seeded, /api/slug/info_unread_count returns the live number." />
+        <SandboxWrapper id="dashboard.email" label="Email tasks">
+          <Section title="Email tasks">
+            <Link href="/comms" className="block">
+              <div className="tile group">
+                <div className="label">Open email tasks</div>
+                <div className="kpi-xl mt-1">{emailKpis.data?.[0]?.tasks_open ?? '—'}</div>
+                <div className="mt-1 text-[11px] text-ink-500">
+                  {emailKpis.data?.[0]?.instructions_pending ?? 0} bot instructions pending
+                </div>
+                <div className="mt-2 text-[11px] text-amber-500 group-hover:text-amber-400">→ Click for /comms</div>
+              </div>
+            </Link>
           </Section>
         </SandboxWrapper>
         <SandboxWrapper id="dashboard.reviews" label="Reviews">
-          <Section title="Reviews trend">
-            <PlaceholderState
-              message="Reviews surface in /comms"
-              hint="Reviews scraper (U133 T8) lands data in guest_reviews. Add listings via review_listings table." />
+          <Section title="Reviews — 30d trend">
+            {reviewsSpk.isLoading ? <PlaceholderState message="Loading reviews…" /> :
+             reviewsSpk.data?.[0]?.total_reviews_30d ? (
+              <Link href="/comms" className="block">
+                <div className="tile group">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div>
+                      <div className="label">30d avg</div>
+                      <div className="kpi-xl">{reviewsSpk.data[0].avg_rating_30d ? `${parseFloat(reviewsSpk.data[0].avg_rating_30d).toFixed(2)}★` : '—'}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="label">count</div>
+                      <div className="kpi">{reviewsSpk.data[0].total_reviews_30d}</div>
+                    </div>
+                  </div>
+                  <div className="mt-2 h-10 opacity-60">
+                    <SparkLine values={(reviewsSpk.data[0].rating_spark || []).map(v => Number(v) || 0)} />
+                  </div>
+                  <div className="mt-2 text-[11px] text-amber-500 group-hover:text-amber-400">→ Click for full reviews</div>
+                </div>
+              </Link>
+            ) : <PlaceholderState message="No reviews in last 30 days." />}
           </Section>
         </SandboxWrapper>
       </div>
