@@ -86,3 +86,4 @@ node_modules/
 /security/authelia-v2/configuration.yml.applied-*
 /security/authelia-v2/db.sqlite3
 /security/authelia-v2/notification.txt
+services/homeai-vault-agent/secrets/
