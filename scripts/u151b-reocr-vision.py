@@ -122,8 +122,24 @@ def call_haiku_vision(image_bytes: bytes, page_no: int, source: str) -> dict:
             "content-type":      "application/json",
         }
     )
-    r = urllib.request.urlopen(req, timeout=60)
-    resp = json.loads(r.read())
+    # U216 hardening: retry on 529 (overloaded), 503 (unavailable), 502 (bad gateway).
+    import time
+    last_err = None
+    for attempt in range(6):
+        try:
+            r = urllib.request.urlopen(req, timeout=60)
+            resp = json.loads(r.read())
+            break
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code in (529, 503, 502, 504, 429):
+                backoff = min(60, 2 ** attempt * 5)  # 5, 10, 20, 40, 60, 60s
+                print(f"    [HTTP {e.code}] attempt {attempt+1}/6 — backing off {backoff}s")
+                time.sleep(backoff)
+                continue
+            raise
+    else:
+        raise last_err  # exhausted retries
 
     text = (resp.get("content") or [{}])[0].get("text", "")
     # Extract JSON from response

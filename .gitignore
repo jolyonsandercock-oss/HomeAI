@@ -96,3 +96,9 @@ data/dojo-inbox/processed/
 data/mortgage-vision-ocr/_pages_*
 data/mortgage-vision-ocr/paperless-*.pdf
 data/trail-profile/
+
+# U215/U217 — Playwright session profiles + scrape caches
+data/trail-profile-oidc/
+data/trail-profile-direct/
+data/touchoffice-probe/
+data/trail-cache/

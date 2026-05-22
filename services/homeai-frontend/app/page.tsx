@@ -520,8 +520,8 @@ export default function DashboardPage() {
             </div>
           ) : (
             <PlaceholderState
-              message="Trail OIDC poll pending U156b"
-              hint="Trail moved to Access Group SSO (identity.accessacloud.com OIDC). u134-trail-poll.py is REST-style and no longer applies; awaiting Playwright OIDC rewrite. Credentials live in Vault at secret/trail." />
+              message="No Trail reports for this date"
+              hint="Trail OIDC scraper (u215) runs 07:30/13:30/19:30. Most recent data shown by fallback if today's reports haven't been completed yet." />
           )}
         </Section>
       </SandboxWrapper>
