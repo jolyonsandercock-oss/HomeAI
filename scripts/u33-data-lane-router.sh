@@ -32,9 +32,16 @@ CSV_MIMES = {"text/csv", "application/csv", "application/vnd.ms-excel"}
 
 DATA_DIR = pathlib.Path("/home_ai/data")  # bind-mounted in homeai-playwright
 NATWEST_DIR = DATA_DIR / "natwest-inbox"
+DOJO_DIR    = DATA_DIR / "dojo-inbox"
 UNKNOWN_DIR = DATA_DIR / "unknown-attachments"
-for p in (NATWEST_DIR, UNKNOWN_DIR):
+for p in (NATWEST_DIR, DOJO_DIR, UNKNOWN_DIR):
     p.mkdir(parents=True, exist_ok=True)
+
+# U-A1 (2026-05-22): Jo confirmed Dojo CSVs go to the pub trading company.
+# When a trusted sender forwards a Dojo-shaped CSV, route to dojo-inbox
+# where u135-dojo-inbox-sweep picks it up automatically.
+DOJO_FILENAME_RE = re.compile(r"transactions[_-].*all[_-]locations.*\.csv$", re.I)
+TRUSTED_SENDERS = {"jolyon.sandercock@gmail.com"}
 
 
 def vault_get(path):
@@ -169,6 +176,18 @@ async def main():
                 out = NATWEST_DIR / f"{mid}__{fname}"
                 out.write_bytes(blob)
                 actions.append(f"natwest-csv saved → {out}")
+                continue
+
+            # Dojo CSV forwarded by a trusted sender (Jo) → dojo-inbox.
+            # u135 sweep imports on its next run.
+            sender_lc = (sender or "").lower().strip()
+            sender_email = sender_lc.split("<")[-1].rstrip(">").strip() if "<" in sender_lc else sender_lc
+            if (sender_email in TRUSTED_SENDERS
+                    and (mime in CSV_MIMES or fname.lower().endswith(".csv"))
+                    and DOJO_FILENAME_RE.search(fname)):
+                out = DOJO_DIR / f"{mid}__{fname}"
+                out.write_bytes(blob)
+                actions.append(f"dojo-csv saved → {out}")
                 continue
 
             if vendor_hit and (mime in PDF_MIMES or fname.lower().endswith(".pdf")):
