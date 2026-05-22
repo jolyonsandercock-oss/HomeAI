@@ -46,7 +46,31 @@ vault_put() {
 case "$ACTION" in
 diagnose)
   echo "── Auth state for each google identity ──"
+  # Read the canonical identity list + auth model from static_context. The
+  # gmail.accounts JSON is source of truth; a missing vault entry for a
+  # service_account identity is EXPECTED (DWD impersonates from sa-malthouse).
+  ACCOUNTS_JSON=$(docker exec homeai-postgres psql -U postgres -d homeai -tAc \
+    "SELECT value::text FROM static_context WHERE key='gmail.accounts'" 2>/dev/null || echo '[]')
   for id in jo bot pounana admin info; do
+    # First check the static_context registration
+    sc_auth=$(echo "$ACCOUNTS_JSON" | python3 -c "
+import json,sys
+try:
+    accs = json.loads(sys.stdin.read())
+    a = next((a for a in accs if a.get('name')=='$id'), None)
+    print(a.get('auth','none') if a else 'none')
+except: print('none')")
+    if [ "$sc_auth" = "service_account" ]; then
+      # DWD identity — sa-malthouse impersonates; per-identity vault entry
+      # is intentionally absent. Don't flag "NOT IN VAULT" for these.
+      email=$(echo "$ACCOUNTS_JSON" | python3 -c "
+import json,sys
+accs=json.loads(sys.stdin.read())
+a=next((a for a in accs if a.get('name')=='$id'), {})
+print(a.get('email','?'))")
+      printf "  %-10s  %-32s  SvcAcc DWD (via sa-malthouse)\n" "$id" "$email"
+      continue
+    fi
     creds=$(vault_kv "$id" 2>/dev/null || echo '{}')
     if [ "$creds" = "{}" ] || [ -z "$creds" ]; then
       printf "  %-10s  %s\n" "$id" "NOT IN VAULT"
