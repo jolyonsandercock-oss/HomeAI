@@ -292,10 +292,15 @@ services:
       # U52 R2 realm enforcement. 0 = dormant (every request runs as OWNER);
       # flip to 1 once Authelia (R3) is wired and sets the X-Realm header.
       REALM_ENFORCE: "1"
-    deploy:
-      resources:
-        reservations:
-          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
+    # GPU reservation temporarily removed 2026-05-23 — nvidia-persistenced
+    # daemon on host failed (sudo systemctl start returns error). Container
+    # serves HTML fine without GPU; /api/hardware/vram-resident and
+    # /api/sovereignty endpoints will return empty until daemon is fixed
+    # and this block restored. See TECH-DEBT.md.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
     ports:
       - "100.104.82.53:8090:8090"
     depends_on:

@@ -857,8 +857,10 @@
             </template>
           </div>
           <div x-show="rows.length > 12" class="text-xs text-slate-500 mt-2">
-            +<span x-text="rows.length - 12"></span> more — visit
-            <a href="/viewer/classifier-queue" class="text-sky-400 hover:underline">full queue</a>
+            +<span x-text="rows.length - 12"></span> more
+            <!-- TODO: re-enable when /viewer/classifier-queue page is built (404 as of 2026-05-23)
+              — visit <a href="/viewer/classifier-queue" class="text-sky-400 hover:underline">full queue</a>
+            -->
           </div>
         </div>
         </div> <!-- end TIER 1 -->

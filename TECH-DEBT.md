@@ -6,6 +6,13 @@ Items that need user (Jo) attention — surfaced during build sessions. Updated 
 
 ## Critical path (currently blocking work)
 
+- [ ] **nvidia-persistenced daemon won't start (build-dashboard GPU disabled)** *(surfaced 2026-05-23)*
+  - Symptom: `sudo systemctl start nvidia-persistenced` exits non-zero. Other GPU containers (ollama, paperless) survived because they were started 8 days ago before the daemon died; any GPU container recreate now fails with `/run/nvidia-persistenced/socket: no such file or directory`.
+  - Workaround applied: GPU reservation removed from `build-dashboard` in `docker-compose.yml` so the container can start. HTML serves fine but `/api/hardware/vram-resident` and `/api/sovereignty` will return empty.
+  - Action: investigate via `sudo journalctl -xeu nvidia-persistenced.service | tail -50`. Likely a kernel module / driver issue (host kernel updated without driver rebuild, GPU detection failing, etc). Once daemon restarts, restore the `deploy.resources.reservations` block on `build-dashboard` (look for the `# GPU reservation temporarily removed 2026-05-23` comment near line 295).
+
+
+
 - [ ] **Gmail OAuth → Vault** *(blocks Step 11 activation)*
   - Goal: populate `secret/gmail/account1` with `oauth_client_id`, `oauth_client_secret`, `refresh_token`.
   - Action: follow `/home_ai/scripts/gmail-oauth-bootstrap.py` docstring. Google Cloud Console → enable Gmail API → create OAuth 2.0 Desktop client → download client_secret JSON → run script → paste printed `vault kv put` (with leading space).
