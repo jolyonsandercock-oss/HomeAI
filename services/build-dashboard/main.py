@@ -5474,6 +5474,7 @@ async def pub_snapshot():
             COALESCE(SUM(value) FILTER (WHERE label = 'Covers'),     0)::numeric        AS covers
           FROM touchoffice_fixed_totals
           WHERE report_date = CURRENT_DATE
+            AND site = 'malthouse'
         """)
         today_accom = await c.fetchrow("""
           SELECT
@@ -5537,6 +5538,7 @@ async def pub_snapshot():
                  SUM(value) FILTER (WHERE label = 'GROSS Sales')::numeric(10,2) AS v
             FROM touchoffice_fixed_totals
            WHERE report_date >= CURRENT_DATE - INTERVAL '14 days'
+             AND site = 'malthouse'
            GROUP BY report_date ORDER BY report_date
         """)
         occ_sparkline = await c.fetch("""
