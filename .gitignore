@@ -102,3 +102,6 @@ data/trail-profile-oidc/
 data/trail-profile-direct/
 data/touchoffice-probe/
 data/trail-cache/
+
+# Cron-written heartbeat — re-modified every 15 min, no value in tracking
+data/u165-last-alert.json
