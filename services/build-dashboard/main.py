@@ -4621,6 +4621,12 @@ async def api_economics_overview(days: int = 90):
     async with p.acquire() as c:
         await c.execute("SET app.current_entity = 'all'")
         kpi = await c.fetchrow("SELECT * FROM v_live_ops_kpis")
+        # U225 T3 — room_revenue for today's ADR computation on the home page.
+        room_rev = await c.fetchrow("""
+          SELECT COALESCE(SUM(rate_per_night), 0)::numeric(10,2) AS room_revenue
+            FROM caterbook_room_nights
+           WHERE night_date = CURRENT_DATE
+        """)
         rows = await c.fetch("""
           SELECT * FROM v_daily_unit_economics
            WHERE report_date >= CURRENT_DATE - ($1::int)
@@ -4637,11 +4643,108 @@ async def api_economics_overview(days: int = 90):
             else: out[k] = v
         return out
 
+    kpi_dict = _row(kpi) or {}
+    kpi_dict["room_revenue"] = float(room_rev["room_revenue"]) if room_rev else 0.0
     return {
         "window_days": days,
-        "kpi":         _row(kpi),
+        "kpi":         kpi_dict,
         "rows":        [_row(r) for r in rows],
         "thresholds":  [_row(t) for t in thresholds],
+    }
+
+
+# U225 T2 — period summary backing the home-page period boxes.
+# Returns yesterday / 7d / 30d slices, each split by site (pub vs cafe) with
+# daily series for the bar chart. Sales from touchoffice_fixed_totals (NET
+# Sales label), labour from v_daily_labour_by_team. Pub labour = kitchen +
+# front_of_house; cafe labour = cafe team. Accommodation labour is excluded
+# (lives separately in Caterbook accounting).
+@app.get("/api/economics/period-summary")
+async def api_economics_period_summary():
+    p = await pool()
+    async with p.acquire() as c:
+        await c.execute("SET app.current_entity = 'all'")
+        sales = await c.fetch("""
+          SELECT report_date,
+                 site,
+                 COALESCE(SUM(value) FILTER (WHERE label='NET sales'), 0)::numeric(12,2) AS net_sales
+            FROM touchoffice_fixed_totals
+           WHERE report_date >= CURRENT_DATE - INTERVAL '30 days'
+             AND report_date <  CURRENT_DATE
+             AND site IN ('malthouse', 'sandwich')
+           GROUP BY report_date, site
+        """)
+        labour = await c.fetch("""
+          SELECT report_date,
+                 CASE WHEN team = 'cafe' THEN 'sandwich' ELSE 'malthouse' END AS site,
+                 COALESCE(SUM(hours), 0)::numeric(10,2)             AS hours,
+                 COALESCE(SUM(cost_with_oncost), 0)::numeric(12,2)  AS cost
+            FROM v_daily_labour_by_team
+           WHERE report_date >= CURRENT_DATE - INTERVAL '30 days'
+             AND report_date <  CURRENT_DATE
+             AND team IN ('cafe', 'kitchen', 'front_of_house')
+           GROUP BY report_date,
+                    CASE WHEN team = 'cafe' THEN 'sandwich' ELSE 'malthouse' END
+        """)
+
+    # Index by (date, site) → numbers.
+    sales_idx, labour_idx = {}, {}
+    for r in sales:
+        sales_idx[(r['report_date'], r['site'])] = float(r['net_sales'])
+    for r in labour:
+        labour_idx[(r['report_date'], r['site'])] = {
+            'hours': float(r['hours']),
+            'cost':  float(r['cost']),
+        }
+
+    today = datetime.now(timezone.utc).date()
+    yesterday = today - timedelta(days=1)
+
+    def slice_summary(start_date, end_date, label):
+        days = []
+        cur = start_date
+        while cur <= end_date:
+            days.append(cur)
+            cur += timedelta(days=1)
+
+        out = {'label': label,
+               'start_date': start_date.isoformat(),
+               'end_date': end_date.isoformat(),
+               'days': len(days),
+               'pub':  {'daily': []},
+               'cafe': {'daily': []}}
+        for site_key, dash_key in (('malthouse', 'pub'), ('sandwich', 'cafe')):
+            sales_total = 0.0
+            labour_total = 0.0
+            for d in days:
+                s = sales_idx.get((d, site_key), 0.0)
+                lab = labour_idx.get((d, site_key), {'cost': 0.0})
+                sales_total += s
+                labour_total += lab['cost']
+                out[dash_key]['daily'].append({
+                    'd': d.isoformat(),
+                    'sales': round(s, 2),
+                    'labour': round(lab['cost'], 2),
+                })
+            n = max(len(days), 1)
+            out[dash_key]['sales_total']  = round(sales_total, 2)
+            out[dash_key]['sales_avg']    = round(sales_total / n, 2)
+            out[dash_key]['labour_total'] = round(labour_total, 2)
+            out[dash_key]['labour_avg']   = round(labour_total / n, 2)
+            # If labour ingest hasn't filled yet (labour_total = 0 but sales
+            # exist), treat pct as unknown rather than 0% — avoids a green
+            # 0% reading when the cafe/pub actually did trade.
+            if sales_total > 0 and labour_total > 0:
+                out[dash_key]['labour_pct'] = round(labour_total / sales_total * 100.0, 1)
+            else:
+                out[dash_key]['labour_pct'] = None
+        return out
+
+    return {
+        'generated_at': datetime.now(timezone.utc).isoformat(),
+        'yesterday': slice_summary(yesterday, yesterday, 'Yesterday'),
+        'last_7d':   slice_summary(today - timedelta(days=7),  yesterday, 'Last 7 days'),
+        'last_30d':  slice_summary(today - timedelta(days=30), yesterday, 'Last 30 days'),
     }
 
 

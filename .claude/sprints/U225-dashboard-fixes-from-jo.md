@@ -146,11 +146,12 @@ Root cause: Vault sealed post-reboot. u29, u33, u66 cron jobs all fail at "fetch
 
 ---
 
-## Decisions deferred until clarification
+## Decisions resolved (Jo, 2026-05-24)
 
-- T2 layout: should the 3 boxes replace the existing 6-tile ribbon entirely, or sit below it? (Default: sit below it; existing tiles stay so we don't break other usage.)
-- T4a: is "average review score" the same metric across Google/TripAdvisor/Booking.com, or per source? (Default: per source + an overall weighted average.)
-- T5 "bar": confirm this is the Pub bar dept (drinks), not vendor purchases.
+- **T2 layout:** REPLACE the existing 6-tile KPI ribbon with the 3 period boxes (Yesterday / 7d / 30d).
+- **T5 "bar":** it's the **bar sub-menu** — i.e. a sub-page/section, not the ribbon. Need to locate.
+- **T4 Booking.com:** **fold in** with the existing review pipeline (single sprint, not separate).
+- **T7 Tanda link stale:** **HOLD** — defer to later sprint. (Knock-on: T2/T6 labour-data section will note "labour ingest paused — see T7" rather than try to fix the ingest now.)
 
 ---
 

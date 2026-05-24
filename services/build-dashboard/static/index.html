@@ -614,60 +614,92 @@
           </tbody>
         </table>
       </div>
-    <div
-         class="grid grid-cols-2 md:grid-cols-6 gap-3 backdrop-blur-md"
+    <!-- U225 T2 — period boxes (Yesterday / 7d / 30d) split by pub vs cafe,
+         with daily bar chart per period. Replaces the prior 6-tile ribbon. -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 backdrop-blur-md"
          style="font-family:'JetBrains Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums">
-      <a href="/economics" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
-        <div class="text-xs uppercase tracking-wide" style="color:#64748b">Labour %</div>
-        <div class="text-2xl font-semibold mt-0.5" :style="`color:${kpi.labour_pct === null ? '#94a3b8' : (kpi.labour_pct < 30 ? '#10b981' : kpi.labour_pct <= 32 ? '#f59e0b' : '#f43f5e')}`">
-          <span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle"
-                :style="`background:${kpi.labour_pct === null ? '#64748b' : (kpi.labour_pct < 30 ? '#10b981' : kpi.labour_pct <= 32 ? '#f59e0b' : '#f43f5e')}; box-shadow:0 0 8px currentColor`"></span>
-          <span x-text="kpi.labour_pct != null ? kpi.labour_pct + '%' : '—'"></span>
+      <template x-for="key in ['yesterday','last_7d','last_30d']" :key="key">
+        <div class="glass p-3 rounded-xl">
+          <div class="flex items-baseline justify-between mb-2">
+            <div class="text-xs uppercase tracking-wide" style="color:#64748b"
+                 x-text="period && period[key] ? period[key].label : '—'"></div>
+            <div class="text-[10px]" style="color:#94a3b8"
+                 x-text="period && period[key] ? (period[key].days + 'd · ' + period[key].end_date) : ''"></div>
+          </div>
+
+          <template x-if="period && period[key]">
+            <div>
+              <!-- Per-site rows: Pub then Cafe -->
+              <template x-for="site in [
+                  {key:'pub',  name:'Pub',  colour:'#10b981'},
+                  {key:'cafe', name:'Cafe', colour:'#f59e0b'}]" :key="site.key">
+                <div class="mb-2 pb-2 border-b border-white/5 last:border-b-0">
+                  <div class="flex items-baseline justify-between">
+                    <div class="flex items-center gap-1.5">
+                      <span class="inline-block w-2 h-2 rounded-full" :style="`background:${site.colour}`"></span>
+                      <span class="text-sm font-medium" x-text="site.name"></span>
+                    </div>
+                    <div class="text-sm"
+                         :style="`color:${labourColour(period[key][site.key].labour_pct)}`"
+                         x-text="period[key][site.key].labour_pct != null
+                                 ? period[key][site.key].labour_pct + '%'
+                                 : '—'"></div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-1 mt-1 text-[11px]" style="color:#94a3b8">
+                    <div>
+                      <span class="block text-[9px] uppercase">Sales</span>
+                      <span class="mono" style="color:#e2e8f0">£<span
+                        x-text="Number(period[key][site.key].sales_total).toLocaleString('en-GB',{maximumFractionDigits:0})"></span></span>
+                      <span class="ml-1">avg £<span
+                        x-text="Number(period[key][site.key].sales_avg).toLocaleString('en-GB',{maximumFractionDigits:0})"></span></span>
+                    </div>
+                    <div>
+                      <span class="block text-[9px] uppercase">Labour</span>
+                      <span class="mono" style="color:#e2e8f0">£<span
+                        x-text="Number(period[key][site.key].labour_total).toLocaleString('en-GB',{maximumFractionDigits:0})"></span></span>
+                      <span class="ml-1">avg £<span
+                        x-text="Number(period[key][site.key].labour_avg).toLocaleString('en-GB',{maximumFractionDigits:0})"></span></span>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Stacked bar chart: 1 bar per day, pub above, cafe below -->
+              <svg class="w-full mt-1" :viewBox="`0 0 ${period[key].pub.daily.length * 8 + 4} 36`"
+                   preserveAspectRatio="none" style="height:36px"
+                   x-html="periodBarSvg(period[key])"></svg>
+            </div>
+          </template>
+
+          <template x-if="!period || !period[key]">
+            <div class="space-y-2">
+              <div class="skel h-4"></div><div class="skel h-4"></div><div class="skel h-9"></div>
+            </div>
+          </template>
         </div>
-        <div class="text-xs" style="color:#94a3b8">target &lt;30%</div>
-        <svg x-show="sparklines?.labour?.some(v => v != null)" x-html="sparkSvg(sparklines?.labour, '#0ea5e9')"
-             class="spark mt-1" viewBox="0 0 100 18" preserveAspectRatio="none"></svg>
-      </a>
-      <a href="/pub" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
-        <div class="text-xs uppercase tracking-wide" style="color:#64748b">Pub net</div>
-        <div class="text-2xl font-semibold mt-0.5" style="color:#e2e8f0"
-             x-text="kpi.pub_net_sales != null ? '£' + Number(kpi.pub_net_sales).toLocaleString(undefined,{maximumFractionDigits:0}) : '—'"></div>
-        <div class="text-xs" style="color:#94a3b8" x-text="kpi.pub_covers ? Number(kpi.pub_covers).toFixed(0) + ' covers' : ''"></div>
-        <svg x-show="sparklines?.pub?.some(v => v != null)" x-html="sparkSvg(sparklines?.pub, '#10b981')"
-             class="spark mt-1" viewBox="0 0 100 18" preserveAspectRatio="none"></svg>
-      </a>
-      <a href="/touchoffice" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
-        <div class="text-xs uppercase tracking-wide" style="color:#64748b">Café net</div>
-        <div class="text-2xl font-semibold mt-0.5" style="color:#e2e8f0"
-             x-text="kpi.sandwich_net_sales != null ? '£' + Number(kpi.sandwich_net_sales).toLocaleString(undefined,{maximumFractionDigits:0}) : '—'"></div>
-        <div class="text-xs" style="color:#94a3b8" x-text="kpi.sandwich_covers ? Number(kpi.sandwich_covers).toFixed(0) + ' covers' : ''"></div>
-        <svg x-show="sparklines?.cafe?.some(v => v != null)" x-html="sparkSvg(sparklines?.cafe, '#f59e0b')"
-             class="spark mt-1" viewBox="0 0 100 18" preserveAspectRatio="none"></svg>
-      </a>
-      <a href="/economics" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
-        <div class="text-xs uppercase tracking-wide" style="color:#64748b">SPLH</div>
-        <div class="text-2xl font-semibold mt-0.5" style="color:#e2e8f0"
-             x-text="kpi.splh ? '£' + kpi.splh : '—'"></div>
-        <div class="text-xs" style="color:#94a3b8" x-text="lwString()"></div>
-      </a>
+      </template>
+    </div>
+
+    <!-- Inbox + Occupancy still useful below the period boxes (compact strip) -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3"
+         style="font-family:'JetBrains Mono', ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums">
       <a href="/caterbook" class="glass p-3 rounded-xl no-underline" style="text-decoration:none">
         <div class="text-xs uppercase tracking-wide" style="color:#64748b">Occupancy</div>
-        <div class="text-2xl font-semibold mt-0.5"
+        <div class="text-xl font-semibold mt-0.5"
              :style="`color:${kpi.occupancy_pct == null ? '#94a3b8' : (kpi.occupancy_pct >= 80 ? '#10b981' : kpi.occupancy_pct >= 50 ? '#f59e0b' : '#f43f5e')}`">
-          <span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle"
-                :style="`background:${kpi.occupancy_pct == null ? '#64748b' : (kpi.occupancy_pct >= 80 ? '#10b981' : kpi.occupancy_pct >= 50 ? '#f59e0b' : '#f43f5e')}; box-shadow:0 0 8px currentColor`"></span>
-          <span x-text="kpi.occupancy_pct != null ? kpi.occupancy_pct + '%' : '—'"></span>
+          <span x-text="(kpi.occupied_rooms != null && kpi.total_rooms != null) ? (kpi.occupied_rooms + '/' + kpi.total_rooms) : '—'"></span>
+          <span class="text-sm ml-1" x-text="kpi.occupancy_pct != null ? '(' + kpi.occupancy_pct + '%)' : ''"></span>
         </div>
-        <div class="text-xs" style="color:#94a3b8"
-             x-text="(kpi.occupied_rooms != null && kpi.total_rooms != null) ? (kpi.occupied_rooms + '/' + kpi.total_rooms + ' rooms · ' + (kpi.in_house_count ?? '—') + ' guests') : '—'"></div>
-        <svg x-show="sparklines?.in_house?.some(v => v != null)" x-html="sparkSvg(sparklines?.in_house, '#a855f7')"
-             class="spark mt-1" viewBox="0 0 100 18" preserveAspectRatio="none"></svg>
+        <div class="text-xs" style="color:#94a3b8">
+          ADR £<span x-text="adrString()"></span>
+          · <span x-text="kpi.in_house_count ?? '—'"></span> in house
+        </div>
       </a>
       <div class="glass p-3 rounded-xl">
         <div class="text-xs uppercase tracking-wide" style="color:#64748b">Inbox</div>
-        <div class="text-2xl font-semibold mt-0.5"
+        <div class="text-xl font-semibold mt-0.5"
              :style="`color:${pendingCount > 0 ? '#f59e0b' : '#94a3b8'}`"
-             x-text="pendingCount + '📨'"></div>
+             x-text="pendingCount + ' 📨'"></div>
         <div class="text-xs" style="color:#94a3b8">pending instructions</div>
       </div>
     </div>
@@ -1701,21 +1733,60 @@ function kpiRibbon() {
     sparklines: null,        // { dates, revenue, labour, in_house }
     drift: null,             // { items, flagged_count }
     reviews: null,           // { items, pending_count, low_star_count }
+    period: null,            // { yesterday, last_7d, last_30d } — U225 T2
     showAnomalyDetail: false,
     showDriftDetail: false,
     showReviewsDetail: false,
     async boot() {
-      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadDrift(), this.loadReviews()]);
-      // Re-derive labour series from sparklines (server-side labour is cost, we want pct from daily rows)
-      // Keeping it simple: use the labour_cost trend as a proxy for labour% trend direction.
+      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadDrift(), this.loadReviews(), this.loadPeriod()]);
       setInterval(() => this.refresh(), 60000);
+    },
+    async loadPeriod() {
+      try {
+        const r = await fetch('/api/economics/period-summary');
+        this.period = await r.json();
+      } catch (e) { console.error('period load', e); }
+    },
+    // Labour% colour: <30 green, 30-32 amber, >32 red. null → grey.
+    labourColour(pct) {
+      if (pct == null) return '#94a3b8';
+      if (pct < 30) return '#10b981';
+      if (pct <= 32) return '#f59e0b';
+      return '#f43f5e';
+    },
+    // ADR = room_revenue / occupied_rooms. Data not yet plumbed into kpi
+    // payload — placeholder until /api/economics/overview returns it.
+    adrString() {
+      const rev = Number(this.kpi.room_revenue);
+      const occ = Number(this.kpi.occupied_rooms);
+      if (!rev || !occ) return '—';
+      return Math.round(rev / occ).toLocaleString('en-GB');
+    },
+    // Stacked daily bars: pub (top half) + cafe (bottom half), scaled by
+    // global max(sales) across both sites for visual comparability.
+    periodBarSvg(p) {
+      if (!p) return '';
+      const all = [...p.pub.daily, ...p.cafe.daily].map(x => x.sales);
+      const max = Math.max(1, ...all);
+      const w = 6, gap = 2;
+      let out = '';
+      for (let i = 0; i < p.pub.daily.length; i++) {
+        const x = i * (w + gap) + 2;
+        const ph = (p.pub.daily[i].sales / max) * 16;
+        const ch = (p.cafe.daily[i].sales / max) * 16;
+        // Pub bar grows upward from midline; cafe grows downward from midline.
+        out += `<rect x="${x}" y="${18 - ph}" width="${w}" height="${ph}" fill="#10b981" opacity="0.85"/>`;
+        out += `<rect x="${x}" y="18" width="${w}" height="${ch}" fill="#f59e0b" opacity="0.85"/>`;
+      }
+      out += `<line x1="0" y1="18" x2="${p.pub.daily.length * (w + gap) + 2}" y2="18" stroke="rgba(148,163,184,0.25)" stroke-width="0.5"/>`;
+      return out;
     },
     async loadKpi() {
       try {
         const r = await fetch('/api/economics/overview?days=14');
         const o = await r.json();
         this.kpi = o.kpi || {};
-        ['labour_pct','total_revenue','splh','total_covers','in_house_count','net_sales_lw','total_net_sales','occupancy_pct','occupied_rooms','total_rooms'].forEach(k => {
+        ['labour_pct','total_revenue','splh','total_covers','in_house_count','net_sales_lw','total_net_sales','occupancy_pct','occupied_rooms','total_rooms','room_revenue'].forEach(k => {
           if (this.kpi[k] != null && !isNaN(this.kpi[k])) this.kpi[k] = Number(this.kpi[k]);
         });
       } catch (e) { console.error('kpi ribbon load', e); }
@@ -1774,7 +1845,7 @@ function kpiRibbon() {
       if ((await r.json()).ok) this.loadReviews();
     },
     async refresh() {
-      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadDrift(), this.loadReviews()]);
+      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadDrift(), this.loadReviews(), this.loadPeriod()]);
     },
     lwDir() {
       const t = Number(this.kpi.total_net_sales), l = Number(this.kpi.net_sales_lw);
