@@ -1,42 +1,43 @@
 # STATUS
 
-_generated: 2026-05-21T22:10:32+01:00_
+_generated: 2026-05-24T17:38:12+01:00_
 _by: scripts/u89-regen-status.sh_
 
 ## Current branch
 
-`main` at `5a64cd7`
+`main` at `ab68f6f`
 
 ## Recent commits (last 20)
 
 ```
-5a64cd7 U173-U178: Phase 7 Track A — revenue close-the-loop
-fe3be98 U168-U172: cron self-heal + auto-docs + backfill + vendor intelligence + Phase 6 close
-80f0b3c U163-U167: 5 autonomous sprints + critical backup bug fix
-e374394 U162: fix Gmail action-queue gap + wire menu-performance slugs
-32eca9e gitignore: data/trail-profile (populated by u156-trail-pair)
-d6f07c6 U156 + U159 + U160 + U161: parallel backend work (UX postponed)
-89e2284 U151b: vision-OCR mortgage statements
-ca422ec Session 2026-05-21 close: Karl+Staff provisioned, Dojo + reviews wired
-36c1154 STATUS regen — end of autonomous session
-38e006f U151 T2 + U153 + U154 + U155 autonomous work
-0156391 U151 T1: Invoice Pipeline robustness patch (in n8n, no file diff)
-f458a71 U151-U155 plan files: staff-rollout roadmap
-d0c773b U147/U148/U149/U150: pen-tests, audits, plans, in-person packet, Phase 6 ADR
-8d7862a U146: close auto-pause loop
-7d860c5 U146-U150 plan files: 5-sprint forward roadmap
-fa5e4b5 U138-U145 retrospective sprint doc
-c775cee STATUS regen post Phase A safety lock-in
-b80ab0a U138: admin invoice drilldown + feedback rule promotion
-d4db599 U141 + U143 service implementations (presidio, litellm, vault-agent)
-8a0d4cd U145 (DRAFT): per-realm Postgres roles for RLS connection partitioning
+ab68f6f u13-vault-unseal: don't let sealed-vault exit code poison pipefail
+0f24b94 U225 T6: /app/cafe ice cream / soft drinks / till panels populated
+7f2fa8b U225 T4a: weighted-mean review rating fix + Booking.com source normalised
+1a97bce U225 T5: /app/bar restructured to 3 period boxes + £ till values
+9a93995 U225 T2+T3: Mission Control 3 period boxes + ADR
+c31cefc U202 weekly backup: auto-snapshot 2026-05-24
+1121748 U225 T1: /pub gross-today scoped to malthouse-only
+d56d4a5 build-dashboard: restore GPU reservation after host reboot self-healed nvidia-persistenced
+702613c dashboard: comment out 5 dead links + document GPU workaround
+6894e03 U220 partial + U221/U223 sprint plans + /schema-stats command
+6c6585e U222: v_workforce_forecast_vs_actual — close planned-vs-actual loop
+ee9b285 gitignore u165-last-alert.json (cron-written heartbeat)
+672aadd U219: fix labour-vs-sales 7d/30d avg scope mismatch
+758a61f A2: diagnose script — distinguish DWD from "NOT IN VAULT"
+ab86450 A1: Dojo CSVs → pub entity (auto-routed in future)
+3080d22 U215-U217: backlog Section C cleared
+903238d U204-U214: fixes from boxbot email #127
+8e3a332 U185-U203: graphic understanding aids + autonomous ops
+0ee475e UX deep-dive + SPEC/STRETCH review (U185-U203)
+0d83e7b Backfill workforce_shifts cost + UX series plan (U179-U184)
 ```
 
 ## Open work signals
 
-- Pending bot_instructions: 1
+- Untriaged bot_instructions: 0
+- Needs-human bot_instructions: 1
 - Open CRITICAL exceptions: 0
-- Working-tree state: 4 files modified/untracked
+- Working-tree state: 6 files modified/untracked
 
 ## Audit log recent entries
 

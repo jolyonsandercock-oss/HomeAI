@@ -7,9 +7,15 @@ set -uo pipefail
 cd /home_ai
 OUT=STATUS.md
 
-# Pending bot_instructions
-PENDING=$(docker exec homeai-postgres psql -U postgres -d homeai -At -c \
-    "SELECT count(*) FROM bot_instructions WHERE status='pending';" 2>/dev/null | grep -v '^$\|^SET$' | head -1)
+# Pending bot_instructions — split untriaged from needs-human.
+# Convention: bot-responder writes status='pending' for both "fresh, not yet
+# triaged" (resolution IS NULL) AND "triaged but bot deferred to human"
+# (resolution IS NOT NULL — see responder.py finalize calls). Surfacing them
+# together hides whether action is actually needed.
+UNTRIAGED=$(docker exec homeai-postgres psql -U postgres -d homeai -At -c \
+    "SELECT count(*) FROM bot_instructions WHERE status='pending' AND resolution IS NULL;" 2>/dev/null | grep -v '^$\|^SET$' | head -1)
+NEEDS_HUMAN=$(docker exec homeai-postgres psql -U postgres -d homeai -At -c \
+    "SELECT count(*) FROM bot_instructions WHERE status='pending' AND resolution IS NOT NULL;" 2>/dev/null | grep -v '^$\|^SET$' | head -1)
 # Open mart.exceptions critical
 CRITICAL=$(docker exec homeai-postgres psql -U postgres -d homeai -At -c \
     "SELECT count(*) FROM mart.exceptions WHERE severity='critical' AND status='open';" 2>/dev/null | grep -v '^$\|^SET$' | head -1)
@@ -39,7 +45,8 @@ echo '```'
 echo ""
 echo "## Open work signals"
 echo ""
-echo "- Pending bot_instructions: $PENDING"
+echo "- Untriaged bot_instructions: $UNTRIAGED"
+echo "- Needs-human bot_instructions: $NEEDS_HUMAN"
 echo "- Open CRITICAL exceptions: $CRITICAL"
 echo "- Working-tree state: $(git status --porcelain | wc -l) files modified/untracked"
 echo ""
