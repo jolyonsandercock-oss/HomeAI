@@ -9,6 +9,14 @@ Items that need user (Jo) attention — surfaced during build sessions. Updated 
 - [x] **nvidia-persistenced daemon won't start (build-dashboard GPU disabled)** *(surfaced 2026-05-23, resolved same day by host reboot)*
   - Reboot self-healed the daemon (active since 14:38 BST). GPU reservation restored on `build-dashboard`; `/api/hardware/vram-resident` confirmed returning live data. Root cause never diagnosed — flag for re-investigation if it recurs.
 
+- [ ] **Vault sealed post-reboot** *(surfaced 2026-05-23, still active 2026-05-24)*
+  - Bot/Telegram/email comms (`u29-instructions-poll`, `u33-bot-responder`, `u66-telegram-bot`) all fail at PG-password fetch because Vault is sealed. Cron logs show `Vault is sealed` 503s from vault-agent.
+  - Action (Jo): `bash /home_ai/.claude/scripts/u13-vault-unseal.sh` (prompts for passphrase, feeds 3 keys).
+  - Also blocks U225 T4b (Booking.com review email ingestion) and U221 (auto-unseal sprint).
+
+- [ ] **U225 T4b — Booking.com review email ingestion** *(parked behind Vault unseal)*
+  - Once Vault is up, write a poller (along the lines of `scripts/u29-instructions-poll.sh`) that pulls `noreply@booking.com` "Guest review for …" emails from the property mailbox, parses reviewer + rating + body via Haiku, INSERTs into `guest_reviews` with `source='booking_com'`. UI side already labels and lists Booking.com once data appears (see `app/comms/page.tsx`).
+
 
 
 - [ ] **Gmail OAuth → Vault** *(blocks Step 11 activation)*

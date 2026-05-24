@@ -75,6 +75,15 @@ Root cause: Vault sealed post-reboot. u29, u33, u66 cron jobs all fail at "fetch
 
 ## T4 — Average review score wrong + Booking.com reviews integration (P1)
 
+**T4a status (2026-05-24):** shipped via V202.
+- Bug: `reviews_rating_spark_30d.avg_rating_30d` was `AVG(per_day_avg)` so a day with 10 5★ reviews counted the same as a day with 1 1★ review. With 10 4.7★ on day-26 + 1 3.0★ on day-28, was returning **3.85★** instead of the true **4.55★**.
+- Fix: compute the weighted mean over all rows in the window (single SELECT AVG(rating), no per-day grouping).
+- Side-cleanup: legacy `booking`/`booking.com`/`Booking.com` rows in `guest_reviews` normalised to canonical `booking_com` to match the existing UI sourceLabel mapping (`app/comms/page.tsx:42`).
+
+**T4b status:** parked, **blocked on Vault unseal** (Gmail OAuth secrets in Vault).
+- Once Vault is unsealed: build a polling script (akin to u29-instructions-poll or u215-trail-poll) that hits the property mailbox, identifies Booking.com review-notification emails (sender `noreply@booking.com` subject `Guest review for…`), parses reviewer name + rating + body via Haiku, and INSERTs into `guest_reviews` with `source='booking_com'`. Once data flows, the existing `/comms` UI already renders Booking.com as a labelled tile + appears in Recent reviews (sourceLabel maps it).
+
+
 **Where:** Review alert strip on `index.html:493-553` + drafts modal.
 **Two bugs:**
   a. Average score figure is wrong (need to verify which view computes it)
