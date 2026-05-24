@@ -1,5 +1,5 @@
-homeai-frontend 0
 homeai-build-dashboard 0
+homeai-frontend 0
 homeai-litellm 0
 homeai-llm-router 0
 homeai-vault-agent 0
@@ -12,7 +12,7 @@ homeai-bot-responder 0
 homeai-n8n 0
 homeai-data-proxy 0
 homeai-mcp 0
-homeai-paperless 0
+homeai-paperless 1716
 homeai-critical-listener 0
 homeai-ollama 0
 homeai-pdfplumber 0
