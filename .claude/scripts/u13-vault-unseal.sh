@@ -29,7 +29,10 @@ if ! docker ps --filter name=homeai-vault --format '{{.Names}}' | grep -q homeai
   exit 1
 fi
 
-SEALED=$(docker exec homeai-vault vault status -format=json 2>/dev/null | jq -r '.sealed' 2>/dev/null || echo "unknown")
+# `vault status` exits 2 when sealed (not an error), which trips pipefail.
+# Capture JSON first, then parse separately so the sealed-exit doesn't poison $SEALED.
+STATUS_JSON=$(docker exec homeai-vault vault status -format=json 2>/dev/null || true)
+SEALED=$(echo "$STATUS_JSON" | jq -r '.sealed' 2>/dev/null || echo "unknown")
 
 case "$SEALED" in
   false)
@@ -90,7 +93,8 @@ done <<< "$DECRYPTED"
 unset DECRYPTED KEY
 
 # ── Confirm ───────────────────────────────────────────────────────
-NEW_SEALED=$(docker exec homeai-vault vault status -format=json 2>/dev/null | jq -r '.sealed')
+NEW_STATUS_JSON=$(docker exec homeai-vault vault status -format=json 2>/dev/null || true)
+NEW_SEALED=$(echo "$NEW_STATUS_JSON" | jq -r '.sealed' 2>/dev/null || echo "unknown")
 if [[ "$NEW_SEALED" == "false" ]]; then
   echo "✓ Vault unsealed."
   exit 0
