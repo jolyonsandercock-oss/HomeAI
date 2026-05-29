@@ -44,6 +44,12 @@ if ! command -v age >/dev/null 2>&1; then
 else
   echo -e "${GREEN}✓${NC} age already installed: $(age --version 2>/dev/null | head -1)"
 fi
+# age ≥1.2 reads the passphrase from /dev/tty, ignoring stdin. We drive it via
+# `expect` in a PTY (same pattern as /home_ai/security/vault-autounseal.sh).
+if ! command -v expect >/dev/null 2>&1; then
+  echo -e "${YEL}→${NC} installing expect"
+  apt-get install -y expect
+fi
 
 # ── 2. Derive machine passphrase ──────────────────────────────
 if [[ ! -r /etc/machine-id ]]; then
@@ -71,72 +77,71 @@ else
     [[ -n "$K" ]] || { echo "✗ empty key"; exit 1; }
     KEYS+=("$K")
   done
-  PLAIN=$(printf '%s\n' "${KEYS[@]}")
+  PLAIN_FILE=$(mktemp)
+  chmod 600 "$PLAIN_FILE"
+  printf '%s\n' "${KEYS[@]}" > "$PLAIN_FILE"
   unset KEYS
 
-  printf '%s' "$PLAIN" | age --passphrase --armor > "$CIPHER" <<EOF
-$MACHINE_PASS
-$MACHINE_PASS
-EOF
-  unset PLAIN
+  # Drive age via expect so the passphrase prompt (and confirm-prompt) get the
+  # machine passphrase from a PTY. The plaintext (unseal keys) comes from the
+  # input file via -. Without expect, age 1.2 dies under cron/systemd with
+  # "could not read passphrase from /dev/tty". Without the input file, the
+  # pipe-and-heredoc trick of the prior version silently encrypted the
+  # passphrase string as the plaintext (cipher unrecoverable).
+  MACHINE_PASS="$MACHINE_PASS" PLAIN_FILE="$PLAIN_FILE" CIPHER="$CIPHER" \
+  expect <<'EXPECT' >/dev/null
+log_user 0
+set timeout 20
+spawn -noecho sh -c "age --passphrase --armor -o $env(CIPHER) $env(PLAIN_FILE)"
+expect {
+  -re "passphrase.*:" { send -- "$env(MACHINE_PASS)\r"; exp_continue }
+  -re "[Cc]onfirm.*:" { send -- "$env(MACHINE_PASS)\r"; exp_continue }
+  -re "[Rr]e-type.*:" { send -- "$env(MACHINE_PASS)\r"; exp_continue }
+  eof
+}
+EXPECT
+  rm -f "$PLAIN_FILE"
+  if [[ ! -s "$CIPHER" ]]; then
+    echo -e "${RED}✗${NC} encryption produced empty cipher — abort"
+    exit 1
+  fi
   chmod 600 "$CIPHER"
   chown root:root "$CIPHER"
-  echo -e "${GREEN}✓${NC} encrypted keys → $CIPHER (mode 600, root:root)"
+  echo -e "${GREEN}✓${NC} encrypted keys → $CIPHER (mode 600, root:root, size $(stat -c%s "$CIPHER")B)"
+
+  # Round-trip self-test: decrypt and confirm we get back exactly the 3 keys.
+  DECRYPTED=$(MACHINE_PASS="$MACHINE_PASS" CIPHER="$CIPHER" expect <<'EXPECT2' | tr -d '\r' | sed '/^$/d'
+log_user 0
+set timeout 10
+spawn -noecho age --decrypt $env(CIPHER)
+expect "passphrase*:"
+send -- "$env(MACHINE_PASS)\r"
+log_user 1
+expect eof
+EXPECT2
+)
+  lines=$(printf '%s\n' "$DECRYPTED" | wc -l)
+  if [[ "$lines" -ne 3 ]]; then
+    echo -e "${RED}✗${NC} round-trip self-test failed: expected 3 lines, got $lines — cipher is corrupt"
+    rm -f "$CIPHER"
+    exit 1
+  fi
+  echo -e "${GREEN}✓${NC} round-trip self-test passed (3 keys recoverable)"
+  unset DECRYPTED
 fi
 
 # ── 4. Install runtime script ─────────────────────────────────
-cat > "$RUNTIME" <<'RUNTIME_EOF'
-#!/bin/bash
-# /home_ai/security/vault-autounseal.sh
-# Decrypts unseal keys with the machine-bound passphrase and submits them
-# to Vault. Retries up to 60 times (5 min) waiting for Vault to become ready.
-
-set -uo pipefail
-CIPHER=/home_ai/security/.vault-unseal.age
-VAULT_URL=${VAULT_URL:-http://127.0.0.1:8200}
-
-[[ -r "$CIPHER" ]] || { echo "✗ $CIPHER unreadable"; exit 1; }
-[[ -r /etc/machine-id ]] || { echo "✗ /etc/machine-id unreadable"; exit 1; }
-
-MID=$(cat /etc/machine-id)
-MACHINE_PASS=$(printf '%s|home_ai|vault-autounseal' "$MID" | sha256sum | cut -d' ' -f1)
-
-# Wait for Vault
-for i in $(seq 1 60); do
-  if curl -sf --max-time 3 "$VAULT_URL/v1/sys/seal-status" >/dev/null; then break; fi
-  sleep 5
-done
-
-# Check seal state — exit 0 if already unsealed
-SEAL=$(curl -sf --max-time 5 "$VAULT_URL/v1/sys/seal-status")
-if printf '%s' "$SEAL" | grep -q '"sealed":false'; then
-  echo "$(date -Iseconds) vault already unsealed"
-  exit 0
+# Runtime script is maintained in-tree at this canonical location and copied
+# into place. Single source of truth — no risk of bootstrap drifting from
+# the deployed script (the previous inlined-heredoc version did, and shipped
+# a broken `echo $PASS | age` pattern that doesn't work on age ≥1.2).
+RUNTIME_SOURCE="$(dirname "$(readlink -f "$0")")/../security/vault-autounseal.sh"
+if [[ ! -f "$RUNTIME_SOURCE" ]]; then
+  echo -e "${RED}✗${NC} canonical runtime script missing: $RUNTIME_SOURCE"
+  exit 1
 fi
-
-# Decrypt
-PLAIN=$(echo "$MACHINE_PASS" | age --decrypt --passphrase "$CIPHER")
-[[ -n "$PLAIN" ]] || { echo "✗ decryption produced empty"; exit 1; }
-
-while IFS= read -r KEY; do
-  [[ -z "$KEY" ]] && continue
-  RESP=$(curl -sf --max-time 5 -X POST -d "{\"key\":\"$KEY\"}" "$VAULT_URL/v1/sys/unseal")
-  printf '%s\n' "$RESP" | grep -q '"sealed":false' && { echo "$(date -Iseconds) unsealed"; unset PLAIN; exit 0; }
-done <<< "$PLAIN"
-unset PLAIN
-
-# Final check
-SEAL=$(curl -sf --max-time 5 "$VAULT_URL/v1/sys/seal-status")
-if printf '%s' "$SEAL" | grep -q '"sealed":false'; then
-  echo "$(date -Iseconds) unsealed (post-loop)"
-  exit 0
-fi
-echo "$(date -Iseconds) ✗ still sealed after submitting all keys"
-exit 1
-RUNTIME_EOF
-chmod 700 "$RUNTIME"
-chown root:root "$RUNTIME"
-echo -e "${GREEN}✓${NC} runtime script → $RUNTIME"
+install -m 700 -o root -g root "$RUNTIME_SOURCE" "$RUNTIME"
+echo -e "${GREEN}✓${NC} runtime script → $RUNTIME (from $RUNTIME_SOURCE)"
 
 # ── 5. systemd unit ───────────────────────────────────────────
 cat > "$SYSTEMD" <<'UNIT_EOF'

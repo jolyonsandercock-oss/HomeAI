@@ -43,15 +43,19 @@ echo
 # ── Service health ─────────────────────────────────────────────
 echo "[1] Service health"
 check "docker daemon"       "docker ps -q | wc -l | tr -d ' '"
-check "homeai-postgres"     "docker inspect -f '{{.State.Status}}' homeai-postgres"
-check "homeai-vault"        "docker inspect -f '{{.State.Status}}' homeai-vault"
-check "homeai-n8n"          "docker inspect -f '{{.State.Status}}' homeai-n8n"
-check "homeai-prometheus"   "docker inspect -f '{{.State.Status}}' homeai-prometheus"
-check "homeai-alertmanager" "docker inspect -f '{{.State.Status}}' homeai-alertmanager"
-check "homeai-grafana"      "docker inspect -f '{{.State.Status}}' homeai-grafana"
-check "homeai-pdfplumber"   "docker inspect -f '{{.State.Status}}' homeai-pdfplumber"
-check "homeai-markitdown"   "docker inspect -f '{{.State.Status}}' homeai-markitdown"
-check "homeai-build-dashboard" "docker inspect -f '{{.State.Status}}' homeai-build-dashboard"
+# U226: docker inspect exits 0 even for exited containers; require state == running.
+running() { docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null | command grep -qx running && echo running; }
+check "homeai-postgres"     "running homeai-postgres"
+check "homeai-vault"        "running homeai-vault"
+check "homeai-n8n"          "running homeai-n8n"
+check "homeai-prometheus"   "running homeai-prometheus"
+check "homeai-alertmanager" "running homeai-alertmanager"
+check "homeai-grafana"      "running homeai-grafana"
+check "homeai-pdfplumber"   "running homeai-pdfplumber"
+check "homeai-markitdown"   "running homeai-markitdown"
+check "homeai-ollama"       "running homeai-ollama"
+check "homeai-blackbox-exporter" "running homeai-blackbox-exporter"
+check "homeai-build-dashboard"   "running homeai-build-dashboard"
 echo
 
 # ── Vault ──────────────────────────────────────────────────────

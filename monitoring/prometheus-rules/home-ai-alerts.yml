@@ -130,3 +130,23 @@ groups:
         annotations:
           summary: "P0 (financial) spend at £{{ $value }} of £0.90 floor"
           description: "P0 floor is reserved for bank recon + invoice extraction + compliance. >80% used means a heavy day for those flows. Check what's running."
+
+  # U226: GPU runtime health
+  - name: home-ai-gpu
+    interval: 30s
+    rules:
+      - alert: OllamaDown
+        expr: probe_success{job="ollama"} == 0
+        for: 3m
+        labels: { severity: critical, component: gpu }
+        annotations:
+          summary: "Ollama /api/version probe failing for 3m+"
+          description: "homeai-ollama is unreachable. Most common cause is NVIDIA driver upgrade with stale container mount spec. Check `docker ps -a homeai-ollama` for exit 127 + libEGL_nvidia.so error. u226-gpu-recover.sh should auto-fire on CDI spec change."
+
+      - alert: OllamaProbeMissing
+        expr: absent(probe_success{job="ollama"})
+        for: 5m
+        labels: { severity: warning, component: gpu }
+        annotations:
+          summary: "Ollama probe metric absent — blackbox-exporter may be down"
+          description: "No probe_success time series for ollama. Check homeai-blackbox-exporter state and prometheus scrape config."

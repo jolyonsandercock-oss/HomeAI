@@ -26,6 +26,22 @@ scrape_configs:
     static_configs:
       - targets: [homeai-n8n:5678]
 
+  # U226: ollama /api/version probe via blackbox-exporter.
+  # Yields probe_success{job="ollama"} = 1 healthy, 0 down.
+  - job_name: ollama
+    metrics_path: /probe
+    params:
+      module: [ollama_version]
+    static_configs:
+      - targets: ['http://homeai-ollama:11434/api/version']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: homeai-blackbox-exporter:9115
+
   # Vault metrics — vault.hcl now has `telemetry { unauthenticated_metrics_access = true }`
   # in the listener block (U14, 2026-05-10). Telemetry config in Vault 1.15 is
   # NOT hot-reloadable, so this scrape job stays commented until the next time

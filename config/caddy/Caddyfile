@@ -126,6 +126,21 @@ https://jolybox.tailc27dff.ts.net {
         reverse_proxy homeai-frontend:3000
     }
 
+    # Grafana (U143 — Phase 5 Health dashboards + n8n/postgres metrics).
+    # Authelia-gated. Grafana is configured with GF_SERVE_FROM_SUB_PATH=true
+    # and GF_SERVER_ROOT_URL=https://.../grafana/ so it expects the /grafana
+    # prefix in incoming requests. Use `handle` (NOT `handle_path`) so the
+    # prefix is preserved both for the forward_auth's rd= build and for
+    # grafana's own router.
+    @grafana path /grafana /grafana/*
+    handle @grafana {
+        forward_auth homeai-authelia:9091 {
+            uri /api/verify?rd=https://jolybox.tailc27dff.ts.net/auth/
+            copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+        }
+        reverse_proxy homeai-grafana:3000
+    }
+
     # Everything else: forward_auth, then proxy to the dashboard.
     # Remote-Groups carries the realm membership which the dashboard
     # middleware (REALM_ENFORCE=1) reads and maps to app.current_realm.

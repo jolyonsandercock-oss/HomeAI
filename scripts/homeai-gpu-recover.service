@@ -1,0 +1,21 @@
+[Unit]
+Description=Home AI GPU container recovery on NVIDIA driver change
+After=docker.service nvidia-cdi-refresh.service
+Requires=docker.service
+# Don't fight nvidia-cdi-refresh — let it finish writing the new spec first.
+After=nvidia-cdi-refresh.service
+
+[Service]
+Type=oneshot
+User=joly
+Group=joly
+# Path unit can fire multiple times during apt upgrade; coalesce to one run.
+ExecStartPre=/bin/sleep 5
+ExecStart=/home_ai/scripts/u226-gpu-recover.sh
+# Don't propagate failure to the path unit; we log + telegram instead.
+SuccessExitStatus=0 2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
