@@ -83,7 +83,7 @@ export function ExpenseRollup() {
                warn={t ? Number(t.uncategorised_gross) > 0 : false} />
         </div>
         {t && Number(t.missing_date_count) > 0 && (
-          <div className="px-3 py-1.5 text-[11px] text-ink-500 bg-ink-50 border-b border-ink-200">
+          <div className="px-3 py-1.5 text-sm text-ink-500 bg-ink-50 border-b border-ink-200">
             {t.missing_date_count} of {t.invoice_count} rows have no extracted invoice date — falling back to email-received date. Haiku coverage gap; affects accuracy of date filtering.
           </div>
         )}
@@ -149,7 +149,7 @@ export function ExpenseRollup() {
 function Kpi({ label, value, sub, warn }: { label: string; value: string; sub?: string; warn?: boolean }) {
   return (
     <div className="px-3 py-2.5">
-      <div className="text-[10px] uppercase tracking-wider text-ink-500">{label}</div>
+      <div className="text-xs uppercase tracking-wider text-ink-500">{label}</div>
       <div className={'text-lg font-mono ' + (warn ? 'text-amber-600' : 'text-ink-800')}>{value}</div>
       {sub && <div className="text-xs text-ink-500 mt-0.5">{sub}</div>}
     </div>
@@ -169,7 +169,7 @@ function RollupList<T extends object>({
     <div className="p-3">
       <div className="flex items-baseline justify-between mb-2">
         <h3 className="text-sm font-medium text-ink-800">{title}</h3>
-        <span className="text-[10px] text-ink-500">{subtitle}</span>
+        <span className="text-xs text-ink-500">{subtitle}</span>
       </div>
       {loading ? (
         <PlaceholderState message="Loading…" />

@@ -23,7 +23,7 @@ export function SandboxWrapper({ id, label, children }: SandboxWrapperProps) {
 
   return (
     <div className="sandbox-target relative group" data-sandbox-id={id}>
-      <div className="absolute -top-2 -left-2 flex items-center gap-1 px-1.5 py-0.5 bg-amber-500 text-ink-0 text-[10px] font-mono rounded shadow z-10">
+      <div className="absolute -top-2 -left-2 flex items-center gap-1 px-1.5 py-0.5 bg-amber-500 text-ink-0 text-xs font-mono rounded shadow z-10">
         <GripVertical size={10} />
         {label ?? id}
         <button
@@ -47,7 +47,7 @@ export function SandboxWrapper({ id, label, children }: SandboxWrapperProps) {
             {comments.map((c) => (
               <div key={c.id} className="text-xs">
                 <div className="text-ink-700">{c.comment_text}</div>
-                <div className="text-[10px] text-ink-500 mt-0.5">
+                <div className="text-xs text-ink-500 mt-0.5">
                   {c.author ?? 'anon'} · {new Date(c.created_at).toLocaleString('en-GB')}
                 </div>
               </div>

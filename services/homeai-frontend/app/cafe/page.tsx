@@ -60,7 +60,7 @@ export default function CafePage() {
             })}
           </div>
           {todayDpt.data && todayDpt.data.length > 0 && (
-            <div className="text-[10px] text-ink-500 mt-2">
+            <div className="text-xs text-ink-500 mt-2">
               From most recent scrape · {todayDpt.data[0]?.report_date}
             </div>
           )}
@@ -78,7 +78,7 @@ export default function CafePage() {
                 <div key={g.department} className="tile">
                   <div className="label">{DEPT_LABEL[g.department] ?? g.department}</div>
                   <div className="kpi mt-1">{gbp(Number(g.total_value) || 0, 0)}</div>
-                  <div className="text-[10px] text-ink-500 mt-0.5">£ over 7 days</div>
+                  <div className="text-xs text-ink-500 mt-0.5">£ over 7 days</div>
                   <div className="mt-2 h-8 opacity-70">
                     <SparkLine values={g.values.map(v => Number(v) || 0)} colour={DEPT_COLOUR[g.department] ?? '#94a3b8'} />
                   </div>

@@ -83,7 +83,7 @@ export default function RoomsPage() {
                     {r?.guest_name ?? <span className="text-ink-500">vacant</span>}
                   </div>
                   {r && (
-                    <div className="mt-1 text-[10px] text-ink-500 flex gap-1.5">
+                    <div className="mt-1 text-xs text-ink-500 flex gap-1.5">
                       {r.arriving_today && <span className="text-good">arriving</span>}
                       {r.departing_today && <span className="text-warn">departing</span>}
                       {!r.arriving_today && !r.departing_today && (
@@ -119,7 +119,7 @@ export default function RoomsPage() {
               <button className="text-xs px-2.5 py-1.5 bg-ink-100 hover:bg-ink-200 text-ink-700 rounded">Add task</button>
               <button onClick={() => setSelected(null)} className="text-xs px-2.5 py-1.5 bg-amber-500 text-ink-0 rounded ml-auto">Close</button>
             </div>
-            <p className="mt-2 text-[10px] text-ink-500">
+            <p className="mt-2 text-xs text-ink-500">
               Memo + task actions land in action_queue in next sprint.
             </p>
           </div>

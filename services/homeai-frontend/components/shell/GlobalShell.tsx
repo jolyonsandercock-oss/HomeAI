@@ -6,6 +6,8 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { BottomTabs } from './BottomTabs';
 import { useEditMode } from '@/components/sandbox/EditModeContext';
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { OnlineIndicator } from '@/components/ui/OnlineIndicator';
 
 // Inner component does the useSearchParams() read; wrapped in Suspense
 // at export so Next.js's static prerender pass doesn't bail.
@@ -20,11 +22,12 @@ function GlobalShellInner({ children }: { children: React.ReactNode }) {
   const bg = dayMode ? 'bg-amber-50/40' : 'bg-ink-0';
   return (
     <div className={`min-h-screen ${bg} ${editing ? 'sandbox-on' : ''}`}>
+      <OnlineIndicator />
       <Sidebar />
       <div className="lg:pl-56">
         <TopBar />
         <main className="px-3 pb-24 pt-3 lg:px-6 lg:pb-6 lg:pt-4">
-          {children}
+          <ErrorBoundary>{children}</ErrorBoundary>
         </main>
       </div>
       <BottomTabs />

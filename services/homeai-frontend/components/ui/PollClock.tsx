@@ -25,7 +25,7 @@ export function PollClock({ lastPoll, redAtMin = 15, greenBelowMin = 3, stuckAbo
 
   if (!lastPoll) {
     return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-red-900/40 text-red-300 animate-pulse" title="never polled">
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-red-900/40 text-red-300 animate-pulse" title="never polled">
         <Clock size={10} /> never
       </span>
     );
@@ -53,7 +53,7 @@ export function PollClock({ lastPoll, redAtMin = 15, greenBelowMin = 3, stuckAbo
   const tooltip = `${label ? label + ': ' : ''}last poll ${new Date(t).toLocaleString()}`;
 
   return (
-    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] ${bg} ${fg} ${flash ? 'animate-pulse' : ''}`} title={tooltip}>
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${bg} ${fg} ${flash ? 'animate-pulse' : ''}`} title={tooltip}>
       <Clock size={10} /> {fmt}
     </span>
   );

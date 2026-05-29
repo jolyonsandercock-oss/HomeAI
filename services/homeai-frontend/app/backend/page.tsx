@@ -60,7 +60,7 @@ export default function BackendPage() {
                     <div className={'mt-1 text-xl font-mono font-semibold ' + freshnessClass(h)}>
                       {h != null ? `${h.toFixed(0)}h` : '—'}
                     </div>
-                    <div className="text-[10px] text-ink-500 mt-0.5">{f.last_data}</div>
+                    <div className="text-xs text-ink-500 mt-0.5">{f.last_data}</div>
                   </div>
                 );
               })}
@@ -75,7 +75,7 @@ export default function BackendPage() {
            aiUsage.data && aiUsage.data.length > 0 ? (
             <div className="tile">
               <table className="w-full text-sm">
-                <thead className="text-[10px] text-ink-500 uppercase tracking-wider">
+                <thead className="text-xs text-ink-500 uppercase tracking-wider">
                   <tr>
                     <th className="text-left py-1.5 font-medium">Model</th>
                     <th className="text-left font-medium">Tier</th>
@@ -102,7 +102,7 @@ export default function BackendPage() {
                   ))}
                 </tbody>
               </table>
-              <div className="mt-2 text-[10px] text-ink-500">
+              <div className="mt-2 text-xs text-ink-500">
                 Cost-per-model conversion deferred — pricing constants need to land in DB first.
               </div>
             </div>
@@ -116,7 +116,7 @@ export default function BackendPage() {
            errors.data && errors.data.length > 0 ? (
             <div className="tile">
               <table className="w-full text-sm">
-                <thead className="text-[10px] text-ink-500 uppercase tracking-wider">
+                <thead className="text-xs text-ink-500 uppercase tracking-wider">
                   <tr>
                     <th className="text-left py-1.5 font-medium">Pipeline</th>
                     <th className="text-left font-medium">Action</th>
@@ -130,7 +130,7 @@ export default function BackendPage() {
                       <td className="py-1.5 text-ink-900 text-xs">{e.pipeline}</td>
                       <td className="text-ink-700 text-xs font-mono">{e.action}</td>
                       <td className={'text-right font-mono ' + (e.occurrences > 5 ? 'text-warn' : 'text-amber-500')}>{e.occurrences}</td>
-                      <td className="text-[11px] text-ink-500 font-mono">{new Date(e.most_recent).toLocaleString('en-GB')}</td>
+                      <td className="text-sm text-ink-500 font-mono">{new Date(e.most_recent).toLocaleString('en-GB')}</td>
                     </tr>
                   ))}
                 </tbody>

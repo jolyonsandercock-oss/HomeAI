@@ -216,8 +216,30 @@ export default function DashboardPage() {
 
   const roomsWeek = roomsWk.data?.[0];
 
+  // Hermes B3: persistent day-view banner so the historical context is
+  // visible above the fold regardless of scroll position.
+  const viewedDate = new Date(viewDate + 'T00:00:00');
+  const viewedLabel = viewedDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
+
   return (
     <div className="space-y-5">
+      {!isToday && (
+        <div
+          role="status"
+          className="rounded border border-amber-600/60 bg-amber-950/40 px-3 py-2 text-sm text-amber-200 flex items-center justify-between gap-3 flex-wrap"
+        >
+          <div>
+            <strong className="text-amber-300">📅 Viewing {viewedLabel}</strong>
+            <span className="ml-2 text-amber-200/80">— historical data (no live updates)</span>
+          </div>
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500 text-ink-0 text-xs font-medium hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+          >
+            <ArrowLeft size={12} /> Back to today
+          </Link>
+        </div>
+      )}
       {staleSources.length > 0 && (
         <div className="rounded border border-red-600 bg-red-950/40 px-3 py-2 text-sm text-red-200">
           <strong className="text-red-300">⚠ Stale data:</strong>{' '}
@@ -247,7 +269,7 @@ export default function DashboardPage() {
                 const today = new Date().toISOString().slice(0, 10);
                 if (!asOf || asOf === today) return null;
                 return (
-                  <div className="mt-1 text-[11px] text-red-400 flex items-center gap-1">
+                  <div className="mt-1 text-sm text-red-400 flex items-center gap-1">
                     ⚠ figures are for {asOf} (no till data for today yet)
                   </div>
                 );
@@ -262,7 +284,7 @@ export default function DashboardPage() {
                   <SparkLine values={revSpark.data[0].values.map(v => Number(v) || 0)} />
                 </div>
               )}
-              <div className="mt-2 text-[11px] text-amber-500 group-hover:text-amber-400">→ Click for Sales detail</div>
+              <div className="mt-2 text-sm text-amber-500 group-hover:text-amber-400">→ Click for Sales detail</div>
             </div>
           </Link>
         </SandboxWrapper>
@@ -270,7 +292,7 @@ export default function DashboardPage() {
         <SandboxWrapper id="dashboard.labour" label="Labour vs sales">
           <Link href="/staff" className="block">
             <div className="tile group">
-              <div className="label flex items-center gap-2">Labour vs sales <span className="text-ink-600 text-[10px] normal-case tracking-normal">yesterday + rolling avg</span></div>
+              <div className="label flex items-center gap-2">Labour vs sales <span className="text-ink-600 text-xs normal-case tracking-normal">yesterday + rolling avg</span></div>
               <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
                 {[{w: 1, name: 'Yesterday'}, {w: 7, name: '7 day'}, {w: 30, name: '30 day'}].map(({w, name}) => {
                   const r = lab(w);
@@ -284,12 +306,12 @@ export default function DashboardPage() {
                   const showTotalsRow = w > 1;
                   return (
                     <div key={w} className="bg-ink-100 rounded p-2">
-                      <div className="text-[10px] text-ink-500 uppercase tracking-wider">{name}{r?.days_with_data ? ` (${r.days_with_data}d data)` : ''}</div>
+                      <div className="text-xs text-ink-500 uppercase tracking-wider">{name}{r?.days_with_data ? ` (${r.days_with_data}d data)` : ''}</div>
                       <div className={'mt-1 text-base font-mono font-semibold ' + labourClass(combR)}>
                         {combR === null ? '—' : `${combR.toFixed(1)}%`}
                       </div>
                       {showTotalsRow && (
-                        <div className="mt-1 grid grid-cols-2 gap-1 text-[10px] leading-tight">
+                        <div className="mt-1 grid grid-cols-2 gap-1 text-xs leading-tight">
                           <div>
                             <div className="text-ink-500 uppercase tracking-wider">Total L</div>
                             <div className="font-mono text-ink-900">{totS > 0 ? gbp(totL, 0) : '—'}</div>
@@ -300,7 +322,7 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       )}
-                      <div className="mt-1 grid grid-cols-2 gap-1 text-[10px] leading-tight">
+                      <div className="mt-1 grid grid-cols-2 gap-1 text-xs leading-tight">
                         <div>
                           <div className="text-ink-500 uppercase tracking-wider">{showTotalsRow ? 'Avg L/d' : 'Labour'}</div>
                           <div className="font-mono text-ink-900">{combS > 0 ? gbp(combL, 0) : '—'}</div>
@@ -310,7 +332,7 @@ export default function DashboardPage() {
                           <div className="font-mono text-ink-900">{combS > 0 ? gbp(combS, 0) : '—'}</div>
                         </div>
                       </div>
-                      <div className="mt-1 flex gap-2 text-[10px]">
+                      <div className="mt-1 flex gap-2 text-xs">
                         <WagePctBadge pct={pubR} label="pub" />
                         <WagePctBadge pct={cafR} label="cafe" />
                       </div>
@@ -324,7 +346,7 @@ export default function DashboardPage() {
                   <SparkLine values={labSpark.data[0].values.map(v => Number(v) || 0)} colour="#fbbf24" />
                 </div>
               )}
-              <div className="mt-2 text-[11px] text-amber-500 group-hover:text-amber-400">→ Click for Staff detail</div>
+              <div className="mt-2 text-sm text-amber-500 group-hover:text-amber-400">→ Click for Staff detail</div>
             </div>
           </Link>
         </SandboxWrapper>
@@ -355,7 +377,7 @@ export default function DashboardPage() {
                 const pulse       = dayAnomaly ? 'anomaly-pulse' : '';
                 const anomTitle   = dayAnomaly ? `Revenue anomaly (z=${dayAnomaly.z.toFixed(2)} vs same-DoW baseline)` : undefined;
                 return (
-                  <Link key={d.day} href={href} className={`tile flex flex-col text-[11px] gap-1 cursor-pointer transition-shadow hover:ring-2 hover:ring-amber-500 ${ring} ${pulse}`} title={anomTitle}>
+                  <Link key={d.day} href={href} className={`tile flex flex-col text-sm gap-1 cursor-pointer transition-shadow hover:ring-2 hover:ring-amber-500 ${ring} ${pulse}`} title={anomTitle}>
                     {/* Day header + weather icon */}
                     <div className="flex items-center justify-between">
                       <span className={'label ' + (dIsActive ? 'text-amber-500' : dIsToday && !isToday ? 'text-good font-semibold' : '')}>
@@ -365,27 +387,27 @@ export default function DashboardPage() {
                     </div>
                     {/* Back-to-today CTA on today-tile when in day-view */}
                     {dIsToday && !isToday && (
-                      <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-good font-semibold">
+                      <div className="flex items-center gap-1 text-xs uppercase tracking-wider text-good font-semibold">
                         <ArrowLeft size={9} /> Back to today
                       </div>
                     )}
                     {/* Temp + rain */}
                     <div className="font-mono text-ink-900">
                       {d.max_temp ? `${parseFloat(d.max_temp).toFixed(0)}°` : '—'}{' '}
-                      <span className="text-ink-500 text-[10px]">
+                      <span className="text-ink-500 text-xs">
                         {d.precipitation_probability != null ? `${d.precipitation_probability}%🌧` :
                          d.rain_mm ? `${parseFloat(d.rain_mm).toFixed(1)}mm` : ''}
                       </span>
                     </div>
-                    <div className="text-[10px] text-ink-500">{weatherLabel(d.weather_code)}</div>
+                    <div className="text-xs text-ink-500">{weatherLabel(d.weather_code)}</div>
                     {/* Sunset */}
-                    <div className="flex items-center gap-1 text-[10px] text-ink-700">
+                    <div className="flex items-center gap-1 text-xs text-ink-700">
                       <Sunset size={11} className="text-amber-500" />
                       <span className="font-mono">{timeOnly(d.sunset)}</span>
                     </div>
                     {/* Tides */}
                     {dayTides.length > 0 && (
-                      <div className="text-[10px] text-ink-600 leading-tight flex items-start gap-1">
+                      <div className="text-xs text-ink-600 leading-tight flex items-start gap-1">
                         <Waves size={11} className="text-info mt-0.5 shrink-0" />
                         <div className="font-mono">
                           {dayTides.map((t, i) => (
@@ -398,7 +420,7 @@ export default function DashboardPage() {
                     )}
                     {/* Rooms — booked / total with "left to sell" suffix */}
                     {dayExtras && dayExtras.rooms_total > 0 && (
-                      <div className="flex items-center gap-1 text-[10px] text-ink-700">
+                      <div className="flex items-center gap-1 text-xs text-ink-700">
                         <Bed size={11} className="text-ink-500" />
                         <span>
                           {dayExtras.rooms_booked}/{dayExtras.rooms_total}
@@ -408,7 +430,7 @@ export default function DashboardPage() {
                     )}
                     {/* Covers */}
                     {(d.lunch_count > 0 || d.dinner_count > 0) && (
-                      <div className="flex items-center gap-1 text-[10px] text-ink-700">
+                      <div className="flex items-center gap-1 text-xs text-ink-700">
                         <UtensilsCrossed size={11} className="text-ink-500" />
                         <span>
                           {d.lunch_count > 0 && `${d.lunch_count} lunch`}
@@ -420,7 +442,7 @@ export default function DashboardPage() {
                     {/* Staff on rota + rota cost */}
                     {dayExtras && dayExtras.staff_total > 0 && (
                       <>
-                        <div className="flex items-center gap-1 text-[10px] text-ink-700">
+                        <div className="flex items-center gap-1 text-xs text-ink-700">
                           <Users size={11} className="text-ink-500" />
                           <span>
                             {dayExtras.staff_total} on rota
@@ -432,7 +454,7 @@ export default function DashboardPage() {
                             </span>
                           </span>
                         </div>
-                        <div className="flex items-center gap-1 text-[10px] text-ink-700">
+                        <div className="flex items-center gap-1 text-xs text-ink-700">
                           <PoundSterling size={11} className="text-ink-500" />
                           <span className="font-mono">{gbp(dayExtras.rota_cost, 0)}</span>
                         </div>
@@ -440,8 +462,8 @@ export default function DashboardPage() {
                     )}
                     {/* Specials + deposit-bearing reservations */}
                     {daySpecials.length > 0 && (
-                      <div className="mt-1 pt-1 border-t border-ink-200 text-[10px] text-ink-700">
-                        <div className="flex items-center gap-1 text-amber-500 uppercase tracking-wider text-[9px] mb-0.5">
+                      <div className="mt-1 pt-1 border-t border-ink-200 text-xs text-ink-700">
+                        <div className="flex items-center gap-1 text-amber-500 uppercase tracking-wider text-xs mb-0.5">
                           <Wine size={10} />Groups · Deposits
                         </div>
                         {daySpecials.slice(0, 3).map((s, i) => (
@@ -453,7 +475,7 @@ export default function DashboardPage() {
                           </div>
                         ))}
                         {daySpecials.length > 3 && (
-                          <div className="text-[10px] text-ink-500">+{daySpecials.length - 3} more</div>
+                          <div className="text-xs text-ink-500">+{daySpecials.length - 3} more</div>
                         )}
                       </div>
                     )}
@@ -558,7 +580,7 @@ export default function DashboardPage() {
                     <div className={'mt-2 text-2xl font-mono font-semibold ' + trailClass(pct)}>
                       {pct != null ? `${pct.toFixed(0)}%` : '—'}
                     </div>
-                    <div className="mt-1 text-[11px] text-ink-500 font-mono">
+                    <div className="mt-1 text-sm text-ink-500 font-mono">
                       {r.tasks_completed ?? 0}/{r.tasks_total ?? 0} tasks
                       {(r.tasks_overdue ?? 0) > 0 && <span className="text-warn"> · {r.tasks_overdue} overdue</span>}
                     </div>
@@ -582,10 +604,10 @@ export default function DashboardPage() {
               <div className="tile group">
                 <div className="label">Open email tasks</div>
                 <div className="kpi-xl mt-1">{emailKpis.data?.[0]?.tasks_open ?? '—'}</div>
-                <div className="mt-1 text-[11px] text-ink-500">
+                <div className="mt-1 text-sm text-ink-500">
                   {emailKpis.data?.[0]?.instructions_pending ?? 0} bot instructions pending
                 </div>
-                <div className="mt-2 text-[11px] text-amber-500 group-hover:text-amber-400">→ Click for /comms</div>
+                <div className="mt-2 text-sm text-amber-500 group-hover:text-amber-400">→ Click for /comms</div>
               </div>
             </Link>
           </Section>
@@ -609,7 +631,7 @@ export default function DashboardPage() {
                   <div className="mt-2 h-10 opacity-60">
                     <SparkLine values={(reviewsSpk.data[0].rating_spark || []).map(v => Number(v) || 0)} />
                   </div>
-                  <div className="mt-2 text-[11px] text-amber-500 group-hover:text-amber-400">→ Click for full reviews</div>
+                  <div className="mt-2 text-sm text-amber-500 group-hover:text-amber-400">→ Click for full reviews</div>
                 </div>
               </Link>
             ) : <PlaceholderState message="No reviews in last 30 days." />}
@@ -631,7 +653,7 @@ function GuestList({ data, loading, emptyMessage }: {
   return (
     <div className="tile">
       <table className="w-full text-sm">
-        <thead className="text-[10px] text-ink-500 uppercase tracking-wider">
+        <thead className="text-xs text-ink-500 uppercase tracking-wider">
           <tr>
             <th className="text-left py-1.5 font-medium">Guest</th>
             <th className="text-left font-medium">Room</th>

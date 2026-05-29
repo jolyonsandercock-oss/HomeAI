@@ -70,19 +70,19 @@ export default function BarPage() {
                   </div>
                   <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
                     <div>
-                      <div className="text-ink-500 uppercase text-[9px] tracking-wide">Wage</div>
+                      <div className="text-ink-500 uppercase text-xs tracking-wide">Wage</div>
                       <div className="font-mono text-ink-900 mt-0.5">
                         {labour != null ? gbp(labour, 0) : <span className="text-ink-400">—</span>}
                       </div>
                     </div>
                     <div>
-                      <div className="text-ink-500 uppercase text-[9px] tracking-wide">Sales</div>
+                      <div className="text-ink-500 uppercase text-xs tracking-wide">Sales</div>
                       <div className="font-mono text-ink-900 mt-0.5">
                         {sales != null ? gbp(sales, 0) : <span className="text-ink-400">—</span>}
                       </div>
                     </div>
                     <div>
-                      <div className="text-ink-500 uppercase text-[9px] tracking-wide">Purch.</div>
+                      <div className="text-ink-500 uppercase text-xs tracking-wide">Purch.</div>
                       <div className="font-mono text-ink-900 mt-0.5">
                         {purchases != null ? gbp(purchases, 0) : <span className="text-ink-400">—</span>}
                       </div>
@@ -92,7 +92,7 @@ export default function BarPage() {
               );
             })}
           </div>
-          <div className="text-[10px] text-ink-500 mt-1">
+          <div className="text-xs text-ink-500 mt-1">
             Wage % = FOH labour ÷ Pub sales · threshold 30%.
             Purchases = Beverage vendor invoices.
           </div>
@@ -108,7 +108,7 @@ export default function BarPage() {
                 <div key={g.grp} className="tile">
                   <div className="label">{GRP_LABEL[g.grp] ?? g.grp}</div>
                   <div className="kpi mt-1">{gbp(Number(g.total_value) || 0, 0)}</div>
-                  <div className="text-[10px] text-ink-500 mt-0.5">£ over 7 days</div>
+                  <div className="text-xs text-ink-500 mt-0.5">£ over 7 days</div>
                   <div className="mt-2 h-8 opacity-70">
                     <SparkLine values={g.values.map(v => Number(v) || 0)} colour={GRP_COLOUR[g.grp]} />
                   </div>

@@ -53,17 +53,17 @@ export function StratifiedActionQueue({ rows }: { rows: ActionRow[] }) {
             <div className="space-y-1">
               {items.slice(0, 20).map((r, i) => (
                 <div key={`${r.source}-${r.ref}-${i}`} className="flex items-center gap-2 text-xs">
-                  <span className={clsx('inline-block px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider', sevBadge(r.severity))}>
+                  <span className={clsx('inline-block px-1.5 py-0.5 rounded text-xs uppercase tracking-wider', sevBadge(r.severity))}>
                     {r.severity}
                   </span>
                   <span className="text-ink-700 truncate flex-1" title={r.title}>{r.title}</span>
-                  <span className="text-ink-500 font-mono text-[10px]">
+                  <span className="text-ink-500 font-mono text-xs">
                     {r.kind}{r.age_days > 0 ? ` · ${r.age_days}d` : ''}
                   </span>
                 </div>
               ))}
               {items.length > 20 && (
-                <div className="text-ink-500 text-[10px]">+{items.length - 20} more</div>
+                <div className="text-ink-500 text-xs">+{items.length - 20} more</div>
               )}
             </div>
           </div>

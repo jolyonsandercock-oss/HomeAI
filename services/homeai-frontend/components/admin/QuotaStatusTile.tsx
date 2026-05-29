@@ -50,7 +50,7 @@ export function QuotaStatusTile() {
       <div className="tile p-0 overflow-hidden">
         <div className="px-3 py-2.5 flex items-baseline justify-between border-b border-ink-200">
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-ink-500">Total today</div>
+            <div className="text-xs uppercase tracking-wider text-ink-500">Total today</div>
             <div className="text-lg font-mono text-ink-800">
               {gbp(total_spent, 4)} <span className="text-xs text-ink-500">/ {gbp(total_ceiling, 2)}</span>
             </div>

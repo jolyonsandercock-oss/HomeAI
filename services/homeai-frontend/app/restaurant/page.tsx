@@ -110,7 +110,7 @@ export default function RestaurantPage() {
                 <div className="text-ink-500 uppercase tracking-wider">{kitchenHours.toFixed(1)} hours · {gbp(kitchenCost)}</div>
               </div>
               <table className="w-full text-sm">
-                <thead className="text-[10px] text-ink-500 uppercase tracking-wider">
+                <thead className="text-xs text-ink-500 uppercase tracking-wider">
                   <tr>
                     <th className="text-left py-1.5 font-medium">Chef</th>
                     <th className="text-left font-medium">Start</th>
@@ -141,7 +141,7 @@ export default function RestaurantPage() {
           {menu.isLoading ? <PlaceholderState message="Loading menu…" /> :
            menu.data && menu.data.length > 0 ? (
             <>
-              <div className="text-[10px] text-ink-500 mb-2">
+              <div className="text-xs text-ink-500 mb-2">
                 Lunch/dinner split pending: TouchOffice scrape is daily-only with no transaction time.
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -152,7 +152,7 @@ export default function RestaurantPage() {
                     <div key={course} className="tile">
                       <div className="label mb-2">{COURSE_LABEL[course]} <span className="text-ink-500">· {items.length}</span></div>
                       <table className="w-full text-xs">
-                        <thead className="text-[10px] text-ink-500 uppercase tracking-wider">
+                        <thead className="text-xs text-ink-500 uppercase tracking-wider">
                           <tr>
                             <th className="text-left font-medium pb-1">#</th>
                             <th className="text-left font-medium">Item</th>

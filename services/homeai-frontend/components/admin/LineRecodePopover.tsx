@@ -66,7 +66,7 @@ export function LineRecodePopover({
           </div>
         )}
 
-        <label className="block text-[10px] uppercase tracking-wider text-ink-500 mb-1">Department</label>
+        <label className="block text-xs uppercase tracking-wider text-ink-500 mb-1">Department</label>
         <div className="grid grid-cols-3 gap-1 mb-3">
           <button
             onClick={() => setDept('')}
@@ -84,7 +84,7 @@ export function LineRecodePopover({
           ))}
         </div>
 
-        <label className="block text-[10px] uppercase tracking-wider text-ink-500 mb-1">Product family</label>
+        <label className="block text-xs uppercase tracking-wider text-ink-500 mb-1">Product family</label>
         <input
           value={family}
           onChange={(e) => setFamily(e.target.value)}
@@ -107,7 +107,7 @@ export function LineRecodePopover({
             Cancel
           </button>
         </div>
-        <div className="text-[10px] text-ink-500 mt-3">
+        <div className="text-xs text-ink-500 mt-3">
           This correction is saved to line_category_feedback and applied to the line immediately.
           The nightly promoter rolls ≥3-agreement clusters into vendor_category_rules.
         </div>

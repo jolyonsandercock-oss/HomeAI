@@ -114,12 +114,12 @@ export default function InvoiceDrilldown({ params }: { params: Promise<{ id: str
               </div>
 
               <div className="px-4 py-2 text-xs text-ink-500 break-all">
-                <div className="text-[10px] uppercase tracking-wider mb-0.5">Subject</div>
+                <div className="text-xs uppercase tracking-wider mb-0.5">Subject</div>
                 {h.subject}
               </div>
               {h.notes && (
                 <div className="px-4 py-2 text-xs text-ink-500 border-t border-ink-200 whitespace-pre-wrap">
-                  <div className="text-[10px] uppercase tracking-wider mb-0.5">Notes</div>
+                  <div className="text-xs uppercase tracking-wider mb-0.5">Notes</div>
                   {h.notes}
                 </div>
               )}
@@ -233,7 +233,7 @@ export default function InvoiceDrilldown({ params }: { params: Promise<{ id: str
 function Cell({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="px-3 py-2.5">
-      <div className="text-[10px] uppercase tracking-wider text-ink-500">{label}</div>
+      <div className="text-xs uppercase tracking-wider text-ink-500">{label}</div>
       <div className="text-base font-mono text-ink-800">{value}</div>
       {sub && <div className="text-xs text-ink-500 mt-0.5">{sub}</div>}
     </div>

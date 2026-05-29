@@ -54,7 +54,7 @@ export default function CashupPage() {
               <input type="date" value={date} onChange={e => setDate(e.target.value)}
                 className="bg-ink-100 border border-ink-200 rounded px-2 py-1 text-ink-900" />
             </label>
-            <div className="text-[10px] text-ink-500 ml-auto">
+            <div className="text-xs text-ink-500 ml-auto">
               Variance = (cash + card + caterpay + collins) − Z-read · &gt;£5 highlighted
             </div>
           </div>
@@ -84,7 +84,7 @@ export default function CashupPage() {
                   <div className="mt-1 text-2xl font-mono font-semibold text-ink-900">
                     {gbp(s.running_balance_pence / 100)}
                   </div>
-                  <div className="text-[11px] text-ink-500 mt-1">
+                  <div className="text-sm text-ink-500 mt-1">
                     {s.movement_count} movement{s.movement_count === 1 ? '' : 's'} this month
                     {s.last_movement && ` · last on ${new Date(s.last_movement).toLocaleDateString('en-GB')}`}
                   </div>
@@ -156,38 +156,38 @@ function TillRow({ row, site, date, onSubmit }: {
       <div className="flex items-center justify-between mb-2">
         <div className="text-xs font-semibold uppercase tracking-wider text-ink-700">{row.till_id.replace('till_', '')}</div>
         {row.entered_at && (
-          <div className="text-[10px] text-ink-500 flex items-center gap-1">
+          <div className="text-xs text-ink-500 flex items-center gap-1">
             <CheckCircle2 size={10} className="text-good" /> saved
           </div>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px]">
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
         <div>
-          <div className="text-ink-500 uppercase tracking-wider text-[9px]">Z-read</div>
+          <div className="text-ink-500 uppercase tracking-wider text-xs">Z-read</div>
           <div className="font-mono text-ink-900">{gbp(row.z_read_pence / 100)}</div>
         </div>
         <div>
-          <div className="text-ink-500 uppercase tracking-wider text-[9px]">Card (Dojo)</div>
+          <div className="text-ink-500 uppercase tracking-wider text-xs">Card (Dojo)</div>
           <div className="font-mono text-ink-900">{row.card_pence != null ? gbp(row.card_pence / 100) : '—'}</div>
         </div>
         <div>
-          <div className="text-ink-500 uppercase tracking-wider text-[9px]">Cash (counted)</div>
+          <div className="text-ink-500 uppercase tracking-wider text-xs">Cash (counted)</div>
           <input type="number" step="0.01" value={cash} onChange={e => setCash(e.target.value)}
             className="bg-ink-100 border border-ink-200 rounded px-2 py-0.5 w-full font-mono text-ink-900" placeholder="0.00" />
         </div>
         <div>
-          <div className="text-ink-500 uppercase tracking-wider text-[9px]">Caterpay (override)</div>
+          <div className="text-ink-500 uppercase tracking-wider text-xs">Caterpay (override)</div>
           <input type="number" step="0.01" value={caterpay} onChange={e => setCaterpay(e.target.value)}
             className="bg-ink-100 border border-ink-200 rounded px-2 py-0.5 w-full font-mono text-ink-900" placeholder="0.00" />
         </div>
         {row.collins_deposit_pence != null && row.collins_deposit_pence > 0 && (
           <div className="col-span-2">
-            <div className="text-ink-500 uppercase tracking-wider text-[9px]">Collins deposits</div>
+            <div className="text-ink-500 uppercase tracking-wider text-xs">Collins deposits</div>
             <div className="font-mono text-info">{gbp(row.collins_deposit_pence / 100)}</div>
           </div>
         )}
         <div className="col-span-2 mt-1">
-          <div className="text-ink-500 uppercase tracking-wider text-[9px]">Notes</div>
+          <div className="text-ink-500 uppercase tracking-wider text-xs">Notes</div>
           <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
             className="bg-ink-100 border border-ink-200 rounded px-2 py-0.5 w-full text-ink-900" />
         </div>
@@ -201,7 +201,7 @@ function TillRow({ row, site, date, onSubmit }: {
           </div>
         </div>
         <button onClick={submit} disabled={saving}
-          className="text-[11px] uppercase tracking-wider px-3 py-1 rounded bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50">
+          className="text-sm uppercase tracking-wider px-3 py-1 rounded bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50">
           {saving ? 'Saving…' : saved ? 'Saved' : 'Save'}
         </button>
       </div>
@@ -224,13 +224,13 @@ function TotalsLine({ rows }: { rows: ReconRow[] }) {
 
   return (
     <div className="tile bg-ink-100">
-      <div className="text-[10px] uppercase tracking-wider text-ink-500 mb-1">Site totals</div>
-      <div className="grid grid-cols-5 gap-2 text-[11px] font-mono text-ink-900">
-        <div><div className="text-[9px] text-ink-500 uppercase">Z</div>{gbp(totals.z_read / 100)}</div>
-        <div><div className="text-[9px] text-ink-500 uppercase">Cash</div>{gbp(totals.cash / 100)}</div>
-        <div><div className="text-[9px] text-ink-500 uppercase">Card</div>{gbp(totals.card / 100)}</div>
-        <div><div className="text-[9px] text-ink-500 uppercase">Cpy</div>{gbp(totals.caterpay / 100)}</div>
-        <div><div className="text-[9px] text-ink-500 uppercase">Coll</div>{gbp(totals.collins / 100)}</div>
+      <div className="text-xs uppercase tracking-wider text-ink-500 mb-1">Site totals</div>
+      <div className="grid grid-cols-5 gap-2 text-sm font-mono text-ink-900">
+        <div><div className="text-xs text-ink-500 uppercase">Z</div>{gbp(totals.z_read / 100)}</div>
+        <div><div className="text-xs text-ink-500 uppercase">Cash</div>{gbp(totals.cash / 100)}</div>
+        <div><div className="text-xs text-ink-500 uppercase">Card</div>{gbp(totals.card / 100)}</div>
+        <div><div className="text-xs text-ink-500 uppercase">Cpy</div>{gbp(totals.caterpay / 100)}</div>
+        <div><div className="text-xs text-ink-500 uppercase">Coll</div>{gbp(totals.collins / 100)}</div>
       </div>
       <div className={'mt-2 pt-1 border-t border-ink-200 text-sm font-semibold ' + cls}>
         Variance: {totals.variance >= 0 ? '+' : '−'}{gbp(Math.abs(totals.variance) / 100)}
@@ -280,7 +280,7 @@ function SafeMovementForm({ onSubmit }: { onSubmit: () => void }) {
         <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
           className="bg-ink-100 border border-ink-200 rounded px-2 py-1 text-ink-900" placeholder="notes" />
         <button onClick={submit} disabled={busy || !amount}
-          className="text-[11px] uppercase tracking-wider px-3 py-1 rounded bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50">
+          className="text-sm uppercase tracking-wider px-3 py-1 rounded bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50">
           {busy ? '…' : 'Log'}
         </button>
       </div>

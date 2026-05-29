@@ -144,7 +144,7 @@ export default function CommsPage() {
               <div className="tile">
                 <div className="label">30d avg rating</div>
                 <div className="kpi-xl mt-1">{sp.avg_rating_30d ? `${parseFloat(sp.avg_rating_30d).toFixed(2)}★` : '—'}</div>
-                <div className="text-[10px] text-ink-500 mt-0.5">days with reviews only</div>
+                <div className="text-xs text-ink-500 mt-0.5">days with reviews only</div>
                 <div className="mt-2 h-10 opacity-70">
                   <SparkLine values={ratingSeries} colour="#f59e0b" />
                 </div>
@@ -152,7 +152,7 @@ export default function CommsPage() {
               <div className="tile">
                 <div className="label">30d review count</div>
                 <div className="kpi-xl mt-1">{sp.total_reviews_30d}</div>
-                <div className="text-[10px] text-ink-500 mt-0.5">total this window</div>
+                <div className="text-xs text-ink-500 mt-0.5">total this window</div>
                 <div className="mt-2 h-10 opacity-70">
                   <SparkLine values={countSeries} colour="#06b6d4" />
                 </div>
@@ -180,17 +180,17 @@ export default function CommsPage() {
                 return (
                   <div key={r.source} className={'tile p-3 ' + (isAggregate ? 'border-amber-500 border-2' : '')}>
                     <div className="flex items-center justify-between">
-                      <div className="text-[10px] text-ink-500 uppercase tracking-wider">{r.label}{isAggregate && ' (aggregate)'}</div>
-                      {r.source === 'booking_com' && <div className="text-[9px] text-ink-500" title="Booking.com rates /10; halved here for parity">/10 → /5</div>}
+                      <div className="text-xs text-ink-500 uppercase tracking-wider">{r.label}{isAggregate && ' (aggregate)'}</div>
+                      {r.source === 'booking_com' && <div className="text-xs text-ink-500" title="Booking.com rates /10; halved here for parity">/10 → /5</div>}
                     </div>
                     <div className="mt-1 text-2xl font-mono font-semibold text-ink-900">
                       {avg30 != null ? `${avg30.toFixed(2)}★` : (avgAll != null ? `${avgAll.toFixed(2)}★` : '—')}
-                      <span className="ml-1 text-[10px] text-ink-500 font-sans normal-case tracking-normal">{avg30 != null ? '30d' : (avgAll != null ? 'all-time' : '')}</span>
+                      <span className="ml-1 text-xs text-ink-500 font-sans normal-case tracking-normal">{avg30 != null ? '30d' : (avgAll != null ? 'all-time' : '')}</span>
                     </div>
-                    <div className="mt-1 text-[10px] text-ink-500">
+                    <div className="mt-1 text-xs text-ink-500">
                       {r.count_30d} reviews / 30d · {r.count_all_time} all-time
                     </div>
-                    <div className="mt-1 text-[10px] text-ink-600">
+                    <div className="mt-1 text-xs text-ink-600">
                       last review: {r.last_review_at ? `${lastReviewDays}d ago` : 'never'}
                     </div>
                     <div className={'mt-1 text-xs font-mono ' + deltaCls}>
@@ -207,7 +207,7 @@ export default function CommsPage() {
             </div>
           )}
           {reviewSum.data?.find(r => r.source === 'booking_com')?.count_all_time == 0 && (
-            <p className="mt-2 text-[11px] text-amber-400">
+            <p className="mt-2 text-sm text-amber-400">
               Booking.com slot wired (averages halved for /5 parity). Will populate once the Booking.com review-email parser is added to the gmail pipeline (queued — needs gmail unblocked via vault unseal).
             </p>
           )}
@@ -235,14 +235,14 @@ export default function CommsPage() {
             <input type="text" value={searchText} onChange={(e) => setSearchText(e.target.value)}
               placeholder="search name or body…"
               className="bg-ink-100 border border-ink-200 text-ink-800 rounded px-2 py-1 flex-1 min-w-32 max-w-64" />
-            <span className="text-[10px] text-ink-500 ml-auto">{tableRows.length} of {reviewTbl.data?.length ?? 0}</span>
+            <span className="text-xs text-ink-500 ml-auto">{tableRows.length} of {reviewTbl.data?.length ?? 0}</span>
           </div>
           {reviewTbl.isLoading ? <PlaceholderState message="Loading…" /> : tableRows.length === 0 ? (
             <PlaceholderState message="No reviews match the filter." />
           ) : (
             <div className="tile overflow-x-auto">
               <table className="w-full text-xs">
-                <thead className="text-ink-500 uppercase tracking-wider text-[10px] sticky top-0 bg-ink-50">
+                <thead className="text-ink-500 uppercase tracking-wider text-xs sticky top-0 bg-ink-50">
                   <tr>
                     <th className="px-2 py-1.5 text-left cursor-pointer hover:text-ink-800 select-none" onClick={() => setSort('rating5')}>
                       Score {sortIcon('rating5')}
@@ -267,7 +267,7 @@ export default function CommsPage() {
                       <tr key={r.review_id} className="border-t border-ink-200 align-top">
                         <td className="px-2 py-1.5 font-mono whitespace-nowrap">
                           <span className="text-amber-500">{score != null ? score.toFixed(1) : '—'}</span>
-                          <span className="ml-1 text-[10px] text-ink-500">{stars(score != null ? Math.round(score) : null)}</span>
+                          <span className="ml-1 text-xs text-ink-500">{stars(score != null ? Math.round(score) : null)}</span>
                         </td>
                         <td className="px-2 py-1.5">{sourceLabel(r.source)}</td>
                         <td className="px-2 py-1.5 whitespace-nowrap text-ink-700">{r.posted_at ? new Date(r.posted_at).toLocaleDateString('en-GB') : '—'}</td>
@@ -313,7 +313,7 @@ export default function CommsPage() {
             return (
               <div className="tile overflow-x-auto">
                 <table className="w-full text-xs">
-                  <thead className="text-ink-500 uppercase tracking-wider text-[10px]">
+                  <thead className="text-ink-500 uppercase tracking-wider text-xs">
                     <tr>
                       <th className="px-2 py-1 text-left">Account</th>
                       <th className="px-2 py-1 text-left">Recipient</th>

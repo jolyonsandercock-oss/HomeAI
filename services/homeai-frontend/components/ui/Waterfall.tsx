@@ -72,7 +72,7 @@ export function Waterfall({ steps, height = 120, format }: WaterfallProps) {
       </svg>
       <div className="grid mt-1" style={{ gridTemplateColumns: `repeat(${steps.length}, 1fr)` }}>
         {bars.map((b, i) => (
-          <div key={i} className="text-[10px] text-center">
+          <div key={i} className="text-xs text-center">
             <div className="text-ink-500 truncate">{b.lbl}</div>
             <div className="font-mono text-ink-700">{fmt(b.v)}</div>
           </div>

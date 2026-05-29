@@ -19,7 +19,7 @@ export function PubVsCafeBar({ pub, cafe, format }: { pub: number; cafe: number;
         <div className="bg-amber-500 transition-all" style={{ width: `${pubPct}%` }} title={`Pub ${fmt(pub)}`} />
         <div className="bg-info transition-all" style={{ width: `${100 - pubPct}%` }} title={`Cafe ${fmt(cafe)}`} />
       </div>
-      <div className="flex justify-between text-[10px] font-mono">
+      <div className="flex justify-between text-xs font-mono">
         <span className="text-amber-500">Pub <strong className="text-ink-900">{fmt(pub)}</strong> · {pubPct.toFixed(0)}%</span>
         <span className="text-info">Cafe <strong className="text-ink-900">{fmt(cafe)}</strong> · {(100 - pubPct).toFixed(0)}%</span>
       </div>

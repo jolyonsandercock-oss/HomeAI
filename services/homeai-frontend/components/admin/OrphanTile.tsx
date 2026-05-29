@@ -43,24 +43,24 @@ export function OrphanTile() {
       <div className="tile p-0 overflow-hidden">
         <div className="grid grid-cols-2 sm:grid-cols-4 border-b border-ink-200">
           <div className="px-3 py-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-ink-500">Exposure</div>
+            <div className="text-xs uppercase tracking-wider text-ink-500">Exposure</div>
             <div className={'text-lg font-mono ' + (exposure > 0 ? 'text-amber-600' : 'text-ink-800')}>
               {gbp(s?.gbp_exposure)}
             </div>
           </div>
           <div className="px-3 py-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-ink-500">Orphans</div>
+            <div className="text-xs uppercase tracking-wider text-ink-500">Orphans</div>
             <div className="text-lg font-mono text-ink-800">{s?.orphan_count ?? '—'}</div>
           </div>
           <div className="px-3 py-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-ink-500">Overdue → Dext</div>
+            <div className="text-xs uppercase tracking-wider text-ink-500">Overdue → Dext</div>
             <div className={'text-lg font-mono ' + (overdue > 0 ? 'text-red-500' : 'text-ink-800')}>
               {s?.overdue_to_forward ?? '—'}
               {overdue > 0 && <AlertTriangle size={14} className="inline ml-1.5 -mt-0.5 text-red-500" />}
             </div>
           </div>
           <div className="px-3 py-2.5">
-            <div className="text-[10px] uppercase tracking-wider text-ink-500">Forwarded</div>
+            <div className="text-xs uppercase tracking-wider text-ink-500">Forwarded</div>
             <div className="text-lg font-mono text-ink-800">{s?.already_forwarded ?? '—'}</div>
           </div>
         </div>

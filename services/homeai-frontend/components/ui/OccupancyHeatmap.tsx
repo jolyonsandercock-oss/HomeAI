@@ -29,7 +29,7 @@ export function OccupancyHeatmap({ rows }: { rows: HeatmapRow[] }) {
 
   return (
     <div className="overflow-x-auto">
-      <table className="text-[10px] border-collapse">
+      <table className="text-xs border-collapse">
         <thead>
           <tr>
             <th className="text-left px-1 sticky left-0 bg-ink-50">room</th>

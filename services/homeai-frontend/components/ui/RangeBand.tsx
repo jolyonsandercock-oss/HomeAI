@@ -46,7 +46,7 @@ export function RangeBand({ value, lo, p10, p50, p90, hi, label, format }: Range
           title={`Today: ${fmt(value)} (P10=${fmt(p10)}, P50=${fmt(p50)}, P90=${fmt(p90)})`}
         />
       </div>
-      <div className="flex justify-between text-[10px] text-ink-500 font-mono">
+      <div className="flex justify-between text-xs text-ink-500 font-mono">
         <span>{fmt(lo)}</span>
         <span className="text-ink-700">{fmt(value)}</span>
         <span>{fmt(hi)}</span>

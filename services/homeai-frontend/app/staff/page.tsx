@@ -140,7 +140,7 @@ export default function StaffPage() {
                   <div key={team} className="tile">
                     <div className="flex items-center justify-between mb-1.5">
                       <div className="text-xs uppercase tracking-wider text-ink-500">{team}</div>
-                      <div className="text-[11px] text-ink-700 font-mono">{teamHours.toFixed(1)}h · {gbp(teamCost)}</div>
+                      <div className="text-sm text-ink-700 font-mono">{teamHours.toFixed(1)}h · {gbp(teamCost)}</div>
                     </div>
                     <ul className="space-y-0.5 text-sm">
                       {shifts.map(s => (
@@ -185,12 +185,12 @@ export default function StaffPage() {
                   {teams.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </label>
-              <div className="ml-auto text-[10px] text-ink-500">Attribution = staff-hours-share × team site revenue</div>
+              <div className="ml-auto text-xs text-ink-500">Attribution = staff-hours-share × team site revenue</div>
             </div>
             {attribution.isLoading ? <PlaceholderState message="Loading…" /> :
              filteredAttribution.length > 0 ? (
               <table className="w-full text-sm">
-                <thead className="text-[10px] text-ink-500 uppercase tracking-wider">
+                <thead className="text-xs text-ink-500 uppercase tracking-wider">
                   <tr>
                     <th className="text-left py-1.5 font-medium">#</th>
                     <th className="text-left font-medium">Name</th>
@@ -207,7 +207,7 @@ export default function StaffPage() {
                     const gpClass = gp == null ? 'text-ink-500' : gp > 0 ? 'text-good' : 'text-warn';
                     return (
                       <tr key={r.user_external_id} className="border-t border-ink-200">
-                        <td className="py-1 text-[11px] text-ink-500 font-mono">{i + 1}</td>
+                        <td className="py-1 text-sm text-ink-500 font-mono">{i + 1}</td>
                         <td className="font-medium text-ink-900">{r.full_name}</td>
                         <td className="text-ink-700 text-xs">{r.team}</td>
                         <td className="text-right font-mono text-ink-700">{parseFloat(String(r.hours)).toFixed(1)}</td>
@@ -247,7 +247,7 @@ export default function StaffPage() {
            holidays.data && holidays.data.length > 0 ? (
             <div className="tile">
               <table className="w-full text-sm">
-                <thead className="text-[10px] text-ink-500 uppercase tracking-wider">
+                <thead className="text-xs text-ink-500 uppercase tracking-wider">
                   <tr>
                     <th className="text-left py-1.5 font-medium">Staff</th>
                     <th className="text-left font-medium">From</th>

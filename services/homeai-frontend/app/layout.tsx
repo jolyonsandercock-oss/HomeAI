@@ -9,6 +9,9 @@ import { DynamicTitle } from "@/components/ui/DynamicTitle";
 export const metadata: Metadata = {
   title: 'Home AI — Mission Control',
   description: 'The Olde Malthouse Inn · operational dashboard',
+  manifest: '/app/manifest.webmanifest',
+  themeColor: '#f59e0b',
+  appleWebApp: { capable: true, title: 'Home AI', statusBarStyle: 'black-translucent' },
 };
 
 // Force dynamic rendering globally — the shell + multiple pages call

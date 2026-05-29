@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { DateRangePicker, DateRange } from '@/components/ui/DateRangePicker';
 import { KPICard } from '@/components/ui/KPICard';
 import { Section } from '@/components/ui/Section';
@@ -47,7 +48,28 @@ function num(s: string | number | null | undefined): number {
 
 export default function SalesPage() {
   const [range, setRange] = useState<DateRange>({ preset: 'today', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
-  const [tab, setTab] = useState<Tab>('all');
+  // Hermes D4: persist sales tab in URL so navigating away and back preserves
+  // the user's view (was: React-only state → reset on every nav).
+  const router = useRouter();
+  const sp = useSearchParams();
+  const pathname = usePathname();
+  const initialTab = (TABS.find(t => t === sp.get('tab')) as Tab | undefined) ?? 'all';
+  const [tab, setTabState] = useState<Tab>(initialTab);
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    const params = new URLSearchParams(sp.toString());
+    if (t === 'all') params.delete('tab'); else params.set('tab', t);
+    const q = params.toString();
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+  };
+  // Adopt URL on first mount if tab param changed externally (e.g. deep link).
+  useEffect(() => {
+    const urlTab = sp.get('tab');
+    if (urlTab && TABS.includes(urlTab as Tab) && urlTab !== tab) {
+      setTabState(urlTab as Tab);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp]);
   const [tableFilter, setTableFilter] = useState<'' | 'high_labour' | 'low_sales' | 'has_data'>('');
 
   const rangeArgs = { start: range.start, end: range.end };
@@ -125,7 +147,7 @@ export default function SalesPage() {
                 className={'px-3 py-1.5 capitalize ' + (tab === t ? 'bg-amber-500 text-ink-0' : 'text-ink-600 hover:text-ink-800')}>{t}</button>
             ))}
           </div>
-          <div className="flex items-center gap-1 text-[10px] text-ink-500">
+          <div className="flex items-center gap-1 text-xs text-ink-500">
             <span>polls:</span>
             <PollClock lastPoll={pollFor('touchoffice_malthouse')} label="touchoffice pub" />
             <PollClock lastPoll={pollFor('touchoffice_sandwich')} label="touchoffice cafe" />
@@ -148,7 +170,16 @@ export default function SalesPage() {
       <SandboxWrapper id="sales.dept-bar" label="Department bar">
         <Section title="Category breakdown (selected range)">
           {cat.isLoading ? <div className="text-xs text-ink-500">Loading…</div> : (
-            <div className="tile h-[340px]">
+            <figure
+              className="tile h-[340px]"
+              aria-labelledby="sales-cat-caption"
+              aria-describedby="sales-filterable-table"
+              role="figure"
+            >
+              <figcaption id="sales-cat-caption" className="sr-only">
+                Bar chart of sales totals by category for the selected date range.
+                The same data is available in the filterable daily table below for screen-reader users.
+              </figcaption>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={catChart} layout="vertical" margin={{ top: 8, right: 24, left: 80, bottom: 8 }}>
                   <CartesianGrid stroke="#2a2a2a" horizontal={false} />
@@ -163,7 +194,7 @@ export default function SalesPage() {
                   )}
                 </BarChart>
               </ResponsiveContainer>
-            </div>
+            </figure>
           )}
         </Section>
       </SandboxWrapper>
@@ -171,7 +202,16 @@ export default function SalesPage() {
       <SandboxWrapper id="sales.income-vs-labour" label="30d income vs labour">
         <Section title="Income vs labour cost — last 30 days">
           {incLab.isLoading ? <div className="text-xs text-ink-500">Loading…</div> : (
-            <div className="tile h-[300px]">
+            <figure
+              className="tile h-[300px]"
+              aria-labelledby="sales-incomelabour-caption"
+              aria-describedby="sales-filterable-table"
+              role="figure"
+            >
+              <figcaption id="sales-incomelabour-caption" className="sr-only">
+                Composed chart of daily total income versus labour cost over the last 30 days,
+                with a 7-day rolling average target line. Data also available in the filterable daily table below.
+              </figcaption>
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={incLab.data ?? []} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
                   <CartesianGrid stroke="#2a2a2a" vertical={false} />
@@ -184,7 +224,7 @@ export default function SalesPage() {
                   <Line type="monotone" dataKey="labour_cost" stroke="#22d3ee" strokeWidth={2} dot={false} name="Labour cost" />
                 </ComposedChart>
               </ResponsiveContainer>
-            </div>
+            </figure>
           )}
         </Section>
       </SandboxWrapper>
@@ -203,9 +243,10 @@ export default function SalesPage() {
             <PollClock lastPoll={pollFor('workforce_shifts')} label="workforce" />
             <PollClock lastPoll={pollFor('xero_bills')} label="xero" />
           </div>
-          <div className="tile overflow-x-auto">
-            <table className="w-full text-xs font-mono">
-              <thead className="text-ink-500 uppercase tracking-wider text-[10px]">
+          <div className="tile overflow-x-auto" id="sales-filterable-table">
+            <table className="w-full text-xs font-mono"
+              aria-label="Daily sales, wage and COGS table — accessible alternative to the charts above">
+              <thead className="text-ink-500 uppercase tracking-wider text-xs">
                 <tr>
                   <th className="px-2 py-1 text-left">Day</th>
                   <th className="px-2 py-1 text-right">Pub food</th>
@@ -258,7 +299,7 @@ export default function SalesPage() {
               </tfoot>
             </table>
           </div>
-          <p className="mt-2 text-[11px] text-ink-500">
+          <p className="mt-2 text-sm text-ink-500">
             COGS is overall (xero contacts not yet site-categorised). Pub COGS vs Café COGS will split once vendor-to-site mapping is wired.
             Labour % is labour ÷ sales (excl accom). Accommodation revenue lives in caterbook and is intentionally excluded from sales totals to avoid double-counting (see /sales accom column for the till-recorded number).
           </p>
