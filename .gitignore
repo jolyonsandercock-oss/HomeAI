@@ -63,6 +63,12 @@ __pycache__/
 /data/xero-inbox/
 /data/xero-profile/
 /data/playwright-browsers/
+# Playwright auth cookies (Dojo / Trail / TouchOffice) — live secrets, never commit
+/data/playwright-state/
+
+# Point-in-time backup files left by install scripts — transient, never commit
+scripts/*.bak.*
+security/*.bak.*
 /data/*.lastsent
 
 # Tailscale cert + key — minted at the box, regenerable; key MUST NOT leave host.
