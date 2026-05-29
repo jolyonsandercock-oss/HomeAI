@@ -7,9 +7,10 @@ import { SparkLine } from '@/components/ui/SparkLine';
 import { WagePctBadge } from '@/components/ui/WagePctBadge';
 import { Section } from '@/components/ui/Section';
 import { PlaceholderState } from '@/components/ui/PlaceholderState';
+import { PollClock } from '@/components/ui/PollClock';
 import { SandboxWrapper } from '@/components/sandbox/SandboxWrapper';
 import { useSlug } from '@/lib/hooks';
-import { gbp, fmtDay } from '@/lib/format';
+import { gbp, fmtDay, formatRoom } from '@/lib/format';
 import {
   Sunset, CloudRain, Cloud, Sun, CloudSnow,
   Bed, UtensilsCrossed, Wine, Waves,
@@ -21,6 +22,9 @@ interface LabourRow {
   window_days: number;
   pub_labour_avg: string | null;  pub_sales_avg: string | null;
   cafe_labour_avg: string | null; cafe_sales_avg: string | null;
+  pub_labour_total: string | null;  pub_sales_total: string | null;
+  cafe_labour_total: string | null; cafe_sales_total: string | null;
+  days_with_data: number | null;
 }
 interface WeekDay {
   day: string;
@@ -177,6 +181,10 @@ export default function DashboardPage() {
   const checkouts = useSlug<GuestRow>('dashboard_checkouts_today', dateArg);
   const trail    = useSlug<TrailReport>('trail_reports_today', dateArg, { refetchInterval: 10 * 60_000 });
   const roomsWk  = useSlug<RoomsWeek>('rooms_week_economics', dateArg);
+  const freshness = useSlug<{ source: string; age_h: string; expected_hours: number; status: string }>('data_source_freshness', {}, { refetchInterval: 5 * 60_000 });
+  const staleSources = (freshness.data ?? []).filter(f => f.status === 'STALE' || f.status === 'stale' || f.status === 'never');
+  const polls = useSlug<{ source: string; last_poll: string | null }>('sales_last_poll_per_source', {}, { refetchInterval: 60_000 });
+  const pubPoll = polls.data?.find(p => p.source === 'touchoffice_malthouse')?.last_poll ?? null;
 
   const pub  = gross.data?.find(r => r.site === 'malthouse');
   const cafe = gross.data?.find(r => r.site === 'sandwich');
@@ -210,17 +218,42 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5">
+      {staleSources.length > 0 && (
+        <div className="rounded border border-red-600 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+          <strong className="text-red-300">⚠ Stale data:</strong>{' '}
+          {staleSources.map(s => {
+            const h = parseFloat(String(s.age_h));
+            const hStr = Number.isFinite(h) ? `${Math.round(h)}h` : '?';
+            return `${s.source} (${hStr}, expected ${s.expected_hours}h)`;
+          }).join(' · ')}
+          {' — '}
+          <span className="text-red-300">numbers on this page may be out-of-date.</span>
+        </div>
+      )}
       {/* ROW 1: Revenue tile + Labour tile */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <SandboxWrapper id="dashboard.revenue" label="Revenue today">
           <Link href={isToday ? '/sales' : `/sales?date=${viewDate}`} className="block">
             <div className="tile group">
-              <div className="label">{isToday ? 'Gross today' : `Gross — ${viewDate}`}</div>
+              <div className="label flex items-center gap-2">
+                <span>{isToday ? 'Gross today' : `Gross — ${viewDate}`}</span>
+                <PollClock lastPoll={pubPoll} label="touchoffice pub" redAtMin={15} greenBelowMin={3} />
+              </div>
               <div className={'kpi-xl mt-1 ' + (gross.isLoading ? '' : grossClass(total))}>
                 {gross.isLoading ? <span className="inline-block w-32 h-10 bg-ink-200 rounded animate-pulse" /> : gbp(total)}
               </div>
+              {(() => {
+                const asOf = pub?.as_of ?? cafe?.as_of;
+                const today = new Date().toISOString().slice(0, 10);
+                if (!asOf || asOf === today) return null;
+                return (
+                  <div className="mt-1 text-[11px] text-red-400 flex items-center gap-1">
+                    ⚠ figures are for {asOf} (no till data for today yet)
+                  </div>
+                );
+              })()}
               <div className="mt-2 flex gap-5 text-sm font-mono">
-                <span><span className="text-ink-500">Pub</span> <strong className="text-ink-900">{gbp(pub?.gross ?? 0)}</strong></span>
+                <span><span className="text-ink-500">Pub (food+bar)</span> <strong className="text-ink-900">{gbp(pub?.gross ?? 0)}</strong></span>
                 <span><span className="text-ink-500">Café</span> <strong className="text-ink-900">{gbp(cafe?.gross ?? 0)}</strong></span>
               </div>
               {/* U185 — 7-day sparkline */}
@@ -239,26 +272,41 @@ export default function DashboardPage() {
             <div className="tile group">
               <div className="label flex items-center gap-2">Labour vs sales <span className="text-ink-600 text-[10px] normal-case tracking-normal">yesterday + rolling avg</span></div>
               <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                {[{w: 1, name: 'Yesterday'}, {w: 7, name: '7 day avg'}, {w: 30, name: '30 day avg'}].map(({w, name}) => {
+                {[{w: 1, name: 'Yesterday'}, {w: 7, name: '7 day'}, {w: 30, name: '30 day'}].map(({w, name}) => {
                   const r = lab(w);
                   const pubR = ratio(r?.pub_labour_avg, r?.pub_sales_avg);
                   const cafR = ratio(r?.cafe_labour_avg, r?.cafe_sales_avg);
                   const combL = (parseFloat(r?.pub_labour_avg ?? '0') + parseFloat(r?.cafe_labour_avg ?? '0'));
                   const combS = (parseFloat(r?.pub_sales_avg ?? '0') + parseFloat(r?.cafe_sales_avg ?? '0'));
                   const combR = combS > 0 ? (combL / combS) * 100 : null;
+                  const totL = (parseFloat(r?.pub_labour_total ?? '0') + parseFloat(r?.cafe_labour_total ?? '0'));
+                  const totS = (parseFloat(r?.pub_sales_total ?? '0')  + parseFloat(r?.cafe_sales_total ?? '0'));
+                  const showTotalsRow = w > 1;
                   return (
                     <div key={w} className="bg-ink-100 rounded p-2">
-                      <div className="text-[10px] text-ink-500 uppercase tracking-wider">{name}</div>
+                      <div className="text-[10px] text-ink-500 uppercase tracking-wider">{name}{r?.days_with_data ? ` (${r.days_with_data}d data)` : ''}</div>
                       <div className={'mt-1 text-base font-mono font-semibold ' + labourClass(combR)}>
                         {combR === null ? '—' : `${combR.toFixed(1)}%`}
                       </div>
+                      {showTotalsRow && (
+                        <div className="mt-1 grid grid-cols-2 gap-1 text-[10px] leading-tight">
+                          <div>
+                            <div className="text-ink-500 uppercase tracking-wider">Total L</div>
+                            <div className="font-mono text-ink-900">{totS > 0 ? gbp(totL, 0) : '—'}</div>
+                          </div>
+                          <div>
+                            <div className="text-ink-500 uppercase tracking-wider">Total S</div>
+                            <div className="font-mono text-ink-900">{totS > 0 ? gbp(totS, 0) : '—'}</div>
+                          </div>
+                        </div>
+                      )}
                       <div className="mt-1 grid grid-cols-2 gap-1 text-[10px] leading-tight">
                         <div>
-                          <div className="text-ink-500 uppercase tracking-wider">Labour</div>
+                          <div className="text-ink-500 uppercase tracking-wider">{showTotalsRow ? 'Avg L/d' : 'Labour'}</div>
                           <div className="font-mono text-ink-900">{combS > 0 ? gbp(combL, 0) : '—'}</div>
                         </div>
                         <div>
-                          <div className="text-ink-500 uppercase tracking-wider">Sales</div>
+                          <div className="text-ink-500 uppercase tracking-wider">{showTotalsRow ? 'Avg S/d' : 'Sales'}</div>
                           <div className="font-mono text-ink-900">{combS > 0 ? gbp(combS, 0) : '—'}</div>
                         </div>
                       </div>
@@ -287,7 +335,7 @@ export default function DashboardPage() {
         <Section title="Week ahead — click a day to drill in">
           {week.isLoading ? <PlaceholderState message="Loading week strip…" /> :
            week.data && week.data.length > 0 ? (
-            <div className="grid grid-cols-7 gap-2">
+            <div className="grid grid-cols-7 gap-2 scroll-snap-x md:overflow-visible">
               {week.data.map((d) => {
                 const dIsToday = d.day === today;
                 const dIsActive = d.day === viewDate;
@@ -521,7 +569,7 @@ export default function DashboardPage() {
           ) : (
             <PlaceholderState
               message="No Trail reports for this date"
-              hint="Trail OIDC scraper (u215) runs 07:30/13:30/19:30. Most recent data shown by fallback if today's reports haven't been completed yet." />
+              hint="Trail checks run at 7:30 am, 1:30 pm, and 7:30 pm. Most recent results shown." />
           )}
         </Section>
       </SandboxWrapper>
@@ -595,7 +643,7 @@ function GuestList({ data, loading, emptyMessage }: {
           {data.map((g, i) => (
             <tr key={i} className="border-t border-ink-200">
               <td className="py-1.5 font-medium text-ink-900">{g.guest_name}</td>
-              <td className="text-ink-700 text-xs">{g.room}</td>
+              <td className="text-ink-700 text-xs font-mono">{formatRoom(g.room)}</td>
               <td className="text-right font-mono text-ink-700">{gbp(g.amount)}</td>
               <td className={'text-right text-xs ' + (g.payment_status === 'paid' ? 'text-good' : g.payment_status === 'unpaid' ? 'text-warn' : 'text-ink-500')}>
                 {g.payment_status ?? '—'}

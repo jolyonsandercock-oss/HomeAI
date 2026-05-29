@@ -17,8 +17,10 @@ export function Sidebar() {
           const active = pathname === href || (href !== '/' && pathname.startsWith(href));
           return (
             <Link key={href} href={href}
+              aria-current={active ? 'page' : undefined}
               className={
                 'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ' +
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ' +
                 (active
                   ? 'bg-ink-100 text-ink-900'
                   : 'text-ink-600 hover:bg-ink-100 hover:text-ink-800')

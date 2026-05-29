@@ -14,8 +14,10 @@ export function BottomTabs() {
           const active = pathname === href || (href !== '/' && pathname.startsWith(href));
           return (
             <Link key={href} href={href}
+              aria-current={active ? 'page' : undefined}
               className={
                 'flex flex-col items-center justify-center gap-1 py-2.5 text-[10px] ' +
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-inset ' +
                 (active ? 'text-amber-500' : 'text-ink-500')
               }>
               <Icon size={20} />
