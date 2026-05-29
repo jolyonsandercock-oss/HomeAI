@@ -14,6 +14,7 @@ and are read at scrape time so they never sit in container env vars.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -45,11 +46,21 @@ async def lifespan(app: FastAPI):
     app.state.http = httpx.AsyncClient(timeout=10.0)
     app.state.pool = None
     if PG_DSN:
-        try:
-            app.state.pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=4)
-            log.info("postgres pool ready")
-        except Exception as e:  # noqa: BLE001
-            log.error("could not open postgres pool: %s — /ingest endpoints will 503", e)
+        # Retry across postgres-not-ready races at boot. Without this, a
+        # cold-start where postgres comes up after playwright leaves the pool
+        # permanently None and /ingest 503s until manual restart.
+        delay = 2.0
+        for attempt in range(1, 11):
+            try:
+                app.state.pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=4)
+                log.info("postgres pool ready (attempt %d)", attempt)
+                break
+            except Exception as e:  # noqa: BLE001
+                log.warning("pool attempt %d failed: %s — retrying in %.0fs", attempt, e, delay)
+                await asyncio.sleep(delay)
+                delay = min(delay * 1.5, 30.0)
+        if app.state.pool is None:
+            log.error("postgres pool never opened after 10 attempts — /ingest will 503")
     try:
         yield
     finally:
@@ -607,3 +618,133 @@ async def ingest_caterbook(
         "departures": len(departs),
         "raw_pdf_path": raw_pdf_path,
     }
+
+
+# ─── U229 Dojo + U230 Trail (stubs — auth pairing required on-site) ─
+
+@app.post("/scrape/dojo")
+async def scrape_dojo(
+    date_from: str | None = Query(None),
+    date_to:   str | None = Query(None),
+) -> dict[str, Any]:
+    """Scrape Dojo merchant dashboard transactions. Stub until on-site pairing.
+    See scrapers/dojo.py for the pairing procedure.
+    """
+    from datetime import date as _date
+    from scrapers import dojo as dojo_scraper
+
+    creds = await vault_read("secret/dojo")
+    df = _date.fromisoformat(date_from) if date_from else None
+    dt = _date.fromisoformat(date_to)   if date_to   else None
+    try:
+        rows = await dojo_scraper.scrape(
+            username=creds["username"], password=creds["password"],
+            date_from=df, date_to=dt,
+        )
+    except RuntimeError as e:
+        raise HTTPException(503, f"dojo scrape failed: {e}")
+    return {"rows": rows, "count": len(rows)}
+
+
+@app.post("/ingest/dojo")
+async def ingest_dojo(
+    date_from: str | None = Query(None),
+    date_to:   str | None = Query(None),
+) -> dict[str, Any]:
+    """Scrape Dojo + upsert into dojo_transactions on (transaction_id)."""
+    payload = await scrape_dojo(date_from=date_from, date_to=date_to)
+    rows = payload["rows"]
+    if not rows:
+        return {"inserted": 0, "skipped": 0, "rows": 0, "note": "stub or empty range"}
+
+    conn = await asyncpg.connect(PG_DSN)
+    try:
+        inserted = skipped = 0
+        async with conn.transaction():
+            for r in rows:
+                rc = await conn.execute(
+                    """
+                    INSERT INTO dojo_transactions
+                        (transaction_id, mid, site, address, location,
+                         transaction_date, transaction_time, transaction_type,
+                         amount, currency, card_type, status, source, realm)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                            'playwright', 'work')
+                    ON CONFLICT (transaction_id) DO NOTHING
+                    """,
+                    r["transaction_id"], r["mid"], r["site"], r["address"],
+                    r.get("location"), r["transaction_date"], r["transaction_time"],
+                    r["transaction_type"], r["amount"], r.get("currency", "GBP"),
+                    r.get("card_type"), r.get("status"),
+                )
+                if rc.endswith("0"):
+                    skipped += 1
+                else:
+                    inserted += 1
+        return {"inserted": inserted, "skipped": skipped, "rows": len(rows)}
+    finally:
+        await conn.close()
+
+
+@app.post("/scrape/trail")
+async def scrape_trail(
+    date_from: str | None = Query(None),
+    date_to:   str | None = Query(None),
+) -> dict[str, Any]:
+    """Scrape Trail food-hygiene reports via OIDC SSO. Stub until on-site pairing."""
+    from datetime import date as _date
+    from scrapers import trail as trail_scraper
+
+    creds = await vault_read("secret/trail")
+    df = _date.fromisoformat(date_from) if date_from else None
+    dt = _date.fromisoformat(date_to)   if date_to   else None
+    try:
+        rows = await trail_scraper.scrape(
+            username=creds["username"], password=creds["password"],
+            date_from=df, date_to=dt,
+        )
+    except RuntimeError as e:
+        raise HTTPException(503, f"trail scrape failed: {e}")
+    return {"rows": rows, "count": len(rows)}
+
+
+@app.post("/ingest/trail")
+async def ingest_trail(
+    date_from: str | None = Query(None),
+    date_to:   str | None = Query(None),
+) -> dict[str, Any]:
+    """Scrape Trail + upsert into trail_reports on (trail_report_id, report_date)."""
+    payload = await scrape_trail(date_from=date_from, date_to=date_to)
+    rows = payload["rows"]
+    if not rows:
+        return {"inserted": 0, "skipped": 0, "rows": 0, "note": "stub or empty range"}
+
+    conn = await asyncpg.connect(PG_DSN)
+    try:
+        inserted = skipped = 0
+        async with conn.transaction():
+            for r in rows:
+                rc = await conn.execute(
+                    """
+                    INSERT INTO trail_reports
+                        (trail_report_id, location, report_name, report_date,
+                         cadence, score_pct, tasks_total, tasks_completed,
+                         tasks_overdue, realm)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'work')
+                    ON CONFLICT (trail_report_id, report_date) DO UPDATE SET
+                        score_pct = EXCLUDED.score_pct,
+                        tasks_completed = EXCLUDED.tasks_completed,
+                        tasks_overdue = EXCLUDED.tasks_overdue
+                    """,
+                    r["trail_report_id"], r["location"], r["report_name"],
+                    r["report_date"], r["cadence"], r.get("score_pct"),
+                    r.get("tasks_total"), r.get("tasks_completed"),
+                    r.get("tasks_overdue"),
+                )
+                if rc.endswith("0"):
+                    skipped += 1
+                else:
+                    inserted += 1
+        return {"inserted": inserted, "skipped": skipped, "rows": len(rows)}
+    finally:
+        await conn.close()
