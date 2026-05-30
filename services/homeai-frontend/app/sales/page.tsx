@@ -12,7 +12,7 @@ import { PlaceholderState } from '@/components/ui/PlaceholderState';
 import { gbp } from '@/lib/format';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
-  LineChart, Line, ComposedChart, Legend, ReferenceLine,
+  LineChart, Line, ComposedChart, Legend, ReferenceLine, LabelList,
 } from 'recharts';
 
 const TABS = ['all', 'pub', 'cafe'] as const;
@@ -26,19 +26,21 @@ interface DailyTotalsRow {
   food: string; bar: string; accom: string; icecream: string; cafe_other: string;
   rolling_7d_avg: string;
 }
-interface IncomeVsLabourRow { day: string; pub_income: string; cafe_income: string; total_income: string; labour_cost: string }
+interface IncomeVsLabourRow { day: string; pub_income: string; cafe_income: string; total_income: string; labour_cost: string; labour_pct: string }
 interface FilterableRow {
   day: string;
-  pub_food: string; pub_bar: string; pub_accom: string;
-  cafe_icecream: string; cafe_other: string;
-  labour_cost: string; cogs_overall: string;
-  sales_excl_accom: string; labour_pct: string | null;
+  pub_food: string; pub_bar: string; pub_accom: string; pub_total: string;
+  pub_labour: string; pub_labour_pct: string | null;
+  cafe_icecream: string; cafe_other: string; cafe_total: string;
+  cafe_labour: string; cafe_labour_pct: string | null;
+  combined_total: string; combined_labour: string; combined_labour_pct: string | null;
 }
+interface FrontendKpiRow { metric: string; value: string }
 interface PollRow { source: string; last_poll: string | null }
 
 const CAT_COLOR: Record<string, string> = {
   Food: '#f59e0b', Bar: '#fb923c', Accommodation: '#a78bfa',
-  'Ice Cream': '#f59e0b', Other: '#737373',
+  'Ice Cream': '#ec4899', Other: '#ec4899',
 };
 
 function num(s: string | number | null | undefined): number {
@@ -47,10 +49,15 @@ function num(s: string | number | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function labourPctColor(pct: number | null): string {
+  if (pct == null) return '';
+  if (pct > 35) return 'text-red-400';
+  if (pct > 25) return 'text-amber-300';
+  return 'text-emerald-400';
+}
+
 export default function SalesPage() {
   const [range, setRange] = useState<DateRange>({ preset: 'today', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
-  // Hermes D4: persist sales tab in URL so navigating away and back preserves
-  // the user's view (was: React-only state → reset on every nav).
   const router = useRouter();
   const sp = useSearchParams();
   const pathname = usePathname();
@@ -63,7 +70,6 @@ export default function SalesPage() {
     const q = params.toString();
     router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
   };
-  // Adopt URL on first mount if tab param changed externally (e.g. deep link).
   useEffect(() => {
     const urlTab = sp.get('tab');
     if (urlTab && TABS.includes(urlTab as Tab) && urlTab !== tab) {
@@ -72,6 +78,13 @@ export default function SalesPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp]);
   const [tableFilter, setTableFilter] = useState<'' | 'high_labour' | 'low_sales' | 'has_data'>('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 10;
+
+  // Reset pagination on filter change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [tableFilter, range]);
 
   const rangeArgs = { start: range.start, end: range.end };
 
@@ -80,15 +93,20 @@ export default function SalesPage() {
   const incLab    = useSlug<IncomeVsLabourRow>('sales_30d_income_vs_labour', {}, { refetchInterval: 5 * 60_000 });
   const table     = useSlug<FilterableRow>('sales_filterable_daily_table', {}, { refetchInterval: 5 * 60_000 });
   const polls     = useSlug<PollRow>('sales_last_poll_per_source', {}, { refetchInterval: 60_000 });
+  const kpiSlug   = useSlug<FrontendKpiRow>('sales_frontend_kpis', rangeArgs, { refetchInterval: 60_000 });
 
   const pollFor = (k: string) => polls.data?.find(p => p.source === k)?.last_poll ?? null;
 
-  // KPI totals over selected range
+  // KPI totals — prefer pre-computed KPIs, fall back to category aggregation
+  const kpiData = kpiSlug.data ?? [];
+  const kpiMap: Record<string, number> = {};
+  kpiData.forEach(r => { kpiMap[r.metric] = num(r.value); });
+
   const catRows = cat.data ?? [];
-  const pubTotal  = catRows.filter(r => r.site === 'malthouse' && r.category !== 'Accommodation').reduce((a, r) => a + num(r.total), 0);
-  const pubAccom  = catRows.filter(r => r.site === 'malthouse' && r.category === 'Accommodation').reduce((a, r) => a + num(r.total), 0);
-  const cafeTotal = catRows.filter(r => r.site === 'sandwich').reduce((a, r) => a + num(r.total), 0);
-  const grandTotal = pubTotal + cafeTotal;
+  const pubTotal  = kpiMap['pub_food_bar'] || catRows.filter(r => r.site === 'malthouse' && r.category !== 'Accommodation').reduce((a, r) => a + num(r.total), 0);
+  const pubAccom  = kpiMap['accom'] || catRows.filter(r => r.site === 'malthouse' && r.category === 'Accommodation').reduce((a, r) => a + num(r.total), 0);
+  const cafeTotal = kpiMap['cafe_all'] || catRows.filter(r => r.site === 'sandwich').reduce((a, r) => a + num(r.total), 0);
+  const grandTotal = kpiMap['total_excl_accom'] || (pubTotal + cafeTotal);
 
   // Categorized bar chart data, filtered by tab
   const catChart = useMemo(() => {
@@ -100,11 +118,16 @@ export default function SalesPage() {
     }));
   }, [catRows, tab]);
 
-  // Compute 7-day rolling average across selected sites — as a target line on the bar chart
+  // Compute percentage breakdown for bar chart
+  const catPct = useMemo(() => {
+    const total = catChart.reduce((a, c) => a + c.total, 0);
+    return catChart.map(d => ({ ...d, pct: total > 0 ? (d.total / total) * 100 : 0 }));
+  }, [catChart]);
+
+  // Compute 7-day rolling average across selected sites
   const target7d = useMemo(() => {
     const visible = (daily30.data ?? []).filter(r => tab === 'all' || (tab === 'pub' ? r.site === 'malthouse' : r.site === 'sandwich'));
     if (visible.length === 0) return null;
-    // Use the last row's rolling_7d_avg (already computed per-site by SQL)
     const bySite: Record<string, number> = {};
     visible.forEach(r => { bySite[r.site] = num(r.rolling_7d_avg); });
     return Object.values(bySite).reduce((a, b) => a + b, 0);
@@ -113,27 +136,56 @@ export default function SalesPage() {
   // Filterable table rows
   const tableRows = useMemo(() => {
     let rows = table.data ?? [];
-    if (tableFilter === 'has_data') rows = rows.filter(r => num(r.sales_excl_accom) > 0);
-    if (tableFilter === 'low_sales') rows = rows.filter(r => num(r.sales_excl_accom) < 1000 && num(r.sales_excl_accom) > 0);
-    if (tableFilter === 'high_labour') rows = rows.filter(r => r.labour_pct != null && num(r.labour_pct) > 30);
+    if (tableFilter === 'has_data') rows = rows.filter(r => num(r.combined_total) > 0);
+    if (tableFilter === 'low_sales') rows = rows.filter(r => num(r.combined_total) < 1000 && num(r.combined_total) > 0);
+    if (tableFilter === 'high_labour') {
+      rows = rows.filter(r => {
+        const p = num(r.combined_labour_pct);
+        const pubP = num(r.pub_labour_pct);
+        const cafeP = num(r.cafe_labour_pct);
+        return p > 30 || pubP > 30 || cafeP > 30;
+      });
+    }
     return rows;
   }, [table.data, tableFilter]);
 
-  // Aggregate table footer
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(tableRows.length / PAGE_SIZE));
+  // Clamp current page if rows change (e.g. filter reduces count)
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedRows = tableRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const startItem = tableRows.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const endItem = Math.min(safePage * PAGE_SIZE, tableRows.length);
+
+  const pagination = (() => {
+    const pages: (number | 'ellipsis')[] = [];
+    const maxVisible = 5;
+    let startP = Math.max(1, safePage - Math.floor(maxVisible / 2));
+    let endP = Math.min(totalPages, startP + maxVisible - 1);
+    if (endP - startP + 1 < maxVisible) startP = Math.max(1, endP - maxVisible + 1);
+    if (startP > 1) { pages.push(1); if (startP > 2) pages.push('ellipsis'); }
+    for (let i = startP; i <= endP; i++) pages.push(i);
+    if (endP < totalPages) { if (endP < totalPages - 1) pages.push('ellipsis'); pages.push(totalPages); }
+    return pages;
+  })();
+
+  // Aggregate table footer (over all filtered rows, not just current page)
   const footer = useMemo(() => {
     const rows = tableRows;
     const n = rows.length;
     const sum = (k: keyof FilterableRow) => rows.reduce((a, r) => a + num(r[k] as string), 0);
-    const totalSales = sum('sales_excl_accom');
-    const totalLabour = sum('labour_cost');
-    const totalCogs = sum('cogs_overall');
+    const pubFood = sum('pub_food'); const pubBar = sum('pub_bar'); const pubAccom = sum('pub_accom');
+    const pubTot = sum('pub_total'); const pubLab = sum('pub_labour');
+    const cafeIce = sum('cafe_icecream'); const cafeOth = sum('cafe_other'); const cafeTot = sum('cafe_total');
+    const cafeLab = sum('cafe_labour');
+    const combTot = sum('combined_total'); const combLab = sum('combined_labour');
     return {
       n,
-      sales: totalSales, labour: totalLabour, cogs: totalCogs,
-      labourPct: totalSales > 0 ? (totalLabour / totalSales) * 100 : null,
-      cogsPct:   totalSales > 0 ? (totalCogs   / totalSales) * 100 : null,
-      avgSales:  n > 0 ? totalSales / n : 0,
-      avgLabour: n > 0 ? totalLabour / n : 0,
+      pubFood, pubBar, pubAccom, pubTot, pubLab, pubLabPct: pubTot > 0 ? (pubLab / pubTot) * 100 : null,
+      cafeIce, cafeOth, cafeTot, cafeLab, cafeLabPct: cafeTot > 0 ? (cafeLab / cafeTot) * 100 : null,
+      combTot, combLab, combLabPct: combTot > 0 ? (combLab / combTot) * 100 : null,
+      avgCombTot: n > 0 ? combTot / n : 0,
+      avgCombLab: n > 0 ? combLab / n : 0,
     };
   }, [tableRows]);
 
@@ -160,7 +212,7 @@ export default function SalesPage() {
         <Section title="KPIs (selected range, excluding accommodation from pub)">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <KPICard label="Total (pub + cafe, excl accom)" size="xl"
-              value={cat.isLoading ? null : gbp(tab === 'all' ? (pubTotal + cafeTotal) : tab === 'pub' ? pubTotal : cafeTotal)} />
+              value={cat.isLoading && kpiSlug.isLoading ? null : gbp(tab === 'all' ? grandTotal : tab === 'pub' ? pubTotal : cafeTotal)} />
             <KPICard label="Pub (food + bar)" value={gbp(pubTotal)} />
             <KPICard label="Café (all)" value={gbp(cafeTotal)} />
             <KPICard label="Accommodation (pub till)" value={gbp(pubAccom)} />
@@ -176,31 +228,42 @@ export default function SalesPage() {
               message="No sales recorded for this period yet"
               hint="The category breakdown appears once tills ring through for the selected range and site." />
           ) : (
-            <figure
-              className="tile h-[340px]"
-              aria-labelledby="sales-cat-caption"
-              aria-describedby="sales-filterable-table"
-              role="figure"
-            >
-              <figcaption id="sales-cat-caption" className="sr-only">
-                Bar chart of sales totals by category for the selected date range.
-                The same data is available in the filterable daily table below for screen-reader users.
-              </figcaption>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={catChart} layout="vertical" margin={{ top: 8, right: 24, left: 80, bottom: 8 }}>
-                  <CartesianGrid stroke="#2a2a2a" horizontal={false} />
-                  <XAxis type="number" stroke="#737373" fontSize={11} tickFormatter={(v) => `£${v}`} />
-                  <YAxis type="category" dataKey="label" stroke="#a3a3a3" fontSize={11} width={150} />
-                  <Tooltip contentStyle={{ background: '#171717', border: '1px solid #2a2a2a' }} formatter={(v: number) => gbp(v)} />
-                  <Bar dataKey="total">
-                    {catChart.map((d, i) => <Cell key={i} fill={CAT_COLOR[d.category] ?? '#f59e0b'} />)}
-                  </Bar>
-                  {target7d != null && (
-                    <ReferenceLine x={target7d} stroke="#22d3ee" strokeDasharray="4 4" label={{ value: `7d avg target £${Math.round(target7d).toLocaleString()}`, fill: '#22d3ee', fontSize: 10, position: 'insideTopRight' }} />
-                  )}
-                </BarChart>
-              </ResponsiveContainer>
-            </figure>
+            <div>
+              <figure
+                className="tile h-[340px]"
+                aria-labelledby="sales-cat-caption"
+                aria-describedby="sales-filterable-table"
+                role="figure"
+              >
+                <figcaption id="sales-cat-caption" className="sr-only">
+                  Bar chart of sales totals by category for the selected date range.
+                  The same data is available in the filterable daily table below for screen-reader users.
+                </figcaption>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={catChart} layout="vertical" margin={{ top: 8, right: 80, left: 80, bottom: 8 }}>
+                    <CartesianGrid stroke="#2a2a2a" horizontal={false} />
+                    <XAxis type="number" stroke="#737373" fontSize={11} tickFormatter={(v) => `£${v}`} />
+                    <YAxis type="category" dataKey="label" stroke="#a3a3a3" fontSize={11} width={150} />
+                    <Tooltip contentStyle={{ background: '#171717', border: '1px solid #2a2a2a' }} formatter={(v: number) => gbp(v)} />
+                    <Bar dataKey="total">
+                      {catChart.map((d, i) => <Cell key={i} fill={CAT_COLOR[d.category] ?? '#f59e0b'} />)}
+                      <LabelList dataKey="total" position="right" formatter={(v: number) => gbp(v)} style={{ fill: '#a3a3a3', fontSize: 10 }} />
+                    </Bar>
+                    {target7d != null && (
+                      <ReferenceLine x={target7d} stroke="#22d3ee" strokeDasharray="4 4" label={{ value: `7d avg target £${Math.round(target7d).toLocaleString()}`, fill: '#22d3ee', fontSize: 10, position: 'insideTopRight' }} />
+                    )}
+                  </BarChart>
+                </ResponsiveContainer>
+              </figure>
+              {/* Percentage breakdown row */}
+              {catPct.length > 0 && (
+                <div className="flex flex-wrap gap-x-6 gap-y-1 mt-2 px-4 text-xs text-ink-400">
+                  {catPct.map(d => (
+                    <span key={d.label}>{d.label}: <span className="text-ink-300">{d.pct.toFixed(1)}%</span></span>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </Section>
       </SandboxWrapper>
@@ -221,18 +284,22 @@ export default function SalesPage() {
             >
               <figcaption id="sales-incomelabour-caption" className="sr-only">
                 Composed chart of daily total income versus labour cost over the last 30 days,
-                with a 7-day rolling average target line. Data also available in the filterable daily table below.
+                with a labour percentage line on the right axis and a 30% reference line.
+                Data also available in the filterable daily table below.
               </figcaption>
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={incLab.data ?? []} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
                   <CartesianGrid stroke="#2a2a2a" vertical={false} />
                   <XAxis dataKey="day" stroke="#737373" fontSize={10} tickFormatter={(d) => d.slice(5)} />
-                  <YAxis stroke="#737373" fontSize={11} tickFormatter={(v) => `£${v}`} />
-                  <Tooltip contentStyle={{ background: '#171717', border: '1px solid #2a2a2a' }} formatter={(v: number) => gbp(v)} />
+                  <YAxis yAxisId="left" stroke="#737373" fontSize={11} tickFormatter={(v) => `£${v}`} />
+                  <YAxis yAxisId="right" orientation="right" stroke="#ef4444" fontSize={10} domain={[10, 'auto']} tickFormatter={(v) => `${v}%`} />
+                  <Tooltip contentStyle={{ background: '#171717', border: '1px solid #2a2a2a' }} formatter={(v: number, name: string) => name === 'labour_pct' ? `${v.toFixed(1)}%` : gbp(v)} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="pub_income"  stackId="inc" fill="#f59e0b" name="Pub income" />
-                  <Bar dataKey="cafe_income" stackId="inc" fill="#fbbf24" name="Café income" />
-                  <Line type="monotone" dataKey="labour_cost" stroke="#22d3ee" strokeWidth={2} dot={false} name="Labour cost" />
+                  <Bar yAxisId="left" dataKey="pub_income"  stackId="inc" fill="#f59e0b" name="Pub income" />
+                  <Bar yAxisId="left" dataKey="cafe_income" stackId="inc" fill="#ec4899" name="Café income" />
+                  <Line yAxisId="left" type="monotone" dataKey="labour_cost" stroke="#22d3ee" strokeWidth={2} dot={false} name="Labour cost" />
+                  <Line yAxisId="right" type="monotone" dataKey="labour_pct" stroke="#ef4444" strokeWidth={2} strokeDasharray="6 3" dot={false} name="Labour %" />
+                  <ReferenceLine yAxisId="right" y={30} stroke="#22c55e" strokeWidth={1.5} strokeDasharray="4 4" label={{ value: '30% target', fill: '#22c55e', fontSize: 10, position: 'insideTopRight' }} />
                 </ComposedChart>
               </ResponsiveContainer>
             </figure>
@@ -256,63 +323,131 @@ export default function SalesPage() {
           </div>
           <div className="tile overflow-x-auto" id="sales-filterable-table">
             <table className="w-full text-xs font-mono"
-              aria-label="Daily sales, wage and COGS table — accessible alternative to the charts above">
-              <thead className="text-ink-500 uppercase tracking-wider text-xs">
+              aria-label="Daily sales, wage and labour percentage table — Pub/Café split with combined totals">
+              <thead className="text-ink-500 uppercase tracking-wider">
+                {/* Row 1: Group headers */}
+                <tr className="border-b border-ink-200">
+                  <th className="px-2 py-1 text-left" rowSpan={2}>Day</th>
+                  <th className="px-2 py-1 text-center border-x border-ink-200" colSpan={4}>Pub</th>
+                  <th className="px-2 py-1 text-center" rowSpan={2}>Pub<br/>Labour %</th>
+                  <th className="px-2 py-1 text-center border-x border-ink-200" colSpan={3} style={{ color: '#ec4899' }}>Café</th>
+                  <th className="px-2 py-1 text-center" rowSpan={2} style={{ color: '#ec4899' }}>Café<br/>Labour %</th>
+                  <th className="px-2 py-1 text-center border-l border-ink-200" colSpan={3}>Combined</th>
+                </tr>
+                {/* Row 2: Individual column headers */}
                 <tr>
-                  <th className="px-2 py-1 text-left">Day</th>
-                  <th className="px-2 py-1 text-right">Pub food</th>
-                  <th className="px-2 py-1 text-right">Pub bar</th>
-                  <th className="px-2 py-1 text-right">Pub accom</th>
-                  <th className="px-2 py-1 text-right">Café ice cream</th>
-                  <th className="px-2 py-1 text-right">Café other</th>
-                  <th className="px-2 py-1 text-right">Sales (excl accom)</th>
-                  <th className="px-2 py-1 text-right">Labour £</th>
+                  <th className="px-2 py-1 text-right">Food</th>
+                  <th className="px-2 py-1 text-right">Bar</th>
+                  <th className="px-2 py-1 text-right">Accom</th>
+                  <th className="px-2 py-1 text-right border-r border-ink-200">Total</th>
+                  <th className="px-2 py-1 text-right" style={{ color: '#ec4899' }}>Ice Cream</th>
+                  <th className="px-2 py-1 text-right" style={{ color: '#ec4899' }}>Other</th>
+                  <th className="px-2 py-1 text-right border-r border-ink-200" style={{ color: '#ec4899' }}>Total</th>
+                  <th className="px-2 py-1 text-right border-l border-ink-200">Total</th>
+                  <th className="px-2 py-1 text-right">Labour</th>
                   <th className="px-2 py-1 text-right">Labour %</th>
-                  <th className="px-2 py-1 text-right">COGS £</th>
                 </tr>
               </thead>
               <tbody>
-                {tableRows.map((r) => (
-                  <tr key={r.day} className="border-t border-ink-200">
+                {paginatedRows.map((r) => (
+                  <tr key={r.day} className="border-t border-ink-200 hover:bg-ink-100/50">
                     <td className="px-2 py-1">{r.day}</td>
                     <td className="px-2 py-1 text-right">{gbp(num(r.pub_food))}</td>
                     <td className="px-2 py-1 text-right">{gbp(num(r.pub_bar))}</td>
                     <td className="px-2 py-1 text-right">{gbp(num(r.pub_accom))}</td>
-                    <td className="px-2 py-1 text-right">{gbp(num(r.cafe_icecream))}</td>
-                    <td className="px-2 py-1 text-right">{gbp(num(r.cafe_other))}</td>
-                    <td className="px-2 py-1 text-right font-semibold">{gbp(num(r.sales_excl_accom))}</td>
-                    <td className="px-2 py-1 text-right">{gbp(num(r.labour_cost))}</td>
-                    <td className={'px-2 py-1 text-right ' + (r.labour_pct != null && num(r.labour_pct) > 35 ? 'text-red-400' : r.labour_pct != null && num(r.labour_pct) > 25 ? 'text-amber-300' : '')}>{r.labour_pct ?? '—'}{r.labour_pct != null ? '%' : ''}</td>
-                    <td className="px-2 py-1 text-right">{gbp(num(r.cogs_overall))}</td>
+                    <td className="px-2 py-1 text-right font-semibold">{gbp(num(r.pub_total))}</td>
+                    <td className={'px-2 py-1 text-right font-semibold ' + labourPctColor(r.pub_labour_pct != null ? num(r.pub_labour_pct) : null)}>
+                      {r.pub_labour_pct != null ? `${num(r.pub_labour_pct).toFixed(1)}%` : '—'}
+                    </td>
+                    <td className="px-2 py-1 text-right" style={{ color: '#ec4899' }}>{gbp(num(r.cafe_icecream))}</td>
+                    <td className="px-2 py-1 text-right" style={{ color: '#ec4899' }}>{gbp(num(r.cafe_other))}</td>
+                    <td className="px-2 py-1 text-right font-semibold" style={{ color: '#ec4899' }}>{gbp(num(r.cafe_total))}</td>
+                    <td className={'px-2 py-1 text-right font-semibold ' + labourPctColor(r.cafe_labour_pct != null ? num(r.cafe_labour_pct) : null)} style={{ color: r.cafe_labour_pct != null ? undefined : '#ec4899' }}>
+                      {r.cafe_labour_pct != null ? `${num(r.cafe_labour_pct).toFixed(1)}%` : '—'}
+                    </td>
+                    <td className="px-2 py-1 text-right font-semibold">{gbp(num(r.combined_total))}</td>
+                    <td className="px-2 py-1 text-right">{gbp(num(r.combined_labour))}</td>
+                    <td className={'px-2 py-1 text-right font-semibold ' + labourPctColor(r.combined_labour_pct != null ? num(r.combined_labour_pct) : null)}>
+                      {r.combined_labour_pct != null ? `${num(r.combined_labour_pct).toFixed(1)}%` : '—'}
+                    </td>
                   </tr>
                 ))}
                 {tableRows.length === 0 && (
-                  <tr><td colSpan={10} className="px-2 py-4 text-center text-ink-500">No rows match the filter</td></tr>
+                  <tr><td colSpan={13} className="px-2 py-8 text-center text-ink-500">No rows match the filter</td></tr>
                 )}
               </tbody>
               <tfoot className="border-t-2 border-ink-300 text-ink-700">
                 <tr>
                   <td className="px-2 py-1 font-semibold">Total ({footer.n}d)</td>
-                  <td className="px-2 py-1 text-right" colSpan={5}></td>
-                  <td className="px-2 py-1 text-right font-semibold">{gbp(footer.sales)}</td>
-                  <td className="px-2 py-1 text-right font-semibold">{gbp(footer.labour)}</td>
-                  <td className="px-2 py-1 text-right font-semibold">{footer.labourPct?.toFixed(1) ?? '—'}%</td>
-                  <td className="px-2 py-1 text-right font-semibold">{gbp(footer.cogs)}</td>
+                  <td className="px-2 py-1 text-right">{gbp(footer.pubFood)}</td>
+                  <td className="px-2 py-1 text-right">{gbp(footer.pubBar)}</td>
+                  <td className="px-2 py-1 text-right">{gbp(footer.pubAccom)}</td>
+                  <td className="px-2 py-1 text-right font-semibold">{gbp(footer.pubTot)}</td>
+                  <td className={'px-2 py-1 text-right font-semibold ' + labourPctColor(footer.pubLabPct)}>{footer.pubLabPct?.toFixed(1) ?? '—'}%</td>
+                  <td className="px-2 py-1 text-right" style={{ color: '#ec4899' }}>{gbp(footer.cafeIce)}</td>
+                  <td className="px-2 py-1 text-right" style={{ color: '#ec4899' }}>{gbp(footer.cafeOth)}</td>
+                  <td className="px-2 py-1 text-right font-semibold" style={{ color: '#ec4899' }}>{gbp(footer.cafeTot)}</td>
+                  <td className={'px-2 py-1 text-right font-semibold ' + labourPctColor(footer.cafeLabPct)}>{footer.cafeLabPct?.toFixed(1) ?? '—'}%</td>
+                  <td className="px-2 py-1 text-right font-semibold">{gbp(footer.combTot)}</td>
+                  <td className="px-2 py-1 text-right">{gbp(footer.combLab)}</td>
+                  <td className={'px-2 py-1 text-right font-semibold ' + labourPctColor(footer.combLabPct)}>{footer.combLabPct?.toFixed(1) ?? '—'}%</td>
                 </tr>
                 <tr>
                   <td className="px-2 py-1">Average / day</td>
-                  <td className="px-2 py-1 text-right" colSpan={5}></td>
-                  <td className="px-2 py-1 text-right">{gbp(footer.avgSales)}</td>
-                  <td className="px-2 py-1 text-right">{gbp(footer.avgLabour)}</td>
-                  <td className="px-2 py-1 text-right">{footer.labourPct?.toFixed(1) ?? '—'}%</td>
-                  <td className="px-2 py-1 text-right">COGS {footer.cogsPct?.toFixed(1) ?? '—'}% of sales</td>
+                  <td className="px-2 py-1 text-right">{gbp(footer.n > 0 ? footer.pubFood / footer.n : 0)}</td>
+                  <td className="px-2 py-1 text-right">{gbp(footer.n > 0 ? footer.pubBar / footer.n : 0)}</td>
+                  <td className="px-2 py-1 text-right">{gbp(footer.n > 0 ? footer.pubAccom / footer.n : 0)}</td>
+                  <td className="px-2 py-1 text-right">{gbp(footer.n > 0 ? footer.pubTot / footer.n : 0)}</td>
+                  <td className="px-2 py-1 text-right"></td>
+                  <td className="px-2 py-1 text-right" style={{ color: '#ec4899' }}>{gbp(footer.n > 0 ? footer.cafeIce / footer.n : 0)}</td>
+                  <td className="px-2 py-1 text-right" style={{ color: '#ec4899' }}>{gbp(footer.n > 0 ? footer.cafeOth / footer.n : 0)}</td>
+                  <td className="px-2 py-1 text-right" style={{ color: '#ec4899' }}>{gbp(footer.n > 0 ? footer.cafeTot / footer.n : 0)}</td>
+                  <td className="px-2 py-1 text-right"></td>
+                  <td className="px-2 py-1 text-right">{gbp(footer.avgCombTot)}</td>
+                  <td className="px-2 py-1 text-right">{gbp(footer.avgCombLab)}</td>
+                  <td className="px-2 py-1 text-right"></td>
                 </tr>
               </tfoot>
             </table>
           </div>
+          {/* Pagination controls */}
+          {tableRows.length > 0 && (
+            <div className="flex items-center justify-between mt-3 text-xs">
+              <span className="text-ink-500">
+                Showing {startItem}–{endItem} of {tableRows.length} days
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={safePage <= 1}
+                  className="px-2 py-1 rounded border border-ink-200 text-ink-600 hover:bg-ink-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                >Prev</button>
+                {pagination.map((p, i) =>
+                  p === 'ellipsis' ? (
+                    <span key={`e${i}`} className="px-1 text-ink-500">…</span>
+                  ) : (
+                    <button
+                      key={p}
+                      onClick={() => setCurrentPage(p)}
+                      className={'px-2 py-1 rounded border ' + (p === safePage ? 'bg-amber-500 border-amber-500 text-ink-0' : 'border-ink-200 text-ink-600 hover:bg-ink-100')}
+                    >{p}</button>
+                  )
+                )}
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={safePage >= totalPages}
+                  className="px-2 py-1 rounded border border-ink-200 text-ink-600 hover:bg-ink-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                >Next</button>
+              </div>
+            </div>
+          )}
+          {tableRows.length === 0 && !table.isLoading && (
+            <div className="mt-3 text-xs text-ink-500 text-center">Showing 0–0 of 0 days</div>
+          )}
           <p className="mt-2 text-sm text-ink-500">
-            COGS is overall (xero contacts not yet site-categorised). Pub COGS vs Café COGS will split once vendor-to-site mapping is wired.
-            Labour % is labour ÷ sales (excl accom). Accommodation revenue lives in caterbook and is intentionally excluded from sales totals to avoid double-counting (see /sales accom column for the till-recorded number).
+            Labour % = labour cost ÷ sales for that category. COGS is overall (xero contacts not yet site-categorised).
+            Pub COGS vs Café COGS will split once vendor-to-site mapping is wired.
+            Accommodation revenue lives in caterbook and is intentionally excluded from sales totals to avoid double-counting.
           </p>
         </Section>
       </SandboxWrapper>
