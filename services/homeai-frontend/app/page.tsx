@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { KPICard } from '@/components/ui/KPICard';
-import { SparkLine } from '@/components/ui/SparkLine';
 import { WagePctBadge } from '@/components/ui/WagePctBadge';
 import { Section } from '@/components/ui/Section';
 import { PlaceholderState } from '@/components/ui/PlaceholderState';
@@ -172,10 +171,6 @@ export default function DashboardPage() {
   const extras   = useSlug<WeekDayExtras>('dashboard_week_strip_extras', {}, { refetchInterval: 5 * 60_000 });
   // U192 — anomaly pulse: rows with { day, daily, dow_mean, dow_sd, z_score, anomalous }
   const anomalies = useSlug<{ day: string; z_score: string | null; anomalous: boolean }>('week_strip_anomalies_7d', {}, { refetchInterval: 5 * 60_000 });
-  // U185 — sparklines: 7-day arrays { values: number[] }
-  const revSpark    = useSlug<{ values: number[] }>('revenue_spark_7d',    {}, { refetchInterval: 10 * 60_000 });
-  const labSpark    = useSlug<{ values: number[] }>('labour_pct_spark_7d', {}, { refetchInterval: 10 * 60_000 });
-  const occSpark    = useSlug<{ values: number[] }>('occupancy_spark_7d',  {}, { refetchInterval: 10 * 60_000 });
   // U211 — reviews 30d
   const reviewsSpk  = useSlug<{ rating_spark: number[]; count_spark: string[]; total_reviews_30d: number; avg_rating_30d: string | null }>('reviews_rating_spark_30d', {}, { refetchInterval: 30 * 60_000 });
   // U212 — email tasks (OAuth confirmed healthy)
@@ -294,12 +289,6 @@ export default function DashboardPage() {
                 <span><span className="text-ink-500">Pub (food+bar)</span> <strong className="text-ink-900">{gbp(pub?.gross ?? 0)}</strong></span>
                 <span><span className="text-ink-500">Café</span> <strong className="text-ink-900">{gbp(cafe?.gross ?? 0)}</strong></span>
               </div>
-              {/* U185 — 7-day sparkline */}
-              {revSpark.data?.[0]?.values && revSpark.data[0].values.length > 1 && (
-                <div className="mt-2 h-6 opacity-60">
-                  <SparkLine values={revSpark.data[0].values.map(v => Number(v) || 0)} />
-                </div>
-              )}
               <div className="mt-2 text-sm text-amber-500 group-hover:text-amber-400">→ Click for Sales detail</div>
             </div>
           </Link>
@@ -356,12 +345,6 @@ export default function DashboardPage() {
                   );
                 })}
               </div>
-              {/* U185 — 7-day labour% sparkline */}
-              {labSpark.data?.[0]?.values && labSpark.data[0].values.length > 1 && (
-                <div className="mt-2 h-6 opacity-60">
-                  <SparkLine values={labSpark.data[0].values.map(v => Number(v) || 0)} colour="#fbbf24" />
-                </div>
-              )}
               <div className="mt-2 text-sm text-amber-500 group-hover:text-amber-400">→ Click for Staff detail</div>
             </div>
           </Link>
@@ -531,7 +514,7 @@ export default function DashboardPage() {
             <KPICard label="% occupied"
               value={roomsWeek?.pct_occupied != null ? `${roomsWeek.pct_occupied}%` : '—'}
               loading={roomsWk.isLoading}
-              spark={occSpark.data?.[0]?.values?.map(v => Number(v) || 0)} />
+              />
             <KPICard label="Avg stay"
               value={roomsWeek?.avg_stay_nights != null ? `${parseFloat(String(roomsWeek.avg_stay_nights)).toFixed(1)} nights` : '—'}
               loading={roomsWk.isLoading} />
@@ -686,9 +669,7 @@ export default function DashboardPage() {
                       <div className="kpi">{reviewsSpk.data[0].total_reviews_30d}</div>
                     </div>
                   </div>
-                  <div className="mt-2 h-10 opacity-60">
-                    <SparkLine values={(reviewsSpk.data[0].rating_spark || []).map(v => Number(v) || 0)} />
-                  </div>
+
                   <div className="mt-2 text-sm text-amber-500 group-hover:text-amber-400">→ Click for full reviews</div>
                 </div>
               </Link>

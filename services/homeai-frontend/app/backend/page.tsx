@@ -6,6 +6,8 @@ import { PlaceholderState } from '@/components/ui/PlaceholderState';
 import { SandboxWrapper } from '@/components/sandbox/SandboxWrapper';
 import { useSlug } from '@/lib/hooks';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { QuotaStatusTile } from '@/components/admin/QuotaStatusTile';
+import { ExpenseRollup } from '@/components/admin/ExpenseRollup';
 
 interface Cache { service: string; model_used: string; calls: number; prompt_tokens_total: number; cache_writes: number; cache_reads: number; pct_input_cached: string | null }
 interface AIUsage {
@@ -41,6 +43,14 @@ export default function BackendPage() {
           </div>
         </div>
       )}
+
+      <SandboxWrapper id="backend.quota" label="AI quota">
+        <QuotaStatusTile />
+      </SandboxWrapper>
+
+      <SandboxWrapper id="backend.expense-rollup" label="Expense rollup">
+        <ExpenseRollup />
+      </SandboxWrapper>
 
       <SandboxWrapper id="backend.freshness" label="Import freshness">
         <Section title="Upstream import freshness">

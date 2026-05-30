@@ -4,9 +4,7 @@ import Link from 'next/link';
 import { Section } from '@/components/ui/Section';
 import { PlaceholderState } from '@/components/ui/PlaceholderState';
 import { SandboxWrapper } from '@/components/sandbox/SandboxWrapper';
-import { ExpenseRollup } from '@/components/admin/ExpenseRollup';
 import { OrphanTile } from '@/components/admin/OrphanTile';
-import { QuotaStatusTile } from '@/components/admin/QuotaStatusTile';
 import { useSlug } from '@/lib/hooks';
 import { gbp } from '@/lib/format';
 
@@ -26,16 +24,8 @@ export default function AdminPage() {
 
   return (
     <div className="space-y-6">
-      <SandboxWrapper id="admin.quota" label="AI quota">
-        <QuotaStatusTile />
-      </SandboxWrapper>
-
       <SandboxWrapper id="admin.orphans" label="Xero orphans">
         <OrphanTile />
-      </SandboxWrapper>
-
-      <SandboxWrapper id="admin.expense-rollup" label="Expense rollup">
-        <ExpenseRollup />
       </SandboxWrapper>
 
       <SandboxWrapper id="admin.invoices" label="Invoices">
