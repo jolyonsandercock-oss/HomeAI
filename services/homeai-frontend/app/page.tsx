@@ -175,6 +175,7 @@ export default function DashboardPage() {
   const reviewsSpk  = useSlug<{ rating_spark: number[]; count_spark: string[]; total_reviews_30d: number; avg_rating_30d: string | null }>('reviews_rating_spark_30d', {}, { refetchInterval: 30 * 60_000 });
   // U212 — email tasks (OAuth confirmed healthy)
   const emailKpis   = useSlug<{ tasks_open: string; instructions_pending: string; last_instruction_at: string | null }>('work_email_kpis', {}, { refetchInterval: 5 * 60_000 });
+  const priorityEmail = useSlug<any>('dashboard_email_priority', {}, { refetchInterval: 5 * 60_000 });
   const tides    = useSlug<TideRow>('dashboard_tides_next_7d', {}, { refetchInterval: 60 * 60_000 });
   const specials = useSlug<SpecialWeek>('dashboard_specials_next_7d', {}, { refetchInterval: 5 * 60_000 });
   const accom    = useSlug<AccomToday>('frontend_accommodation_today', dateArg, { refetchInterval: 60_000 });
@@ -599,19 +600,56 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <SandboxWrapper id="dashboard.email" label="Email tasks">
           <Section title="Email tasks">
-            <Link
-              href="/comms"
-              className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded"
-            >
-              <div className="tile group">
-                <div className="label">Open email tasks</div>
-                <div className="kpi-xl mt-1">{emailKpis.data?.[0]?.tasks_open ?? '—'}</div>
-                <div className="mt-1 text-sm text-ink-500">
-                  {emailKpis.data?.[0]?.instructions_pending ?? 0} bot instructions pending
+            <div className="tile">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <div className="label">Total flagged</div>
+                  <div className="kpi-xl mt-1">{emailKpis.data?.[0]?.tasks_open ?? '—'}</div>
                 </div>
-                <div className="mt-2 text-sm text-amber-500 group-hover:text-amber-400">→ Click for /comms</div>
+                <div className="text-right text-xs text-ink-500">
+                  <div>{emailKpis.data?.[0]?.instructions_pending ?? 0} bot pending</div>
+                  <div className="font-semibold text-warn">{priorityEmail.data?.length ?? 0} need action</div>
+                </div>
               </div>
-            </Link>
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                {(() => {
+                  const byKw: Record<string, { items: any[]; maxSev: number }> = {};
+                  for (const e of priorityEmail.data ?? []) {
+                    const kw = e.matched_keyword || 'other';
+                    if (!byKw[kw]) byKw[kw] = { items: [], maxSev: 0 };
+                    byKw[kw].items.push(e);
+                    if (e.severity > byKw[kw].maxSev) byKw[kw].maxSev = e.severity;
+                  }
+                  const kwOrder = ['urgent', 'complaint', 'overdue', 'dissatisfied', 'salary', 'credit control', 'final reminder'];
+                  const sorted = Object.entries(byKw).sort(([a], [b]) => {
+                    const ia = kwOrder.indexOf(a), ib = kwOrder.indexOf(b);
+                    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+                  });
+                  return sorted.map(([kw, info]) => (
+                    <div key={kw} className={'rounded px-2 py-1.5 border ' + (
+                      info.maxSev >= 5 ? 'bg-red-900/20 border-red-800/40' :
+                      info.maxSev >= 4 ? 'bg-orange-900/20 border-orange-800/40' :
+                      'bg-amber-900/15 border-amber-800/30'
+                    )}>
+                      <div className={'text-2xs uppercase tracking-wider font-medium ' + (
+                        info.maxSev >= 5 ? 'text-red-400' :
+                        info.maxSev >= 4 ? 'text-orange-400' : 'text-amber-400'
+                      )}>{kw}</div>
+                      <div className="flex items-baseline gap-1 mt-0.5">
+                        <span className="text-sm font-bold text-ink-900">{info.items.length}</span>
+                        <span className="text-2xs text-ink-500">open</span>
+                      </div>
+                      <div className="text-2xs text-ink-500 truncate mt-0.5" title={info.items.map((i: any) => i.subject).join(' | ')}>
+                        {info.items[0]?.subject.slice(0, 40) || ''}
+                      </div>
+                    </div>
+                  ));
+                })()}
+              </div>
+              <Link href="/comms" className="block text-sm text-amber-500 hover:text-amber-400 font-medium">
+                → Manage all flagged emails
+              </Link>
+            </div>
           </Section>
         </SandboxWrapper>
         <SandboxWrapper id="dashboard.manual-uploads" label="Manual uploads">
