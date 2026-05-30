@@ -1,0 +1,38 @@
+{
+  "name": "extract_invoice",
+  "description": "Extract structured fields from the OCR text of a UK supplier invoice. Be conservative: return null for anything not clearly present; never guess. Set is_invoice=false for statements, receipts, order confirmations, payment notifications.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "is_invoice":     {"type": "boolean", "description": "True only if this is an actual supplier invoice."},
+      "vendor_name":    {"type": ["string", "null"]},
+      "invoice_number": {"type": ["string", "null"]},
+      "invoice_date":   {"type": ["string", "null"], "description": "YYYY-MM-DD"},
+      "due_date":       {"type": ["string", "null"], "description": "YYYY-MM-DD"},
+      "net":            {"type": ["number", "null"], "description": "Net total (pre-VAT), GBP."},
+      "vat":            {"type": ["number", "null"], "description": "VAT amount, GBP."},
+      "gross":          {"type": ["number", "null"], "description": "Gross total, GBP."},
+      "currency":       {"type": ["string", "null"], "description": "ISO code, default GBP."},
+      "category":       {"type": ["string", "null"], "description": "One of: food, drink_alcohol, drink_soft, packaging, cleaning, utilities, services, repairs, capex, other."},
+      "confidence":     {"type": "number", "minimum": 0, "maximum": 1},
+      "lines": {
+        "type": "array",
+        "description": "One entry per invoice line item.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "description": {"type": ["string", "null"]},
+            "quantity":    {"type": ["number", "null"]},
+            "unit":        {"type": ["string", "null"]},
+            "unit_price":  {"type": ["number", "null"]},
+            "line_net":    {"type": ["number", "null"]},
+            "vat_rate":    {"type": ["number", "null"], "description": "Percent, e.g. 20 or 0."},
+            "category":    {"type": ["string", "null"]}
+          },
+          "required": ["description"]
+        }
+      }
+    },
+    "required": ["is_invoice", "confidence"]
+  }
+}
