@@ -35,10 +35,12 @@ TS=$(date -u +%Y%m%dT%H%M%SZ)
 OUT="$OUTBOX/${TS}_${SLUG_CLEAN}.md"
 
 # Read stdin into the file. Front-matter header for orientation.
+# Use `%s` as the format so any leading-dash literal (e.g. `---`) is
+# treated as data, not as a printf option.
 {
-  printf '# Claude reply: %s\n\n' "$SLUG_CLEAN"
-  printf 'Generated: %s\n\n' "$TS"
-  printf '---\n\n'
+  printf '%s\n\n' "# Claude reply: $SLUG_CLEAN"
+  printf '%s\n\n' "Generated: $TS"
+  printf '%s\n\n' '---'
   cat
 } > "$OUT"
 
