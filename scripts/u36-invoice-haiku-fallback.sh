@@ -119,6 +119,7 @@ async def main():
       SELECT id, account, source_email_id, vendor_domain
         FROM vendor_invoice_inbox
        WHERE is_statement = false
+         AND status NOT IN ('duplicate','ignored')
          AND extraction_method NOT IN ('notification_only','pdf_fail','haiku','haiku_low_conf')
          AND (
               extraction_confidence < 0.5
