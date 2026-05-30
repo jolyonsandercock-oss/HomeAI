@@ -1,22 +1,25 @@
 # Next session — opening prompt (draft)
 
-_Drafted 2026-05-30 end-of-session. Read `MASTER.md` first._
+_Updated 2026-05-31 (overnight). Read `MASTER.md` + the two specs + plan first._
 
-**Where we left off:** Large stabilisation day — root cause across the board was a
-mid-May host-crontab reset that silently dropped pipeline jobs. Restored/repaired:
-invoices (u35 chain + crons, P2 retired), TouchOffice→EPOS bridge, caterbook/tides/
-workforce/dojo/heartbeat schedules, Telegram bot reactivation, Gmail RLS drops, P9
-(google-fetch rewire), dead-letter drained. Created `MASTER.md` living reference +
-nightly commit-log updater. Selftest green (51/0).
+## ACTIVE PROJECT: Invoice Intelligence (Project A → B)
+Specs: `docs/superpowers/specs/2026-05-30-invoice-{intelligence,cogs-analytics}-design.md`
+Plan:  `docs/superpowers/plans/2026-05-31-invoice-capture-projectA.md`
 
-**Top focus next (MASTER.md §2):**
-1. **Xero Sync (P3)** — only integration leaving an open loop (invoice ↔ accounting); freshness `never`.
-2. **RLS-role connection migration (U147)** — services still run as `postgres` superuser; only material security item.
-3. **Karl onboarding + mobile dress rehearsal (U154)** — needs the UX polish pass first.
+**Done + verified (shadow, zero prod impact):**
+- Stage 1 — `V206` migration applied: `purchases` + `purchase_lines` + `cogs_category_map`, RLS realm-isolation, indexes, grants, seeded map.
+- Stage 2 core — `scripts/projA/ladder.py`: `gate()` + `derive_realm()`, tested 11/11 (`python3 tests/projA/test_gate.py`); `ai_schemas/invoice_extract.schema.json`.
 
-**Open decisions for Jo:** Trail + Dojo scrapers are parked (broken/CAPTCHA) — revisit when convenient. Recipe/inventory economics (Phase 8) not started.
+**Resume here (Stage 2 → 4, plan has the task list):**
+1. `scripts/projA/ocr.py` — pdfplumber + vision fallback, persist PDF.
+2. Ladder tier callers in `ladder.py` — local (Ollama qwen2.5 `format`) → Haiku → Sonnet tool-use against the schema; `run_ladder(row)` orchestration writing `purchases`/`purchase_lines` (idempotent, realm-tagged, gate-gated).
+3. `scripts/projA/backfill.py` — bounded 12-mo backfill with a **hard cloud-spend ceiling**; validate on `--limit 25` before scaling. **Why I paused here:** this is the first step that spends cloud $ and needs quality eyeballing — wanted a checkpoint, not a blind paid run.
+4. Slugs: `purchases_recent`, `purchases_unverified`, `purchases_by_category` (+ smoke-test).
+5. **[HUMAN]** `/invoices/review` UX, per-surface cutover behind flags + parity gate, retire legacy `invoices` — none of this autonomously.
 
-**Mid-flight / fragile to watch:**
-- P9 fix validated only on replayed events — confirm the next *real* `document.received` processes clean.
-- Heartbeat is now **6-hourly always-emit** — sanity-check the Telegram volume is what Jo wants.
-- `booking-scraper.py` + `weather-sync.py` still run from the bot-responder `/app` writable layer → a `--force-recreate` wipes them (see `feedback-bot-responder-scripts-not-baked`).
+## Other open items (from before)
+- **Xero Sync (P3)** not live; **U147** RLS-role connection migration (services still on `postgres` superuser).
+- P9 fix validated only on replayed events — confirm next real `document.received` is clean.
+- Heartbeat now **6-hourly always-emit** — sanity-check Telegram volume.
+- Trail + Dojo scrapers parked (broken/CAPTCHA).
+- `booking-scraper.py`/`weather-sync.py` run from bot-responder `/app` writable layer → recreate wipes them.
