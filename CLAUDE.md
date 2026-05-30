@@ -76,6 +76,20 @@ DB is single Postgres (`homeai`), no schemas (everything in `public`). n8n share
 
 `postgres/migrations/V<N>__<sprint>_<topic>.sql`. Applied manually via `docker exec -i homeai-postgres psql -U postgres -d homeai < file.sql`. No auto-runner. Latest: V205.
 
+### Postgres MCP (read-only)
+
+The `postgres` MCP server (`@henkey/postgres-mcp-server`) is wired into Claude Code via `~/.claude/scripts-mcp-postgres-wrapper.sh`. It connects as the `homeai_readonly` role over the docker bridge IP (resolved fresh at startup so it survives reboot — `feedback-docker-bridge-ip-drift`).
+
+**Use it for**: `SELECT`-shaped reads via `pg_execute_query`, schema discovery via `pg_manage_schema operation=get_info`, `EXPLAIN` via `pg_manage_query operation=explain`. The MCP exposes write tools (`pg_execute_mutation`, `pg_execute_sql`, `pg_manage_users`, etc.) but they fail with `permission denied` because the connection is the read-only role. **Defense in depth, not on the MCP tool surface.**
+
+**Use `docker exec` for writes**: schema migrations, `INSERT`/`UPDATE`/`DELETE`, role management, anything DDL. The canonical path is still:
+```
+docker exec -i homeai-postgres psql -U postgres -d homeai < migration.sql
+```
+Or `psql -U postgres -d homeai -c "..."` for one-offs. This split keeps the high-volume MCP path safe and the low-volume write path deliberate (no accidental destructive operation from a hallucinated tool call).
+
+**If you need writable MCP** (rare — usually you don't): edit `~/.claude/settings.json` `mcpServers.postgres.command` to point at a wrapper that uses the `postgres` superuser, restart Claude Code, do the work, revert. Don't leave it open. The wrapper script is plain bash — fork it as `~/.claude/scripts-mcp-postgres-rw.sh` if you want a clean toggle. **A Claude Code self-modification guard hard-blocks any session from editing its own `settings.json` `mcpServers` entry**, so this is necessarily a manual user step (which is the right design).
+
 ### Pitfalls
 
 - **`::time` on timestamptz returns bare `HH:MM:SS`** — when serialised to JSON the frontend's `new Date()` produces `Invalid Date`. Always return full ISO timestamps for time columns.
@@ -137,6 +151,14 @@ Three layers:
 - Project-level decisions: `/home_ai/.claude/decisions/` — capture what Jo chose and why.
 - Sprint plans: `/home_ai/.claude/sprints/U<N>-<topic>.md`. Latest: U231.
 - Before naming a new U-number, **check** `git log + sprints/ + decisions/` (STATUS.md is regenerated only at `/retro` so often stale — `feedback-check-sprint-number-first`).
+
+## Installed Claude Code plugins / skills (2026-05-30)
+
+- **`skill-creator`** (official marketplace) — Create / Eval / Improve / Benchmark lifecycle for our own skills. Invoke via `/skill-creator:create`, `/skill-creator:eval`, etc.
+- **`superpowers`** (official marketplace, obra/superpowers) — `brainstorming` (design-before-code, surfaces decisions for Hermes review at the right stage), `executing-plans` (checkpoints in long autonomous batches), `finishing-a-development-branch` (standardised end-of-session cleanup), `subagent-driven-development` (TDD with built-in code review). **`using-git-worktrees` is in `disabledSkills`** — single-session box, parallel sessions trigger SSH timeouts at load 15+.
+- **`claudeception`** (skill-dir at `~/.claude/skills/claudeception/`) — auto-extracts reusable skills from each session's non-obvious debugging, workarounds, and trial-and-error. Closes the cross-session memory gap. Activator hook runs on every prompt.
+- **`defuddle`** (skill-dir at `~/.claude/skills/defuddle/`) — clean-extracts web article content (~80% fewer tokens than raw HTML). Triggers on "defuddle", "extract article", "clean this page", etc. Used when Hermes drops reference URLs or when reading vendor docs.
+- **`postgres` MCP** — see "Postgres MCP" section above.
 
 ## Pre-push hygiene
 
