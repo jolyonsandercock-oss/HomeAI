@@ -32,7 +32,7 @@ ok &= check("non-invoice fails", (not g) and any("invoice" in x for x in r))
 # gate: line sum mismatch fails
 g, r = gate({"is_invoice": True, "vendor_name": "Acme", "invoice_date": "2026-05-01",
              "net": 80.0, "vat": 16.0, "gross": 96.0, "lines": [{"line_net": 10.0}]})
-ok &= check("line-sum mismatch fails", (not g) and any("sum" in x for x in r))
+ok &= check("line-sum mismatch fails", (not g) and any("lines" in x for x in r))
 
 # realm derivation
 ok &= check("info->work", derive_realm("info", None) == "work")
