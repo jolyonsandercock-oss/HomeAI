@@ -192,9 +192,14 @@ async def main():
     rows = await conn.fetch("""
       SELECT id, account, source_email_id
         FROM vendor_invoice_inbox
-       WHERE extraction_method IS NULL
+       WHERE (extraction_method IS NULL
+              OR extraction_method IN ('harvest_keyword','harvest_overdue'))
          AND is_statement = false
          AND status NOT IN ('duplicate','ignored')
+         -- Gmail message ids are lowercase hex; Paperless-sourced rows
+         -- (e.g. 'paperless:9', 'scan:24') have their own OCR pipeline and
+         -- would crash the urllib fetch with InvalidURL — exclude them.
+         AND source_email_id ~ '^[0-9a-f]+$'
        ORDER BY received_at DESC
        LIMIT $1
     """, LIMIT)
