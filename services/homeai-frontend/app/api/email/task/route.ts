@@ -8,6 +8,7 @@ interface Body {
   task_id: number;
   status: "done" | "dismissed" | "snoozed";
   notes?: string;
+  create_ignore_rule?: boolean;
 }
 
 export async function POST(req: NextRequest) {
@@ -32,6 +33,26 @@ export async function POST(req: NextRequest) {
       `SELECT home_ai.update_email_task_status($1, $2, $3) as task_id`,
       [body.task_id, body.status, body.notes || null]
     );
+
+    // If requested, create an ignore rule for this sender's domain
+    if (body.create_ignore_rule && body.status === 'dismissed') {
+      try {
+        const taskResult = await client.query(
+          "SELECT e.from_address FROM email_tasks et JOIN emails e ON e.id = et.email_id WHERE et.id = $1",
+          [body.task_id]
+        );
+        const fromAddr = taskResult.rows[0]?.from_address || "";
+        const domain = fromAddr.split("@")[1]?.replace(/[>]$/g, "");
+        if (domain) {
+          await client.query(
+            "SELECT home_ai.insert_email_ignore_rule($1, $2)",
+            [domain, "\comm"]
+          );
+        }
+      } catch {
+        // Non-critical — ignore rule creation failure should not block status update
+      }
+    }
 
     return NextResponse.json({ ok: true, id: result.rows[0]?.task_id });
   } catch (e) {
