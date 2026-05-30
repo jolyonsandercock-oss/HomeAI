@@ -1,0 +1,9 @@
+[Unit]
+Description=Home AI — Vault seal-state watchdog (out-of-band Telegram pager)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/home_ai/scripts/vault-watchdog.sh
+Nice=10

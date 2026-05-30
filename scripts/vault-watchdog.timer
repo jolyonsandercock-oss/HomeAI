@@ -1,0 +1,11 @@
+[Unit]
+Description=Home AI — Vault seal-state watchdog (every 5 min)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=vault-watchdog.service
+
+[Install]
+WantedBy=timers.target
