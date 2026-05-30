@@ -3,10 +3,11 @@
 
 ## Read first, every session
 
-1. **`/home_ai/STATUS.md`** — current build state (human-readable mirror of memory).
+1. **`/home_ai/MASTER.md`** — **the living project reference**: §1 completed/live, §2 next phases, §3 degraded/superseded, §4 daily commit log. Read this first for current state.
 2. **This file (AGENTS.md)** — operational rules + non-negotiables.
 3. **Auto-memory** at `/home/joly/.claude/projects/-home-joly/memory/` — canonical state store, auto-loaded by harness. Read individual `feedback_*.md` files when their topic comes up.
-4. **`/home_ai/SPEC.md`** — architectural reference. Read only the relevant section for the current step, never end-to-end.
+4. **`/home_ai/SPEC.md`** — original architectural reference. Read only the relevant section for the current step, never end-to-end.
+5. **`/home_ai/STATUS.md`** — auto-generated git/state snapshot (stale between `/retro` runs); MASTER.md supersedes it as the reference.
 
 `HOME-AI-STRETCH.md` is future-ideas only — read on demand.
 
@@ -125,8 +126,9 @@ Any hits → STOP. Show user before commit. Common false positives: AGENTS.md/SP
 ## Key paths
 
 ```
-Status:      /home_ai/STATUS.md             ← current build state (human mirror)
-Spec:        /home_ai/SPEC.md               ← architectural reference
+Master:      /home_ai/MASTER.md             ← living project reference (READ FIRST)
+Status:      /home_ai/STATUS.md             ← auto git/state snapshot (stale between /retro)
+Spec:        /home_ai/SPEC.md               ← original architectural reference
 Stretch:     /home_ai/HOME-AI-STRETCH.md    ← future ideas only
 Memory:      /home/joly/.claude/projects/-home-joly/memory/
 Sprints:     /home_ai/.claude/sprints/U*.md
@@ -156,4 +158,4 @@ These are documented in `/home/joly/.claude/projects/-home-joly/memory/`. The ha
 
 ## Build state
 
-See **STATUS.md** for current phase/step/sprint. AGENTS.md does not track state — that's what STATUS.md is for.
+See **MASTER.md** (§1 completed / §2 next / §3 degraded) for current state. STATUS.md is the auto-generated snapshot; AGENTS.md does not track state.
