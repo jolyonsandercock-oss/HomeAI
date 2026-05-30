@@ -79,8 +79,10 @@ echo
 echo "[4] n8n workflows"
 ACTIVE=$($PSQL "SELECT count(*) FROM workflow_entity WHERE active=true")
 check "active workflow count >= 13" "[[ $ACTIVE -ge 13 ]] && echo $ACTIVE"
+# invoice-pipeline-v1 (P2) intentionally retired 2026-05-30 — broken vault gmail
+# path; extraction runs via the u35 shell chain instead (see memory). Not expected active.
 for wf in test-master-router gmail-ingest-v1 partition-maintenance-v1 \
-          bank-csv-import-v1 nanny-v1 report-ingestion-v1 invoice-pipeline-v1 \
+          bank-csv-import-v1 nanny-v1 report-ingestion-v1 \
           alert-sink-v1 hmac-verifier-v1 diagnostics-v1 cleanup-v1 \
           watchdog-n8n-errors; do
   check "  workflow $wf active" "$PSQL \"SELECT active FROM workflow_entity WHERE id='$wf'\" | command grep -q '^t$' && echo active"
