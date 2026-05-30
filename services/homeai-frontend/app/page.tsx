@@ -15,6 +15,7 @@ import {
   Sunset, CloudRain, Cloud, Sun, CloudSnow,
   Bed, UtensilsCrossed, Wine, Waves,
   Users, PoundSterling, ShieldCheck, ArrowLeft,
+  Upload,
 } from 'lucide-react';
 
 interface TodayGross { site: string; gross: string; as_of?: string }
@@ -115,7 +116,15 @@ function weatherClass(code: number | null, rain: number | null, temp: number | n
 }
 function timeOnly(iso: string | null): string {
   if (!iso) return '—';
+  if (/^\d{2}:\d{2}:\d{2}$/.test(iso)) {
+    const [h, m] = iso.split(':');
+    const hh = parseInt(h, 10);
+    const ampm = hh >= 12 ? 'pm' : 'am';
+    const h12 = hh % 12 || 12;
+    return `${h12}:${m}${ampm}`;
+  }
   const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
   return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 function timeShort(t: string | null): string {
@@ -183,6 +192,13 @@ export default function DashboardPage() {
   const roomsWk  = useSlug<RoomsWeek>('rooms_week_economics', dateArg);
   const freshness = useSlug<{ source: string; age_h: string; expected_hours: number; status: string }>('data_source_freshness', {}, { refetchInterval: 5 * 60_000 });
   const staleSources = (freshness.data ?? []).filter(f => f.status === 'STALE' || f.status === 'stale' || f.status === 'never');
+  // U234 — Hermes-flagged: surface the daily manual-upload list on the dashboard
+  // so it's not only visible via the 08:00 Telegram + morning email.
+  const manualUploads = useSlug<{ kind: string; source: string; label: string; last_dated: string | null; days_stale: number | null; status: string }>(
+    'manual_data_pending_uploads', {}, { refetchInterval: 10 * 60_000 });
+  const manualStaleCount = (manualUploads.data ?? []).filter(r => r.status === 'stale' || r.status === 'never').length;
+  const manualWarnCount  = (manualUploads.data ?? []).filter(r => r.status === 'warn').length;
+  const manualWorst = (manualUploads.data ?? [])[0]; // slug already orders worst-first
   const polls = useSlug<{ source: string; last_poll: string | null }>('sales_last_poll_per_source', {}, { refetchInterval: 60_000 });
   const pubPoll = polls.data?.find(p => p.source === 'touchoffice_malthouse')?.last_poll ?? null;
 
@@ -596,11 +612,14 @@ export default function DashboardPage() {
         </Section>
       </SandboxWrapper>
 
-      {/* ROW 7: Email + reviews placeholders */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      {/* ROW 7: Email + Manual uploads + Reviews */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <SandboxWrapper id="dashboard.email" label="Email tasks">
           <Section title="Email tasks">
-            <Link href="/comms" className="block">
+            <Link
+              href="/comms"
+              className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded"
+            >
               <div className="tile group">
                 <div className="label">Open email tasks</div>
                 <div className="kpi-xl mt-1">{emailKpis.data?.[0]?.tasks_open ?? '—'}</div>
@@ -610,6 +629,45 @@ export default function DashboardPage() {
                 <div className="mt-2 text-sm text-amber-500 group-hover:text-amber-400">→ Click for /comms</div>
               </div>
             </Link>
+          </Section>
+        </SandboxWrapper>
+        <SandboxWrapper id="dashboard.manual-uploads" label="Manual uploads">
+          <Section title="Manual uploads pending">
+            {manualUploads.isLoading ? (
+              <PlaceholderState message="Loading…" />
+            ) : (manualUploads.data ?? []).length === 0 ? (
+              <div className="tile">
+                <div className="label">All caught up</div>
+                <div className="kpi-xl mt-1 text-good">✓ 0</div>
+                <div className="mt-1 text-sm text-ink-500">
+                  Bank, card, mortgage, and Dojo all within window.
+                </div>
+              </div>
+            ) : (
+              <Link
+                href="/admin"
+                className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded"
+              >
+                <div className="tile group">
+                  <div className="label flex items-center gap-2">
+                    <Upload size={14} className={manualStaleCount > 0 ? 'text-warn' : 'text-amber-500'} />
+                    <span>Items to upload</span>
+                  </div>
+                  <div className={'kpi-xl mt-1 ' + (manualStaleCount > 0 ? 'text-warn' : 'text-amber-500')}>
+                    {(manualUploads.data ?? []).length}
+                  </div>
+                  <div className="mt-1 text-sm text-ink-500">
+                    {manualStaleCount} stale · {manualWarnCount} warn
+                  </div>
+                  {manualWorst && (
+                    <div className="mt-1 text-sm text-ink-600 truncate" title={`${manualWorst.source} · ${manualWorst.label}`}>
+                      worst: {manualWorst.source}{manualWorst.days_stale != null ? ` (${manualWorst.days_stale}d)` : ''}
+                    </div>
+                  )}
+                  <div className="mt-2 text-sm text-amber-500 group-hover:text-amber-400">→ Check this morning's email</div>
+                </div>
+              </Link>
+            )}
           </Section>
         </SandboxWrapper>
         <SandboxWrapper id="dashboard.reviews" label="Reviews">
