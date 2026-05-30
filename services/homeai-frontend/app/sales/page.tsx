@@ -8,6 +8,7 @@ import { Section } from '@/components/ui/Section';
 import { PollClock } from '@/components/ui/PollClock';
 import { SandboxWrapper } from '@/components/sandbox/SandboxWrapper';
 import { useSlug } from '@/lib/hooks';
+import { PlaceholderState } from '@/components/ui/PlaceholderState';
 import { gbp } from '@/lib/format';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
@@ -169,7 +170,12 @@ export default function SalesPage() {
 
       <SandboxWrapper id="sales.dept-bar" label="Department bar">
         <Section title="Category breakdown (selected range)">
-          {cat.isLoading ? <div className="text-xs text-ink-500">Loading…</div> : (
+          {cat.isLoading ? <div className="text-xs text-ink-500">Loading…</div> :
+           catChart.length === 0 ? (
+            <PlaceholderState
+              message="No sales recorded for this period yet"
+              hint="The category breakdown appears once tills ring through for the selected range and site." />
+          ) : (
             <figure
               className="tile h-[340px]"
               aria-labelledby="sales-cat-caption"
@@ -201,7 +207,12 @@ export default function SalesPage() {
 
       <SandboxWrapper id="sales.income-vs-labour" label="30d income vs labour">
         <Section title="Income vs labour cost — last 30 days">
-          {incLab.isLoading ? <div className="text-xs text-ink-500">Loading…</div> : (
+          {incLab.isLoading ? <div className="text-xs text-ink-500">Loading…</div> :
+           (incLab.data ?? []).length === 0 ? (
+            <PlaceholderState
+              message="No income or labour data for the last 30 days yet"
+              hint="This chart fills in as daily till totals and Tanda labour costs land for the period." />
+          ) : (
             <figure
               className="tile h-[300px]"
               aria-labelledby="sales-incomelabour-caption"
