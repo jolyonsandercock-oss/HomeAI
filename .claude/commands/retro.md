@@ -12,6 +12,8 @@ File each learning to the correct location:
 3. **Claude failure modes / repeated mistakes** → new `feedback_*.md` under `/home/joly/.claude/projects/-home-joly/memory/` (and link from `MEMORY.md`)
 4. **General project conventions** → AGENTS.md main body (only if non-state, non-obvious, durable)
 
+Then **reconcile `MASTER.md` §1–§3** (the living reference, MANDATORY): move work shipped this session into §1 Completed, demote anything broken/replaced into §3 Degraded/Superseded, refresh §2 Next phases, and bump "Last curated" to today. (§4 commit log auto-appends nightly — leave it.)
+
 Then update **STATUS.md** (MANDATORY):
 
 - Update "Last updated" date
@@ -30,4 +32,6 @@ Then update the canonical auto-memory at `/home/joly/.claude/projects/-home-joly
 
 Then update AGENTS.md only if a rule or pointer changed (rare — AGENTS.md should be stable).
 
-Report what was filed and where. **Do not end the session without updating STATUS.md and project_homeai.md.**
+Finally, **draft the next session's opening prompt** → write (overwrite) `/home_ai/.claude/NEXT-SESSION.md`, ~10 lines max, with: (a) where we left off (1–2 lines), (b) the top 1–3 focus items pulled from `MASTER.md` §2, (c) any open decisions awaiting Jo, (d) anything mid-flight or fragile to watch (e.g. a deploy in progress, a degraded scraper). The aim is the next session opens with context + focus, not a cold read.
+
+Report what was filed and where. **Do not end the session without reconciling MASTER.md §1–§3, updating STATUS.md + project_homeai.md, and writing NEXT-SESSION.md.**
