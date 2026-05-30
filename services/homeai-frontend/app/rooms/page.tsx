@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { DateRangePicker, DateRange } from '@/components/ui/DateRangePicker';
 import { PollClock } from '@/components/ui/PollClock';
@@ -43,11 +43,27 @@ const TABS = ['all', 'pub', 'cafe'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function RoomsPage() {
-  const rooms = useSlug<Room>('frontend_rooms_today', {}, { refetchInterval: 5 * 60_000 });
-  const accom = useSlug<AccomToday>('frontend_accommodation_today');
-  const [selected, setSelected] = useState<Room | null>(null);
+
   const [range, setRange] = useState<DateRange>({ preset: 'today', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
-  const router = useRouter();
+
+  const dateParam = useMemo(() => {
+
+    if (range.preset === 'today') return { date: new Date().toISOString().slice(0, 10) };
+
+    if (range.preset === 'yesterday') {
+
+      const y = new Date(); y.setDate(y.getDate() - 1);
+
+      return { date: y.toISOString().slice(0, 10) };
+
+    }
+
+    return { date: new Date().toISOString().slice(0, 10) };
+
+  }, [range]);
+  const rooms = useSlug<Room>('frontend_rooms_today', dateParam, { refetchInterval: 5 * 60_000 });
+  const accom = useSlug<AccomToday>('frontend_accommodation_today', dateParam);
+  const [selected, setSelected] = useState<Room | null>(null);  const router = useRouter();
   const sp = useSearchParams();
   const pathname = usePathname();
   const initialTab = (TABS.find(t => t === sp.get('tab')) as Tab | undefined) ?? 'all';

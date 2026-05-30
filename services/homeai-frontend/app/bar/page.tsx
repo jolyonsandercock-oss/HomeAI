@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { DateRangePicker, DateRange } from '@/components/ui/DateRangePicker';
 import { PollClock } from '@/components/ui/PollClock';
@@ -42,12 +42,28 @@ const TABS = ['all', 'pub', 'cafe'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function BarPage() {
-  const today = useSlug<TodayGross>('frontend_today_gross');
-  const wage  = useSlug<BarWage>('bar_wage_summary');
-  const till  = useSlug<TillGroup>('bar_till_groups_spark_7d');
-  const pub   = today.data?.find(r => r.site === 'malthouse');
+
   const [range, setRange] = useState<DateRange>({ preset: 'today', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
-  const router = useRouter();
+
+  const dateParam = useMemo(() => {
+
+    if (range.preset === 'today') return { date: new Date().toISOString().slice(0, 10) };
+
+    if (range.preset === 'yesterday') {
+
+      const y = new Date(); y.setDate(y.getDate() - 1);
+
+      return { date: y.toISOString().slice(0, 10) };
+
+    }
+
+    return { date: new Date().toISOString().slice(0, 10) };
+
+  }, [range]);
+  const today = useSlug<TodayGross>('frontend_today_gross', dateParam);
+  const wage  = useSlug<BarWage>('bar_wage_summary', dateParam);
+  const till  = useSlug<TillGroup>('bar_till_groups_spark_7d');
+  const pub   = today.data?.find(r => r.site === 'malthouse');  const router = useRouter();
   const sp = useSearchParams();
   const pathname = usePathname();
   const initialTab = (TABS.find(t => t === sp.get('tab')) as Tab | undefined) ?? 'all';

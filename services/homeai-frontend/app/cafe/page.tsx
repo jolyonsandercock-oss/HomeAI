@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { DateRangePicker, DateRange } from '@/components/ui/DateRangePicker';
 import { PollClock } from '@/components/ui/PollClock';
@@ -38,11 +38,19 @@ const TABS = ['all', 'pub', 'cafe'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function CafePage() {
-  const today    = useSlug<TodayGross>('frontend_today_gross');
-  const todayDpt = useSlug<CafeDeptToday>('cafe_today_depts');
+  const [range, setRange] = useState<DateRange>({ preset: 'today', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
+  const dateParam = useMemo(() => {
+    if (range.preset === 'today') return { date: new Date().toISOString().slice(0, 10) };
+    if (range.preset === 'yesterday') {
+      const y = new Date(); y.setDate(y.getDate() - 1);
+      return { date: y.toISOString().slice(0, 10) };
+    }
+    return { date: new Date().toISOString().slice(0, 10) };
+  }, [range]);
+  const today    = useSlug<TodayGross>('frontend_today_gross', dateParam);
+  const todayDpt = useSlug<CafeDeptToday>('cafe_today_depts', dateParam);
   const spark7d  = useSlug<CafeDeptSpark>('cafe_dept_spark_7d');
   const cafe     = today.data?.find(r => r.site === 'sandwich');
-  const [range, setRange] = useState<DateRange>({ preset: 'today', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
   const router = useRouter();
   const sp = useSearchParams();
   const pathname = usePathname();

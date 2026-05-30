@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { DateRangePicker, DateRange } from '@/components/ui/DateRangePicker';
 import { PollClock } from '@/components/ui/PollClock';
@@ -91,9 +91,7 @@ type Tab = (typeof TABS)[number];
 export default function StaffPage() {
   const [dateFrom, setDateFrom] = useState(isoDateDaysAgo(6));
   const [dateTo,   setDateTo]   = useState(todayIsoLocal());
-  const [teamFilter, setTeamFilter] = useState<string>('all');
-  const [range, setRange] = useState<DateRange>({ preset: 'today', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
-  const router = useRouter();
+  const [teamFilter, setTeamFilter] = useState<string>('all');  const router = useRouter();
   const sp = useSearchParams();
   const pathname = usePathname();
   const initialTab = (TABS.find(t => t === sp.get('tab')) as Tab | undefined) ?? 'all';
@@ -111,11 +109,29 @@ export default function StaffPage() {
       setTabState(urlTab as Tab);
     }
   }, [sp]);
+
+  const [range, setRange] = useState<DateRange>({ preset: 'today', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
+
+  const dateParam = useMemo(() => {
+
+    if (range.preset === 'today') return { date: new Date().toISOString().slice(0, 10) };
+
+    if (range.preset === 'yesterday') {
+
+      const y = new Date(); y.setDate(y.getDate() - 1);
+
+      return { date: y.toISOString().slice(0, 10) };
+
+    }
+
+    return { date: new Date().toISOString().slice(0, 10) };
+
+  }, [range]);
   const poller = useSlug<{ source: string; last_poll: string }>('sales_last_poll_per_source', {}, { refetchInterval: 60_000 });
   const pollFor = (source: string) => (poller.data ?? []).find((p: any) => p.source === source)?.last_poll ?? null;
 
   const status     = useSlug<TandaStatus>('staff_tanda_sync_status', {}, { refetchInterval: 5 * 60_000 });
-  const rota       = useSlug<RotaRow>('staff_on_rota_today');
+  const rota       = useSlug<RotaRow>('staff_on_rota_today', dateParam);
   const attribution = useSlug<AttributionRow>('staff_attribution_per_hour', { date_from: dateFrom, date_to: dateTo });
   const holidays   = useSlug<HolidayRow>('staff_upcoming_holidays');
   const birthdays  = useSlug<BirthdayRow>('staff_birthdays_next_30d');
