@@ -1,6 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
+import { DateRangePicker, DateRange } from '@/components/ui/DateRangePicker';
+import { PollClock } from '@/components/ui/PollClock';
 import { Section } from '@/components/ui/Section';
 import { KPICard } from '@/components/ui/KPICard';
 import { SandboxWrapper } from '@/components/sandbox/SandboxWrapper';
@@ -36,10 +39,34 @@ function canonRoom(r: string | null): string | null {
   return null;
 }
 
+const TABS = ['all', 'pub', 'cafe'] as const;
+type Tab = (typeof TABS)[number];
+
 export default function RoomsPage() {
   const rooms = useSlug<Room>('frontend_rooms_today', {}, { refetchInterval: 5 * 60_000 });
   const accom = useSlug<AccomToday>('frontend_accommodation_today');
   const [selected, setSelected] = useState<Room | null>(null);
+  const [range, setRange] = useState<DateRange>({ preset: 'today', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
+  const router = useRouter();
+  const sp = useSearchParams();
+  const pathname = usePathname();
+  const initialTab = (TABS.find(t => t === sp.get('tab')) as Tab | undefined) ?? 'all';
+  const [tab, setTabState] = useState<Tab>(initialTab);
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    const params = new URLSearchParams(sp.toString());
+    if (t === 'all') params.delete('tab'); else params.set('tab', t);
+    const q = params.toString();
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+  };
+  useEffect(() => {
+    const urlTab = sp.get('tab');
+    if (urlTab && TABS.includes(urlTab as Tab) && urlTab !== tab) {
+      setTabState(urlTab as Tab);
+    }
+  }, [sp]);
+  const poller = useSlug<{ source: string; last_poll: string }>('sales_last_poll_per_source', {}, { refetchInterval: 60_000 });
+  const pollFor = (source: string) => (poller.data ?? []).find((p: any) => p.source === source)?.last_poll ?? null;
 
   const occupied = new Map<string, Room>();
   rooms.data?.forEach((r) => {
@@ -49,6 +76,23 @@ export default function RoomsPage() {
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <DateRangePicker value={range} onChange={setRange} />
+        <div className="flex items-center gap-2">
+          <div className="flex bg-ink-100 border border-ink-200 rounded-md overflow-hidden text-xs">
+            {TABS.map((t) => (
+              <button key={t} onClick={() => setTab(t)}
+                className={'px-3 py-1.5 capitalize ' + (tab === t ? 'bg-amber-500 text-ink-0' : 'text-ink-600 hover:text-ink-800')}>{t}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 text-xs text-ink-500">
+            <span>polls:</span>
+            <PollClock lastPoll={pollFor('touchoffice_malthouse')} label="touchoffice pub" />
+            <PollClock lastPoll={pollFor('touchoffice_sandwich')} label="touchoffice cafe" />
+          </div>
+        </div>
+      </div>
+
       <SandboxWrapper id="rooms.summary" label="Today summary">
         <Section title="Today">
           <div className="grid grid-cols-3 gap-3">

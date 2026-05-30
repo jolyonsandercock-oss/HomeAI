@@ -1,5 +1,9 @@
 'use client';
 
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
+import { DateRangePicker, DateRange } from '@/components/ui/DateRangePicker';
+import { PollClock } from '@/components/ui/PollClock';
 import { Section } from '@/components/ui/Section';
 import { KPICard } from '@/components/ui/KPICard';
 import { PlaceholderState } from '@/components/ui/PlaceholderState';
@@ -30,16 +34,57 @@ const DEPT_COLOUR: Record<string, string> = {
 
 const HEADLINE_DEPTS = ['Cafe Ice Cream', 'Cafe Soft Drinks', 'HOT DRINKS'];
 
+const TABS = ['all', 'pub', 'cafe'] as const;
+type Tab = (typeof TABS)[number];
+
 export default function CafePage() {
   const today    = useSlug<TodayGross>('frontend_today_gross');
   const todayDpt = useSlug<CafeDeptToday>('cafe_today_depts');
   const spark7d  = useSlug<CafeDeptSpark>('cafe_dept_spark_7d');
   const cafe     = today.data?.find(r => r.site === 'sandwich');
+  const [range, setRange] = useState<DateRange>({ preset: 'today', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
+  const router = useRouter();
+  const sp = useSearchParams();
+  const pathname = usePathname();
+  const initialTab = (TABS.find(t => t === sp.get('tab')) as Tab | undefined) ?? 'all';
+  const [tab, setTabState] = useState<Tab>(initialTab);
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    const params = new URLSearchParams(sp.toString());
+    if (t === 'all') params.delete('tab'); else params.set('tab', t);
+    const q = params.toString();
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+  };
+  useEffect(() => {
+    const urlTab = sp.get('tab');
+    if (urlTab && TABS.includes(urlTab as Tab) && urlTab !== tab) {
+      setTabState(urlTab as Tab);
+    }
+  }, [sp]);
+  const poller = useSlug<{ source: string; last_poll: string }>('sales_last_poll_per_source', {}, { refetchInterval: 60_000 });
+  const pollFor = (source: string) => (poller.data ?? []).find((p: any) => p.source === source)?.last_poll ?? null;
 
   const findToday = (dept: string) => todayDpt.data?.find(r => r.department === dept);
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <DateRangePicker value={range} onChange={setRange} />
+        <div className="flex items-center gap-2">
+          <div className="flex bg-ink-100 border border-ink-200 rounded-md overflow-hidden text-xs">
+            {TABS.map((t) => (
+              <button key={t} onClick={() => setTab(t)}
+                className={'px-3 py-1.5 capitalize ' + (tab === t ? 'bg-amber-500 text-ink-0' : 'text-ink-600 hover:text-ink-800')}>{t}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 text-xs text-ink-500">
+            <span>polls:</span>
+            <PollClock lastPoll={pollFor('touchoffice_malthouse')} label="touchoffice pub" />
+            <PollClock lastPoll={pollFor('touchoffice_sandwich')} label="touchoffice cafe" />
+          </div>
+        </div>
+      </div>
+
       <SandboxWrapper id="cafe.kpi" label="Café KPIs">
         <Section title="Café — today">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

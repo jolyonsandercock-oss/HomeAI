@@ -91,6 +91,13 @@ export default function SalesPage() {
   const cat       = useSlug<CategorizedRow>('sales_categorized_split_range', rangeArgs, { refetchInterval: 60_000 });
   const daily30   = useSlug<DailyTotalsRow>('sales_daily_totals_30d', {}, { refetchInterval: 5 * 60_000 });
   const incLab    = useSlug<IncomeVsLabourRow>('sales_30d_income_vs_labour', {}, { refetchInterval: 5 * 60_000 });
+  // Compute labour_pct client-side (slug doesn't return it)
+  const incLabWithPct = (incLab.data ?? []).map(r => ({
+    ...r,
+    labour_pct: num(r.labour_cost) > 0 && num(r.total_income) > 0
+      ? (num(r.labour_cost) / num(r.total_income)) * 100
+      : null,
+  }));
   const table     = useSlug<FilterableRow>('sales_filterable_daily_table', {}, { refetchInterval: 5 * 60_000 });
   const polls     = useSlug<PollRow>('sales_last_poll_per_source', {}, { refetchInterval: 60_000 });
   const kpiSlug   = useSlug<FrontendKpiRow>('sales_frontend_kpis', rangeArgs, { refetchInterval: 60_000 });
@@ -288,11 +295,11 @@ export default function SalesPage() {
                 Data also available in the filterable daily table below.
               </figcaption>
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={incLab.data ?? []} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+                <ComposedChart data={incLabWithPct} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
                   <CartesianGrid stroke="#2a2a2a" vertical={false} />
                   <XAxis dataKey="day" stroke="#737373" fontSize={10} tickFormatter={(d) => d.slice(5)} />
                   <YAxis yAxisId="left" stroke="#737373" fontSize={11} tickFormatter={(v) => `£${v}`} />
-                  <YAxis yAxisId="right" orientation="right" stroke="#ef4444" fontSize={10} domain={[10, 'auto']} tickFormatter={(v) => `${v}%`} />
+                  <YAxis yAxisId="right" orientation="right" stroke="#ef4444" fontSize={10} domain={[0, 'auto']} tickFormatter={(v) => `${v}%`} />
                   <Tooltip contentStyle={{ background: '#171717', border: '1px solid #2a2a2a' }} formatter={(v: number, name: string) => name === 'labour_pct' ? `${v.toFixed(1)}%` : gbp(v)} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Bar yAxisId="left" dataKey="pub_income"  stackId="inc" fill="#f59e0b" name="Pub income" />

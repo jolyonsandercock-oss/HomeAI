@@ -426,7 +426,14 @@ function ExpenseExceptionSection() {
                   <tbody>
                     {uncatVendors.slice(0, 15).map(r => (
                       <tr key={r.vendor_domain + r.detail} className="border-t border-ink-200 cursor-pointer hover:bg-ink-100/50" onClick={() => setSelectedRow(r)}>
-                        <td className="py-1.5 text-ink-900">{r.vendor_display}</td>
+                        <td className="py-1.5 text-ink-900">
+                          {r.vendor_display}
+                          <a href={'https://mail.google.com/mail/u/0/#search/from%3A' + encodeURIComponent(r.vendor_domain)}
+                             target="_blank" rel="noopener noreferrer"
+                             className="ml-2 text-xs text-amber-500 hover:text-amber-400"
+                             onClick={(e) => e.stopPropagation()}
+                             title="Open in Gmail">&#x2197;</a>
+                        </td>
                         <td className="text-right text-ink-500">{r.invoice_count}</td>
                         <td className="text-right text-warn">{gbp(parseFloat(r.total_gross))}</td>
                         <td className="text-right text-ink-500">{r.detail}</td>
@@ -455,7 +462,14 @@ function ExpenseExceptionSection() {
                     {unassignedLines.slice(0, 20).map((r, i) => (
                       <tr key={r.vendor_domain + r.detail + i} className="border-t border-ink-200 cursor-pointer hover:bg-ink-100/50" onClick={() => setSelectedRow(r)}>
                         <td className="py-1.5 text-ink-700">{r.vendor_display.slice(0, 25)}</td>
-                        <td className="text-ink-900">{r.detail}</td>
+                        <td className="text-ink-900">
+                          {r.detail}
+                          <a href={'https://mail.google.com/mail/u/0/#search/' + encodeURIComponent(r.detail.slice(0, 40))}
+                             target="_blank" rel="noopener noreferrer"
+                             className="ml-2 text-xs text-amber-500 hover:text-amber-400"
+                             onClick={(e) => e.stopPropagation()}
+                             title="Search in Gmail">&#x2197;</a>
+                        </td>
                         <td className="text-right text-ink-500">{r.invoice_count}</td>
                         <td className="text-right text-amber-400">{gbp(parseFloat(r.total_gross))}</td>
                       </tr>
