@@ -24,7 +24,13 @@ cross-checks pass.
 
 ## 2. Scope
 
-- **Realm:** work only (entity 1 — pub / café / ice-cream). Personal/AREL excluded.
+- **Realm:** **all invoices captured and realm-tagged** — the pipeline is realm-aware
+  (load-bearing invariant). Each invoice's realm is derived at ingest (work = entity 1
+  / `info`,`admin` mailboxes; personal = entity 3 / `jo`,`pounana`; owner = `bot`),
+  written to `purchases.realm`, and RLS-segregated. **Personal invoices that arrive in
+  the stack are captured + flagged `personal`** (owner/family visibility), never dropped.
+  COGS analytics (Project B) is scoped to `work`; personal purchases are captured for
+  completeness, not pub COGS.
 - **Sources:** supplier emails to `info@` / `admin@` (via existing google-fetch +
   u95 harvest), and Brother→Paperless scans. (Dext is review-only, no API — out.)
 - **In scope:** PDF persistence, OCR, header + line-item extraction, vendor +
@@ -65,7 +71,7 @@ Accept = gate passes **and** confidence ≥ tier threshold. Else escalate.
 |---|---|---|
 | `ingest` | harvest emails/scans → staging row + persisted PDF | google-fetch, Paperless |
 | `ocr` | PDF → text (pdfplumber; vision-OCR for image-only) | pdfplumber, vision model |
-| `classify` | is-invoice? + vendor + category | local LLM, vendor rules |
+| `classify` | is-invoice? + **realm** + vendor + category | local LLM, vendor rules |
 | `extract` (per tier) | OCR text → header+lines JSON (schema-constrained) | Ollama / Anthropic |
 | `validate` | cross-field gate; decide accept/escalate | — |
 | `verify-queue` | human confirm/correct UI | frontend |
@@ -84,8 +90,8 @@ Accept = gate passes **and** confidence ≥ tier threshold. Else escalate.
     quantity, unit, unit_price, line_net, vat_rate, category`.
 - `vendor_invoice_inbox` → demoted to **ingest staging** only (harvest landing zone;
   the ladder reads from it, writes to `purchases`).
-- Legacy empty `invoices` table → **retired** (migration drops or archives it; audit
-  consumers first per AGENTS rule 7).
+- Legacy empty `invoices` table → retired **only after cutover is proven** (§7b);
+  audit consumers first per AGENTS rule 7.
 - New slugs: `purchases_recent`, `purchases_by_category`, `purchases_unverified`
   (verify-queue feed), realm=`work`, approved.
 
@@ -113,6 +119,29 @@ Re-run the ladder over the **last 12 months** of harvested invoices to populate
 `purchases`/`purchase_lines` retroactively (seasonality + YoY for COGS). Bounded
 run to cap one-off cloud-escalation cost; Tier-0-first keeps most of it local.
 
+## 7b. Coexistence & cutover (parallel / hot-swap)
+
+The new pipeline is **additive and runs in parallel** with the current invoice +
+email stack — nothing in the live website is removed during the build:
+
+- **Shadow build:** the ladder writes **only** to the new `purchases` /
+  `purchase_lines` tables. The existing `vendor_invoice_inbox`, `invoices`,
+  `frontend_invoices_recent`, the comms email modal, tasks expense categorisation,
+  invoice-detail force-extract button — **all keep running untouched** on current
+  data while `purchases` fills and is validated against them.
+- **Hot-swap via slug/flag, not rewrite:** cutover repoints each consuming surface
+  to `purchases` by swapping the slug behind it (+ a feature flag) — **page
+  components and UX are preserved, only the data source changes.** Reversible: flip
+  back to the legacy slug if anything regresses.
+- **Parity gate per surface:** `purchases` must match-or-beat the legacy data on a
+  reconciliation check (counts, totals, no missing rows) before that surface flips.
+  Surfaces flip **one at a time**, not big-bang.
+- **Retire last:** only once every consumer is flipped + stable do we retire the
+  legacy `invoices` table and demote the inbox to pure staging.
+
+Net: the good website features survive throughout; the swap is incremental and
+reversible.
+
 ## 8. Testing
 
 - **Fixtures:** a labelled set of real invoices per vendor (header+lines) as the
@@ -130,6 +159,11 @@ run to cap one-off cloud-escalation cost; Tier-0-first keeps most of it local.
 - Data model: **new `purchases` + `purchase_lines`**; inbox→staging; retire `invoices`.
 - Backfill: **last 12 months**.
 - Local fine-tune (Unsloth) is **Phase 2**, gated on the gold set the queue builds.
+- **Realm-aware, not work-siloed:** capture all invoices, tag `purchases.realm`;
+  personal invoices flagged `personal` (captured, RLS-segregated), not dropped.
+- **Parallel + hot-swappable:** new tables only; existing invoice/email website
+  features stay live; cutover is per-surface slug/flag swap with a parity gate;
+  legacy retired last. (§7b)
 
 ## 10. Open / deferred
 
