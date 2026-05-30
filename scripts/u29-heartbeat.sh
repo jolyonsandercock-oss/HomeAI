@@ -1,15 +1,15 @@
 #!/bin/bash
 # /home_ai/scripts/u29-heartbeat.sh
 #
-# 15-min heartbeat. Logs every run to telegram_outbox. Only ACTUALLY
-# emits a Telegram message when the system is degraded:
-#   - any system_alerts firing
-#   - any scrape stale beyond its tolerance (TO>1h, CB>26h, WF>26h)
-#   - dead_letter open count > 5
-#   - pending bot_instructions > 0
+# 6-hourly heartbeat (00/06/12/18). Emits a Telegram message EVERY run:
+#   - healthy  → routine status update (♥ ok + freshness summary)
+#   - degraded → exception/emergency listing the reasons:
+#       system_alerts firing · scrape stale (TO>1h, CB>26h, WF>26h)
+#       · dead_letter open > 5 · pending bot_instructions > 0
 #
-# In steady-state, this generates ZERO Telegram noise — but the log table
-# proves the heartbeat is running. If you want to confirm liveness, query
+# Changed 2026-05-30 from */15 quiet-unless-degraded to 6-hourly always-emit
+# (owner request: "6 hourly + exceptions, updates or emergencies"). Real-time
+# criticals remain covered by Prometheus→notify-bridge + vault-watchdog. History:
 # `SELECT * FROM telegram_outbox WHERE source='heartbeat' ORDER BY id DESC LIMIT 10`.
 
 set -uo pipefail
@@ -83,34 +83,32 @@ async def main():
     http_status = None
     suppression_reason = None
 
-    if degraded:
-        # Suppress if an identical-body heartbeat was sent in the last 4 hours
-        # (avoid alerting the same issue every 15 min).
-        recent = await conn.fetchval(
-          """SELECT COUNT(*) FROM telegram_outbox
-              WHERE source='heartbeat' AND body_hash=$1
-                AND sent_at > now() - interval '4 hours'
-                AND suppressed=false""",
-          body_hash)
-        if recent and recent > 0:
-            suppression_reason = f"identical-body within 4h ({recent})"
-        else:
-            try:
-                d = vault_get("telegram")
-                req = urllib.request.Request(
-                    f"https://api.telegram.org/bot{d['bot_token']}/sendMessage",
-                    data=urllib.parse.urlencode({
-                        "chat_id": d["chat_id"], "text": body,
-                        "disable_notification": "false",
-                    }).encode())
-                r = urllib.request.urlopen(req, timeout=10)
-                http_status = r.status
-                sent = True
-            except Exception as e:
-                http_status = -1
-                suppression_reason = f"http error: {str(e)[:120]}"
+    # 6-hourly run always emits: a routine status update when healthy, an
+    # exception/emergency when degraded. Dedup guards only against a misfire
+    # double-send of an identical body within 4h.
+    recent = await conn.fetchval(
+      """SELECT COUNT(*) FROM telegram_outbox
+          WHERE source='heartbeat' AND body_hash=$1
+            AND sent_at > now() - interval '4 hours'
+            AND suppressed=false""",
+      body_hash)
+    if recent and recent > 0:
+        suppression_reason = f"identical-body within 4h ({recent})"
     else:
-        suppression_reason = "steady-state (not degraded)"
+        try:
+            d = vault_get("telegram")
+            req = urllib.request.Request(
+                f"https://api.telegram.org/bot{d['bot_token']}/sendMessage",
+                data=urllib.parse.urlencode({
+                    "chat_id": d["chat_id"], "text": body,
+                    "disable_notification": "false",
+                }).encode())
+            r = urllib.request.urlopen(req, timeout=10)
+            http_status = r.status
+            sent = True
+        except Exception as e:
+            http_status = -1
+            suppression_reason = f"http error: {str(e)[:120]}"
 
     await conn.execute("""
       INSERT INTO telegram_outbox
