@@ -85,6 +85,68 @@ For each: insert into `query_whitelist` (realm `work`, `approved_at=NOW()`), the
 
 ---
 
+## §S — Searchability (added requirement)
+Spend must be searchable by **vendor** (Forest Produce), **department** (bar,
+overhead), **line item / product** (Guinness), and **business & property** (entity
+1 vs AREL properties) — across **three surfaces that all read one flat view**:
+(a) local model, (b) slugs/queries, (c) frontend table filters.
+
+### Task S1: dimensions — department + product + property [autonomous]
+- [ ] Add `department` to `cogs_category_map` and seed: `drink_alcohol→bar`,
+  `drink_soft→bar`, `food→kitchen`, `packaging/cleaning/utilities/services/repairs/capex→overhead`,
+  accommodation categories→`accommodation`. (`ALTER TABLE cogs_category_map ADD COLUMN department text;`)
+- [ ] **Product canonicalisation** (`scripts/projA/canonicalise_lines.py`): for
+  `purchase_lines.product_canonical_id IS NULL`, match `description` to
+  `product_canonical`/`product_aliases` (normalised exact → trigram fuzzy → cheap
+  Haiku for the long tail); create canonical rows for genuinely new products.
+  Test: a "Guinness Draught 11G" line resolves to the canonical "Guinness". Idempotent, spend-capped.
+- [ ] **Property linkage**: `ALTER TABLE purchases ADD COLUMN property_id bigint;`
+  backfill from `account_property_map` (vendor_domain/account_number → property_id);
+  business invoices (entity 1, no property) stay NULL. Commit.
+
+### Task S2: flat search view `v_purchase_search` [autonomous]
+- [ ] One row per line item, every dimension denormalised for filtering:
+```sql
+CREATE OR REPLACE VIEW v_purchase_search AS
+SELECT p.id AS purchase_id, pl.id AS line_id, p.invoice_date,
+       p.vendor_name, p.vendor_id,
+       COALESCE(pl.category, p.category) AS category,
+       m.department,
+       pl.product_canonical_id, pc.canonical_name AS product,
+       pl.description, pl.quantity, pl.unit, pl.unit_price, pl.line_net,
+       p.entity_id, p.realm, p.property_id, p.gross_amount AS invoice_gross,
+       p.gate_passed, p.verified
+FROM purchases p
+JOIN purchase_lines pl ON pl.purchase_id = p.id
+LEFT JOIN cogs_category_map m ON m.purchase_category = COALESCE(pl.category, p.category)
+LEFT JOIN product_canonical pc ON pc.id = pl.product_canonical_id
+WHERE p.is_invoice;   -- realm RLS still applies on the base tables
+```
+- [ ] Verify free-text + dimension filters return sensibly (Forest Produce; department=bar; product ILIKE 'guinness'). Commit.
+
+### Task S3: faceted search slug [autonomous]
+- [ ] `purchase_search` slug over `v_purchase_search` with **optional** params
+  `vendor, department, category, product, entity_id, property_id, date_from, date_to,
+  q` (free text over description/vendor/product) — returns matching lines **plus a
+  total `sum(line_net)`** so "amount and spend by X" is answered in one call.
+- [ ] `purchase_spend_summary` slug — grouped totals by a `group_by` param
+  (vendor | department | product | entity | property) for the same filters.
+- [ ] Smoke-test both (`scripts/test-all-slugs.cjs`). Commit.
+
+### Task S4: frontend filterable table [HUMAN review of UX]
+- [ ] `/sales` (or new `/purchases`) Tabulator-style table over `purchase_search`
+  with **column filters + free-text box** on vendor / department / product /
+  description / entity / date / amount, and a live filtered-total footer. Reuse the
+  existing filterable-table pattern (e.g. the daily sales table). **[HUMAN] Jo eyeballs.**
+
+### Task S5: local-model access [autonomous]
+- [ ] The bot/local model answers spend questions by calling `purchase_search` /
+  `purchase_spend_summary` (realm `work`, so already loadable by the bot's slug set).
+  Add a one-line heuristic to `heuristics.md`: "spend questions (by vendor/department/
+  product) → call purchase_spend_summary with the extracted filter." Verify qwen can
+  map "how much on Guinness last month" → `{product:'Guinness', group_by:'product', date_from:…}`.
+- [ ] Commit.
+
 ## Caveats baked into the design (don't hide from the UI)
 - **Purchase date ≠ consumption** → headline grain is **weekly/monthly**; daily shown but flagged noisy. True stock-adjusted COGS needs inventory counts (out of scope).
 - **Capture confidence** travels with every ratio.
