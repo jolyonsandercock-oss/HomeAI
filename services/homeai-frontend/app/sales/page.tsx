@@ -35,6 +35,7 @@ interface FilterableRow {
   cafe_labour: string; cafe_labour_pct: string | null;
   combined_total: string; combined_labour: string; combined_labour_pct: string | null;
 }
+interface CogsRow { day: string; cogs_day: string; cogs_7d_avg: string }
 interface FrontendKpiRow { metric: string; value: string }
 interface PollRow { source: string; last_poll: string | null }
 
@@ -100,6 +101,13 @@ export default function SalesPage() {
   }));
   const table     = useSlug<FilterableRow>('sales_filterable_daily_table', {}, { refetchInterval: 5 * 60_000 });
   const polls     = useSlug<PollRow>('sales_last_poll_per_source', {}, { refetchInterval: 60_000 });
+  const cogs7d    = useSlug<CogsRow>('daily_cogs_7d_avg', {}, { refetchInterval: 5 * 60_000 });
+  // WIP: purchase-based COGS 7-day rolling avg, keyed by day for the daily table.
+  const cogsMap = useMemo(() => {
+    const m: Record<string, number> = {};
+    (cogs7d.data ?? []).forEach(r => { m[String(r.day).slice(0, 10)] = num(r.cogs_7d_avg); });
+    return m;
+  }, [cogs7d.data]);
   const kpiSlug   = useSlug<FrontendKpiRow>('sales_frontend_kpis', rangeArgs, { refetchInterval: 60_000 });
 
   const pollFor = (k: string) => polls.data?.find(p => p.source === k)?.last_poll ?? null;
@@ -339,7 +347,7 @@ export default function SalesPage() {
                   <th className="px-2 py-1 text-center" rowSpan={2}>Pub<br/>Labour %</th>
                   <th className="px-2 py-1 text-center border-x border-ink-200" colSpan={3} style={{ color: '#ec4899' }}>Café</th>
                   <th className="px-2 py-1 text-center" rowSpan={2} style={{ color: '#ec4899' }}>Café<br/>Labour %</th>
-                  <th className="px-2 py-1 text-center border-l border-ink-200" colSpan={3}>Combined</th>
+                  <th className="px-2 py-1 text-center border-l border-ink-200" colSpan={5}>Combined</th>
                 </tr>
                 {/* Row 2: Individual column headers */}
                 <tr>
@@ -353,6 +361,8 @@ export default function SalesPage() {
                   <th className="px-2 py-1 text-right border-l border-ink-200">Total</th>
                   <th className="px-2 py-1 text-right">Labour</th>
                   <th className="px-2 py-1 text-right">Labour %</th>
+                  <th className="px-2 py-1 text-right italic font-normal text-ink-400" title="WIP — purchase-based COGS, 7-day rolling avg, partial capture">COGS 7d <span className="text-ink-500">(WIP)</span></th>
+                  <th className="px-2 py-1 text-right italic font-normal text-ink-400" title="WIP — 7d-avg COGS as % of the day's combined total">COGS %</th>
                 </tr>
               </thead>
               <tbody>
@@ -377,10 +387,18 @@ export default function SalesPage() {
                     <td className={'px-2 py-1 text-right font-semibold ' + labourPctColor(r.combined_labour_pct != null ? num(r.combined_labour_pct) : null)}>
                       {r.combined_labour_pct != null ? `${num(r.combined_labour_pct).toFixed(1)}%` : '—'}
                     </td>
+                    {(() => {
+                      const c = cogsMap[String(r.day).slice(0, 10)];
+                      const tot = num(r.combined_total);
+                      return (<>
+                        <td className="px-2 py-1 text-right italic text-ink-400">{c != null ? gbp(c) : '—'}</td>
+                        <td className="px-2 py-1 text-right italic text-ink-400">{c != null && tot > 0 ? `${(c / tot * 100).toFixed(1)}%` : '—'}</td>
+                      </>);
+                    })()}
                   </tr>
                 ))}
                 {tableRows.length === 0 && (
-                  <tr><td colSpan={13} className="px-2 py-8 text-center text-ink-500">No rows match the filter</td></tr>
+                  <tr><td colSpan={15} className="px-2 py-8 text-center text-ink-500">No rows match the filter</td></tr>
                 )}
               </tbody>
               <tfoot className="border-t-2 border-ink-300 text-ink-700">
@@ -398,6 +416,8 @@ export default function SalesPage() {
                   <td className="px-2 py-1 text-right font-semibold">{gbp(footer.combTot)}</td>
                   <td className="px-2 py-1 text-right">{gbp(footer.combLab)}</td>
                   <td className={'px-2 py-1 text-right font-semibold ' + labourPctColor(footer.combLabPct)}>{footer.combLabPct?.toFixed(1) ?? '—'}%</td>
+                  <td className="px-2 py-1 text-right italic text-ink-500">—</td>
+                  <td className="px-2 py-1 text-right italic text-ink-500">—</td>
                 </tr>
                 <tr>
                   <td className="px-2 py-1">Average / day</td>
@@ -413,6 +433,8 @@ export default function SalesPage() {
                   <td className="px-2 py-1 text-right">{gbp(footer.avgCombTot)}</td>
                   <td className="px-2 py-1 text-right">{gbp(footer.avgCombLab)}</td>
                   <td className="px-2 py-1 text-right"></td>
+                  <td className="px-2 py-1 text-right italic text-ink-500">—</td>
+                  <td className="px-2 py-1 text-right italic text-ink-500">—</td>
                 </tr>
               </tfoot>
             </table>
