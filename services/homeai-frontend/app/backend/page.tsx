@@ -16,6 +16,7 @@ interface AIUsage {
   avg_latency_ms: number; cache_hits: number; escalated: number;
 }
 interface ErrorRow { pipeline: string; action: string; occurrences: number; most_recent: string }
+interface LocalAI { workload: string; capability_tag: string | null; calls: number; prompt_tokens: number; completion_tokens: number; latest: string }
 interface Freshness { source: string; last_data: string; hours_stale: string | number | null }
 interface PipelineLogRow { pipeline: string; action: string; created_at: string; trace_id: string | null; record_type: string | null; record_id: number | null }
 
@@ -32,6 +33,7 @@ export default function BackendPage() {
 const pipelineLogs = useSlug<PipelineLogRow>('pipeline_audit_recent');
   const errors  = useSlug<ErrorRow>('backend_errors_24h', {}, { refetchInterval: 60_000 });
   const fresh   = useSlug<Freshness>('backend_import_freshness', {}, { refetchInterval: 60_000 });
+  const localAI = useSlug<LocalAI>('backend_local_ai_30d', {}, { refetchInterval: 5 * 60_000 });
 
   const staleSources = (fresh.data ?? []).filter(f => parseFloat(String(f.hours_stale ?? 0)) >= 24);
 
@@ -119,6 +121,48 @@ const pipelineLogs = useSlug<PipelineLogRow>('pipeline_audit_recent');
               </div>
             </div>
           ) : <PlaceholderState message="No AI calls in the last 24h." />}
+        </Section>
+      </SandboxWrapper>
+
+      <SandboxWrapper id="backend.local-ai" label="Local model">
+        <Section title="Local model — Ollama / qwen (30 days)">
+          {localAI.isLoading ? <PlaceholderState message="Loading…" /> :
+           localAI.data && localAI.data.length > 0 ? (
+            <div className="tile overflow-x-auto">
+              <div className="mb-2 text-xs text-ink-500">
+                {(() => {
+                  const d = localAI.data!;
+                  const c = d.reduce((s, r) => s + Number(r.calls), 0);
+                  const tok = d.reduce((s, r) => s + Number(r.prompt_tokens) + Number(r.completion_tokens), 0);
+                  return `${c.toLocaleString()} calls · ${tok.toLocaleString()} tokens · £0 cloud cost (runs on the local RTX 3060)`;
+                })()}
+              </div>
+              <table className="w-full text-sm">
+                <thead className="text-xs text-ink-500 uppercase tracking-wider">
+                  <tr>
+                    <th className="text-left py-1.5 font-medium">Workload</th>
+                    <th className="text-left font-medium">Capability</th>
+                    <th className="text-right font-medium">Calls</th>
+                    <th className="text-right font-medium">Prompt tok</th>
+                    <th className="text-right font-medium">Completion tok</th>
+                    <th className="text-left font-medium">Last</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {localAI.data.map((r, i) => (
+                    <tr key={i} className="border-t border-ink-200">
+                      <td className="py-1.5 text-ink-900">{r.workload}</td>
+                      <td className="text-ink-700 text-xs">{r.capability_tag}</td>
+                      <td className="text-right font-mono text-ink-700">{Number(r.calls).toLocaleString()}</td>
+                      <td className="text-right font-mono text-ink-700">{Number(r.prompt_tokens).toLocaleString()}</td>
+                      <td className="text-right font-mono text-ink-700">{Number(r.completion_tokens).toLocaleString()}</td>
+                      <td className="text-ink-500 text-xs">{new Date(r.latest).toLocaleString('en-GB')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <PlaceholderState message="No local-model calls in the last 30 days." />}
         </Section>
       </SandboxWrapper>
 

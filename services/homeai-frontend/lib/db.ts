@@ -112,7 +112,9 @@ async function runSlugDirect(slug: string, params: Record<string, unknown>, real
   );
   if (def.rowCount === 0) throw new Error(`slug not found: ${slug}`);
   const { sql_template, realm: slug_realm } = def.rows[0];
-  if (slug_realm !== realm && slug_realm !== 'shared') {
+  // owner sees everything; otherwise the request realm must match the slug's
+  // realm (or the slug is 'shared', visible to all).
+  if (realm !== 'owner' && slug_realm !== realm && slug_realm !== 'shared') {
     throw new Error(`slug ${slug} is realm=${slug_realm}; refusing to serve to realm=${realm}`);
   }
   const { sql, args } = bindNamedParams(sql_template, params);
