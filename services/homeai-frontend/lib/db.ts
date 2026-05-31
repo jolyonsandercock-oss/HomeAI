@@ -107,6 +107,24 @@ export async function runSlug(slug: string, params: Record<string, unknown> = {}
   return runSlugDirect(slug, params, realm);
 }
 
+// Invoices exception workflow — confirm or categorise a purchase (the latter
+// applies across the vendor). Write happens inside the SECURITY DEFINER
+// home_ai.verify_purchase fn, so the readonly role only needs EXECUTE.
+export async function verifyPurchase(body: { purchase_id: number; action: 'confirm' | 'categorise'; category?: string | null }) {
+  const p = pool();
+  const client = await p.connect();
+  try {
+    await client.query(`SELECT home_ai.set_realm('work')`);
+    const r = await client.query(
+      `SELECT home_ai.verify_purchase($1, $2, $3) AS affected`,
+      [body.purchase_id, body.action, body.category ?? null]
+    );
+    return { ok: true, affected: r.rows[0]?.affected ?? 0 };
+  } finally {
+    client.release();
+  }
+}
+
 export interface SandboxCommentPost {
   component_id: string; comment_text: string;
   page_path?: string | null; author?: string | null;

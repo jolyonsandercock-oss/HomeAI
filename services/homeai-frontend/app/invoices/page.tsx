@@ -34,6 +34,7 @@ const DEPT_COLOR: Record<string, string> = {
 };
 const REALM_COLOR: Record<string, string> = { work: '#f59e0b', personal: '#a78bfa', owner: '#22d3ee' };
 const DEPTS = ['kitchen', 'bar', 'overhead', 'accommodation', 'unmapped'];
+const CATEGORIES = ['food', 'drink_alcohol', 'drink_soft', 'packaging', 'cleaning', 'utilities', 'services', 'repairs', 'capex', 'other'];
 
 function num(s: string | number | null | undefined): number {
   if (s == null) return 0;
@@ -78,6 +79,20 @@ export default function InvoicesPage() {
 
   const kpi = kpis.data?.[0];
   const confRow = conf.data?.[0];
+
+  // Exception workflow — confirm or categorise (categorise applies across the vendor).
+  const [catSel, setCatSel] = useState<Record<number, string>>({});
+  const [busy, setBusy] = useState<number | null>(null);
+  const act = async (id: number, action: 'confirm' | 'categorise', category?: string) => {
+    setBusy(id);
+    try {
+      await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/api/invoices/verify`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ purchase_id: id, action, category }),
+      });
+      await Promise.all([excs.refetch(), kpis.refetch(), grouped.refetch(), conf.refetch()]);
+    } finally { setBusy(null); }
+  };
 
   // Pivot month×department → recharts stacked rows.
   const monthChart = useMemo(() => {
@@ -301,12 +316,24 @@ export default function InvoicesPage() {
                         <span className={'px-1.5 py-0.5 rounded text-[10px] ' + (r.issue === 'low confidence' ? 'bg-red-500/20 text-red-300' : 'bg-amber-500/20 text-amber-300')}>{r.issue}</span>
                       </td>
                       <td className="px-2 py-1 text-ink-500">{r.extraction_tier}</td>
-                      <td className="px-2 py-1"><span className="text-ink-600" title="Verify actions land in v2">confirm / categorise →</span></td>
+                      <td className="px-2 py-1">
+                        <div className="flex items-center gap-1">
+                          <select value={catSel[r.id] ?? ''} onChange={e => setCatSel(s => ({ ...s, [r.id]: e.target.value }))}
+                            className="bg-ink-100 border border-ink-200 rounded px-1 py-0.5 text-[11px]">
+                            <option value="">category…</option>
+                            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                          <button disabled={!catSel[r.id] || busy === r.id} onClick={() => act(r.id, 'categorise', catSel[r.id])}
+                            className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 disabled:opacity-40 text-[11px]">apply</button>
+                          <button disabled={busy === r.id} onClick={() => act(r.id, 'confirm')}
+                            className="px-1.5 py-0.5 rounded bg-ink-200 text-ink-700 disabled:opacity-40 text-[11px]">confirm</button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <p className="mt-2 text-[11px] text-ink-500">Confirm / categorise actions wire to the verify pipeline in the next pass (v2).</p>
+              <p className="mt-2 text-[11px] text-ink-500">“Apply” sets the category on this invoice <em>and every uncategorised invoice from the same vendor</em>, then marks them verified — the queue shrinks as you go.</p>
             </div>
           )}
         </Section>
