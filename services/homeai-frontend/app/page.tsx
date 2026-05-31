@@ -265,13 +265,6 @@ export default function DashboardPage() {
           <span className="text-red-300">numbers on this page may be out-of-date.</span>
         </div>
       )}
-      {/* KPI traffic-light band (U234) — management + operational, with levers */}
-      {isToday && (
-        <SandboxWrapper id="dashboard.kpis" label="KPI traffic light">
-          <KpiTrafficLight />
-        </SandboxWrapper>
-      )}
-
       {/* ROW 1: Revenue tile + Labour tile */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <SandboxWrapper id="dashboard.revenue" label="Revenue today">
@@ -359,6 +352,14 @@ export default function DashboardPage() {
           </Link>
         </SandboxWrapper>
       </div>
+
+      {/* KPI traffic-light band (U234) — strategic health summary, sits below
+          the live revenue/labour row so the page leads with "what's happening now" */}
+      {isToday && (
+        <SandboxWrapper id="dashboard.kpis" label="KPI traffic light">
+          <KpiTrafficLight />
+        </SandboxWrapper>
+      )}
 
       {/* ROW 2: 7-day week strip (today + 6 forward) — each day is a Link */}
       <SandboxWrapper id="dashboard.week" label="Week strip">
