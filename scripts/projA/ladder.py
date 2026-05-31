@@ -71,9 +71,8 @@ def gate(rec, tol=0.02):
 
 
 # ─── OCR ────────────────────────────────────────────────────────
-def fetch_ocr_text(acct, mid, stored=None):
-    if stored and len(stored) >= 50:
-        return stored
+def fetch_pdf_bytes(acct, mid):
+    """Raw bytes of the first PDF attachment, or None."""
     try:
         a = json.load(urllib.request.urlopen(f"{GF}/attachments/{acct}/{mid}", timeout=20))
     except Exception:
@@ -83,16 +82,35 @@ def fetch_ocr_text(acct, mid, stored=None):
     if not pdf: return None
     try:
         o = json.load(urllib.request.urlopen(f"{GF}/attachment/{acct}/{mid}/{pdf['attachment_id']}", timeout=45))
-        raw = base64.urlsafe_b64decode(o["data_b64url"] + "=" * (-len(o["data_b64url"]) % 4))
+        return base64.urlsafe_b64decode(o["data_b64url"] + "=" * (-len(o["data_b64url"]) % 4))
     except Exception:
         return None
+
+
+def _multipart(raw):
     b = "---b"
     body = (f"--{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"x.pdf\"\r\n"
             f"Content-Type: application/pdf\r\n\r\n").encode() + raw + f"\r\n--{b}--\r\n".encode()
+    return body, b
+
+
+def pdf_to_text(raw):
+    body, b = _multipart(raw)
     req = urllib.request.Request(f"{PDF_PL}/extract-pdf", data=body,
         headers={"Content-Type": f"multipart/form-data; boundary={b}"}, method="POST")
     try:
         return json.load(urllib.request.urlopen(req, timeout=60)).get("text") or ""
+    except Exception:
+        return ""
+
+
+def pdf_to_png_b64(raw):
+    """Render page 1 → PNG (pdfplumber service); base64 for Claude vision."""
+    body, b = _multipart(raw)
+    req = urllib.request.Request(f"{PDF_PL}/render-page1-png?width=1400", data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={b}"}, method="POST")
+    try:
+        return base64.standard_b64encode(urllib.request.urlopen(req, timeout=60).read()).decode("ascii")
     except Exception:
         return None
 
@@ -135,6 +153,22 @@ def extract_anthropic(client, text, model):
         sys.stderr.write(f"{model} err: {str(e)[:120]}\n"); return None, 0, 0
 
 
+def extract_vision(client, png_b64, model):
+    """Anthropic tool-use on a page image (image-only PDFs). Returns (dict|None, in, out)."""
+    tool = {"name": "extract_invoice", "description": "Record invoice fields.", "input_schema": _SCHEMA}
+    try:
+        resp = client.messages.create(
+            model=model, max_tokens=1500, system=_SYS, tools=[tool],
+            tool_choice={"type": "tool", "name": "extract_invoice"},
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": png_b64}},
+                {"type": "text", "text": "Extract the fields from this invoice image."}]}])
+        tu = [b for b in resp.content if b.type == "tool_use"]
+        return (tu[0].input if tu else None), resp.usage.input_tokens, resp.usage.output_tokens
+    except Exception as e:
+        sys.stderr.write(f"{model} vision err: {str(e)[:120]}\n"); return None, 0, 0
+
+
 def _cost(model, itok, otok):
     pin, pout = PRICE.get(model, (0, 0))
     return itok * pin / 1e6 + otok * pout / 1e6
@@ -146,47 +180,64 @@ async def run_ladder(client, conn, row, state):
     key = f"purch:{acct}:{mid}"
     if await conn.fetchval("SELECT 1 FROM purchases WHERE idempotency_key=$1", key):
         state["skip"] += 1; return
-    text = fetch_ocr_text(acct, mid, row.get("pdf_text_extracted"))
-    if not text or len(text) < 30:
-        state["no_text"] += 1; return
-
     realm = derive_realm(acct, row.get("entity_id"))
-    result, tier, conf = None, None, 0.0
 
-    # Tier 0 — local
-    d = extract_local(text)
-    if d is not None:
-        result, tier, conf = d, "local", float(d.get("confidence") or 0)
-        if d.get("is_invoice") is False and conf >= TIER_THRESHOLD["local"]:
-            await _write(conn, row, key, realm, d, "local", conf, False); state["not_invoice"] += 1; return
-        ok, _ = gate(d)
-        if not (ok and conf >= TIER_THRESHOLD["local"]):
-            result = None  # escalate
+    stored = row.get("pdf_text_extracted")
+    text = stored if (stored and len(stored) >= 50) else None
+    raw = None
+    if text is None:
+        raw = fetch_pdf_bytes(acct, mid)
+        if raw:
+            text = pdf_to_text(raw)
 
-    # Cloud tiers (respect spend ceiling)
+    use_vision = (not text or len(text) < 30)
+    png_b64 = None
+    if use_vision:
+        if raw is None:
+            raw = fetch_pdf_bytes(acct, mid)
+        png_b64 = pdf_to_png_b64(raw) if raw else None
+        if png_b64 is None:
+            state["no_text"] += 1; return
+
+    result, tier, conf, lastd = None, None, 0.0, None
+
+    # Tier 0 — local (text only; qwen is not a vision model)
+    if not use_vision:
+        d = extract_local(text)
+        if d is not None:
+            lastd = d; cf = float(d.get("confidence") or 0)
+            if d.get("is_invoice") is False and cf >= TIER_THRESHOLD["local"]:
+                await _write(conn, row, key, realm, d, "local", cf, False); state["not_invoice"] += 1; return
+            ok, _ = gate(d)
+            if ok and cf >= TIER_THRESHOLD["local"]:
+                result, tier, conf = d, "local", cf
+
+    # Cloud tiers — text or vision, respecting the spend ceiling
     for model, tname in ((HAIKU, "haiku"), (SONNET, "sonnet")):
         if result is not None: break
         if state["cloud_usd"] >= state["ceiling"]:
             state["ceiling_hit"] = True; break
-        d, itok, otok = extract_anthropic(client, text, model)
-        c = _cost(model, itok, otok)
-        state["cloud_usd"] += c; state["in_tok"] += itok; state["out_tok"] += otok
-        state[f"calls_{tname}"] += 1
+        if use_vision:
+            d, itok, otok = extract_vision(client, png_b64, model); label = tname + "_vision"
+        else:
+            d, itok, otok = extract_anthropic(client, text, model); label = tname
+        state["cloud_usd"] += _cost(model, itok, otok)
+        state["in_tok"] += itok; state["out_tok"] += otok
+        state[f"calls_{tname}"] = state.get(f"calls_{tname}", 0) + 1
         if d is None: continue
-        cf = float(d.get("confidence") or 0)
+        lastd = d; cf = float(d.get("confidence") or 0)
         if d.get("is_invoice") is False and cf >= TIER_THRESHOLD[tname]:
-            await _write(conn, row, key, realm, d, tname, cf, False); state["not_invoice"] += 1; return
+            await _write(conn, row, key, realm, d, label, cf, False); state["not_invoice"] += 1; return
         ok, _ = gate(d)
         if ok and cf >= TIER_THRESHOLD[tname]:
-            result, tier, conf = d, tname, cf
+            result, tier, conf = d, label, cf
 
     if result is not None:
         await _write(conn, row, key, realm, result, tier, conf, True)
-        state["accepted"] += 1; state[f"acc_{tier}"] += 1
+        state["accepted"] += 1
+        state[f"acc_{tier}"] = state.get(f"acc_{tier}", 0) + 1
     else:
-        # exhausted → best-effort row to the human verify queue (gate_passed=false)
-        best = d if 'd' in dir() and d else extract_local(text) or {}
-        await _write(conn, row, key, realm, best, tier or "local", conf, False)
+        await _write(conn, row, key, realm, lastd or {}, tier or ("vision" if use_vision else "local"), conf, False)
         state["to_verify"] += 1
 
 
