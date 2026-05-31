@@ -11,10 +11,33 @@ shows a concrete lever** — the action staff should take that day to pull it ba
 to green. Benchmarks sourced from UK pub/inn 2025 industry data (see refs).
 
 ## Delivery order (per Jo, 2026-05-31)
-1. **Spec** (this doc).
-2. **Close Tier-1 data gaps** — seed targets, build stocktake capture, fix
-   covers ingestion.
-3. **Build the traffic-light KPI section** with action recommendations.
+1. ✅ **Spec** (this doc).
+2. ◑ **Close Tier-1 data gaps** —
+   - ✅ Targets seeded (`kpi_targets`, V218, benchmarked + draft levers).
+   - ✅ Salaried-staff disambiguation (`salaried_staff`, V219): Karl Ramsey GM
+     £40k from 2026-05-20; salary is source of truth, his hourly Tanda shifts
+     excluded (labour corrected 18.6%→16.8%).
+   - ⏸️ **Stocktake — DEFERRED** (Jo: "no stock levels currently, may be built
+     in future"). GP/prime-cost stay flagged provisional until it lands.
+   - ⚙️ **Covers ingestion — still open**: `epos_daily_reports.covers` exists
+     but the TouchOffice bridge never populates it. Fix needed to unlock
+     spend-per-head + covers/labour-hour. (Not yet done.)
+3. ✅ **Traffic-light KPI section built + deployed** — `v_kpi_live` +
+   `kpi_dashboard` slug (V220) + `KpiTrafficLight` component on the dashboard.
+   7 buildable-now KPIs live with status + levers. **Provisional KPIs render
+   muted (not green)** so incomplete-data metrics don't mislead.
+
+### Live status of the 7 KPIs (2026-05-31)
+prime_cost 31.3% · labour_pct 16.8% · food_gp 82.7% · wet_gp 95.1% (all
+**provisional** — capture/labour incomplete) · sales_vs_lw +77% green ·
+cogs_coverage 77% amber (lever shown) · cashup_variance £0 green.
+
+### Remaining
+- Covers ingestion (TouchOffice bridge) → spend-per-head, covers/labour-hour.
+- Jo to refine the draft levers + tune thresholds in `kpi_targets`.
+- Labour completeness: confirm hourly data covers all non-salaried staff
+  (labour reads ~17%, low vs 25–30% norm — likely still partial).
+- Tier-2/3 data (reviews, accom depth, utilities, recipes) per roadmap below.
 
 ---
 
