@@ -42,10 +42,15 @@ _ACCOUNT_REALM = {"info": "work", "admin": "work", "jo": "personal", "pounana": 
 
 
 def derive_realm(account, entity_id):
-    if account and account.lower() in _ACCOUNT_REALM:
-        return _ACCOUNT_REALM[account.lower()]
+    # U233: entity is AUTHORITATIVE. An ARTL/entity-1 invoice is 'work' even if
+    # it landed in a personal inbox (account='jo'). The receiving inbox must not
+    # override the classified entity — that was tagging pub invoices 'personal'
+    # purely because Jo received/forwarded them. Account is a fallback only when
+    # entity is unknown.
     if entity_id == 1: return "work"
     if entity_id in (2, 3, 4): return "personal"
+    if account and account.lower() in _ACCOUNT_REALM:
+        return _ACCOUNT_REALM[account.lower()]
     return "owner"
 
 
