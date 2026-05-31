@@ -1,0 +1,19 @@
+30 7 * * * docker exec homeai-bot-responder python3 /app/weather-sync.py >> /home_ai/logs/weather-sync.log 2>&1
+20 * * * * cd /home_ai && bash scripts/u35-invoice-pdf-extract.sh 200 >> /home_ai/logs/u35-extract.log 2>&1
+# TouchOffice realtime scrape — every 15 min (overlap guard prevents concurrent runs)
+*/15 * * * * bash /home_ai/scripts/u33-touchoffice-realtime.sh >> /home_ai/logs/touchoffice-realtime.log 2>&1
+# Bridge to epos_daily_reports — runs every 30 min (after scrape has had time)
+*/30 * * * * docker exec -i homeai-bot-responder python3 - < /home_ai/scripts/touchoffice-to-epos.py >> /home_ai/logs/touchoffice-bridge.log 2>&1
+50 6 * * * bash scripts/u95-harvest-cron.sh 3 >> /home_ai/logs/u95-harvest.log 2>&1
+30 3 * * * bash /home_ai/scripts/u27-touchoffice-daily.sh >> /home_ai/logs/u27-touchoffice-daily.log 2>&1
+0 7 * * * bash /home_ai/scripts/u29-workforce-sync.sh 7 >> /home_ai/logs/u29-workforce-sync.log 2>&1
+15 7 * * * bash /home_ai/scripts/u135-dojo-inbox-sweep.sh >> /home_ai/logs/u135-dojo-sweep.log 2>&1
+30 7 * * * bash /home_ai/scripts/u28-caterbook-daily.sh >> /home_ai/logs/u28-caterbook-daily.log 2>&1
+0 6 * * * python3 /home_ai/scripts/u133-scrape-tides.py >> /home_ai/logs/u133-tides.log 2>&1
+0 5 * * * python3 /home_ai/scripts/auto-classify.py >> /home_ai/logs/auto-classify.log 2>&1
+0 */6 * * * bash /home_ai/scripts/u29-heartbeat.sh >> /home_ai/logs/u29-heartbeat.log 2>&1
+50 23 * * * bash scripts/update-master-status.sh >> /home_ai/logs/update-master-status.log 2>&1
+40 7 * * * bash /home_ai/scripts/projA/projA-daily.sh >> /home_ai/logs/projA-daily.log 2>&1
+* * * * * bash /home_ai/scripts/u66-telegram-bot.sh >> /home_ai/logs/u66-telegram-bot.log 2>&1
+*/2 * * * * bash /home_ai/scripts/u29-instructions-poll.sh >> /home_ai/logs/u29-instructions-poll.log 2>&1
+* * * * * bash /home_ai/scripts/u33-bot-responder.sh >> /home_ai/logs/u33-bot-responder.log 2>&1
