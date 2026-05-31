@@ -1,11 +1,12 @@
 import {
-  LayoutDashboard, Receipt, Bed, UtensilsCrossed, Wine, Coffee,
+  LayoutDashboard, Receipt, FileText, Bed, UtensilsCrossed, Wine, Coffee,
   Users, MessageSquare, ListChecks, Wrench, Activity,
 } from 'lucide-react';
 
 export const NAV = [
   { href: '/',              label: 'Dashboard',     icon: LayoutDashboard, mobile: true },
   { href: '/sales',         label: 'Sales',         icon: Receipt,         mobile: true },
+  { href: '/invoices',      label: 'Invoices',      icon: FileText,        mobile: false },
   { href: '/rooms',         label: 'Rooms',         icon: Bed,             mobile: true },
   { href: '/restaurant',    label: 'Restaurant',    icon: UtensilsCrossed, mobile: false },
   { href: '/bar',           label: 'Bar',           icon: Wine,            mobile: false },
