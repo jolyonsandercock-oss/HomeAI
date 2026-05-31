@@ -356,7 +356,7 @@ export default function StaffPage() {
       {/* Wage % */}
       <SandboxWrapper id="staff.wage-tracker" label="Wage %">
         <Section title="Wage % tracker">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[1, 7, 30].map((d) => {
               const r = wage.data?.find(x => Number(x.days) === d);
               const pct = r?.pct != null ? parseFloat(r.pct) : null;

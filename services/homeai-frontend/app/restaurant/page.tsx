@@ -119,7 +119,7 @@ export default function RestaurantPage() {
 
       <SandboxWrapper id="restaurant.kpi" label="Restaurant KPIs">
         <Section title="Tonight on the book">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <KPICard label="Bookings" value={total} loading={list.isLoading} />
             <KPICard label="Pax total" value={pax} loading={list.isLoading} />
             <KPICard label="Avg party" value={total ? (pax / total).toFixed(1) : '—'} loading={list.isLoading} />

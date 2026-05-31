@@ -111,7 +111,7 @@ export default function RoomsPage() {
 
       <SandboxWrapper id="rooms.summary" label="Today summary">
         <Section title="Today">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <KPICard label="Arrivals" value={accom.data?.[0]?.arrivals ?? '—'} />
             <KPICard label="Staying" value={accom.data?.[0]?.staying ?? '—'} />
             <KPICard label="Departures" value={accom.data?.[0]?.departures ?? '—'} />

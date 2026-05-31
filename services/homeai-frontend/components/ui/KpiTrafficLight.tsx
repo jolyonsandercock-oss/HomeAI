@@ -71,7 +71,7 @@ export function KpiTrafficLight() {
       {mgmt.length > 0 && (
         <>
           <div className="text-[10px] uppercase tracking-wide text-ink-500 mb-1">Management</div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mb-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2 mb-3">
             {mgmt.map(r => <KpiCard key={r.kpi_key} r={r} />)}
           </div>
         </>
@@ -79,7 +79,7 @@ export function KpiTrafficLight() {
       {ops.length > 0 && (
         <>
           <div className="text-[10px] uppercase tracking-wide text-ink-500 mb-1">Operational</div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
             {ops.map(r => <KpiCard key={r.kpi_key} r={r} />)}
           </div>
         </>
