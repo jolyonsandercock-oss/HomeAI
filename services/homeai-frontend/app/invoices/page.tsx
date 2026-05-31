@@ -27,6 +27,8 @@ interface LineRow {
   realm: string | null; gate_passed: boolean; verified: boolean;
 }
 interface ExcRow { id: number; invoice_date: string | null; vendor_name: string | null; gross_amount: string | null; extraction_tier: string | null; confidence: string | null; issue: string }
+interface GmRow { month: string; dept: string | null; sales: string | null; cogs: string | null; gp_pct: string | null }
+const GM_DEPTS = ['FOOD SALES', 'ALCOHOL SALES', 'HOT DRINKS'];
 
 const DEPT_COLOR: Record<string, string> = {
   kitchen: '#f59e0b', bar: '#fb923c', overhead: '#64748b',
@@ -76,6 +78,7 @@ export default function InvoicesPage() {
   const grouped = useSlug<SummaryRow>('purchase_spend_summary', { ...params, group_by: groupBy });
   const lines   = useSlug<LineRow>('purchase_search', params);
   const excs    = useSlug<ExcRow>('purchase_exceptions', {}, { refetchInterval: 10 * 60_000 });
+  const gm      = useSlug<GmRow>('gross_margin_period', { months: 6 }, { refetchInterval: 10 * 60_000 });
 
   const kpi = kpis.data?.[0];
   const confRow = conf.data?.[0];
@@ -226,6 +229,42 @@ export default function InvoicesPage() {
           </Section>
         </SandboxWrapper>
       </div>
+
+      {/* Gross margin — provisional */}
+      <SandboxWrapper id="invoices.gp" label="Gross margin (provisional)">
+        <Section title="Gross margin — provisional (WIP)">
+          <div className="text-[11px] text-ink-500 italic mb-2">
+            Provisional: COGS is invoice-date based (lumpy) and the category→sales-department mapping is
+            partial, so GP% currently reads high. Capture {confRow?.pct_categorised ?? '—'}% categorised — firms up as both improve.
+          </div>
+          {gm.isLoading ? <div className="text-xs text-ink-500">Loading…</div> :
+           (gm.data ?? []).filter(r => GM_DEPTS.includes(r.dept ?? '')).length === 0 ?
+            <PlaceholderState message="No mapped gross-margin rows yet" /> : (
+            <div className="overflow-auto max-h-[300px] text-xs">
+              <table className="w-full">
+                <thead className="text-ink-500 sticky top-0 bg-ink-50"><tr>
+                  <th className="text-left px-2 py-1">month</th>
+                  <th className="text-left px-2 py-1">department</th>
+                  <th className="text-right px-2 py-1">sales</th>
+                  <th className="text-right px-2 py-1">COGS</th>
+                  <th className="text-right px-2 py-1 italic">GP % (WIP)</th>
+                </tr></thead>
+                <tbody>
+                  {(gm.data ?? []).filter(r => GM_DEPTS.includes(r.dept ?? '')).map((r, i) => (
+                    <tr key={i} className="border-t border-ink-200">
+                      <td className="px-2 py-1">{String(r.month).slice(0, 7)}</td>
+                      <td className="px-2 py-1">{r.dept}</td>
+                      <td className="px-2 py-1 text-right font-mono">{gbp(num(r.sales))}</td>
+                      <td className="px-2 py-1 text-right font-mono">{gbp(num(r.cogs))}</td>
+                      <td className="px-2 py-1 text-right font-mono italic text-ink-400">{r.gp_pct != null ? `${r.gp_pct}%` : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+      </SandboxWrapper>
 
       {/* Waterfall explorer */}
       <SandboxWrapper id="invoices.explorer" label="Spend explorer">
