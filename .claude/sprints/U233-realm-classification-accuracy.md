@@ -36,19 +36,19 @@ accounts = personal). The earlier "bank mis-tagged" hypothesis was wrong.
    0 to a work request (U147 Phase A RLS cap intact); U232 coverage improved
    (Jan 2026 flipped false-`low` → `ok`).
 
-## Held for Jo (decisions I should not make unilaterally)
+## Decisions (resolved by Jo 2026-05-31)
 
-1. **St Joseph's School (£8,436) + Math Academy ($49)** — held as `personal`.
-   They are `entity_id=1` (ARTL) but read as kids'/personal education. The real
-   error is their *entity* (should be 3 personal or 4 family), which would then
-   set realm correctly. Confirm: are these genuinely personal, and which entity?
-   (If St Joseph's is actually the pub catering an event *for* the school, it's
-   work.)
-2. **AREL (entity 2) realm** — AREL is the property business (7 investment
-   properties) but its bank + invoices currently map to `personal`. The realm
-   model (owner/work/personal/family/shared) has no AREL slot. Decide: fold
-   AREL into `work`, keep `personal`, or add a realm. `derive_realm` currently
-   keeps entity 2 → personal (unchanged) pending this.
+1. **St Joseph's School (£8,436) + Math Academy ($49)** — confirmed
+   personal/family. **DONE**: entity corrected `1 → 4` (Family); realm stays
+   `personal` (the only valid personal-side realm for `set_realm`; RLS
+   `personal` sees family+personal+shared). They now sit outside work COGS.
+2. **AREL (entity 2) realm** — **decision: keep `personal` for now**, defer the
+   realm-model question. `derive_realm` already maps entity 2 → personal; no
+   change. Revisit if/when AREL needs its own work surface (own-realm = own
+   sprint).
+
+**Final state**: 620 work/entity-1 invoices, 2 personal/entity-4. Sprint
+complete bar the carried-over refinements below.
 
 ## Findings carried to other sprints
 
