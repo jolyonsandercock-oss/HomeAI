@@ -5,6 +5,68 @@ Format: most recent first. One entry per issue.
 
 ---
 
+## 2026-05-31 — /invoices leaked personal-realm data to work requests (U147 Phase A)
+
+**Symptom:** `GET /app/api/slug/purchase_kpis?realm=personal` over a work
+request returned 65 personal invoices / £62k — the realm toggle could pull
+cross-realm data the work surface should never see.
+
+**Root cause (two compounding bugs):**
+1. **Transaction-scoping.** `lib/db.ts` ran `home_ai.set_realm()` and the slug
+   query as two separate autocommit statements. `set_realm` uses
+   `set_config(..., is_local=true)` (SET LOCAL), so the realm evaporated before
+   the query ran → `app.current_realm` NULL → RLS `realm_isolation` policy hit
+   its transitional `NULL/'' -> TRUE` branch and returned all realms.
+2. **Views bypass RLS.** The invoice views (`v_purchase_search` etc.) are owned
+   by `postgres` (BYPASSRLS) and were created WITHOUT `security_invoker`, so
+   SELECTs through them evaluate RLS as the view owner — bypassing it entirely.
+   The `:realm` SQL param (driven by the page's realm toggle) was then the only
+   realm filter, so `:realm='personal'` returned personal rows.
+
+**Fix:**
+- `lib/db.ts`: new `withRealm()` helper wraps `set_realm` + the query/write in
+  one transaction (BEGIN/set_realm/…/COMMIT) so SET LOCAL persists for the
+  query and auto-clears on COMMIT (pool-safe). Applied to `runSlugDirect`,
+  `verifyPurchase`, `upsertCashupInput`, `insertSafeMovement`. Rebuilt + shipped.
+- Migration `V216__u147a_view_security_invoker.sql`: `security_invoker=true` on
+  `v_purchase_search`, `v_cogs_period`, `v_gross_margin_period` so they honour
+  RLS as the calling role.
+
+**Verified:** `purchase_kpis?realm=personal` → 0 / null (was £62k/65);
+`?realm=work` → £92k/487 intact; all invoice/sales slugs http 200.
+
+**Follow-up (tracked in U147 sprint doc):** full view-layer `security_invoker`
+audit — every postgres-owned view over a realm-aware table has the same
+BYPASSRLS property (e.g. `v_invoice_lines_resolved`, `v_daily_gp`). And the RLS
+`NULL -> TRUE` escape hatch should become default-deny (U147 Phase B).
+
+---
+
+## 2026-05-31 — Caterbook daily report dead-letters in the invoice path
+
+**Symptom:** One unresolved dead letter every morning (~05:07–05:15):
+`invoice.detected` event (e.g. event 11412 / DL 1052) `verdict=dead_letter on
+node master-router`, retry_count=3.
+
+**Root cause:** The Caterbook "Arrivals and Departures" email
+(`no-reply@caterbook.net`) is classified `report-attachment`, and the gmail-
+ingest-v1 `Invoice or Report?` IF raises `invoice.detected` for both `invoice`
+**and** `report-attachment`. Master Router then tries to extract an invoice,
+finds none, retries 3×, and dead-letters. Caterbook is handled by its own
+dedicated u28 pipeline and is never an invoice, so this recurred daily.
+(Broader finding: many notification senders — Dext, Amazon shipment-tracking,
+Airbnb — also raise `invoice.detected` but extract gracefully to "not an
+invoice"; only Caterbook dead-letters because its mail has no extractable PDF.)
+
+**Fix:** Inserted a `Not Caterbook?` guard IF in gmail-ingest-v1 between
+`Invoice or Report?`(true) and `INSERT invoice.detected` — condition
+`from_address notContains caterbook.net`; false branch routes to `Write Audit
+Log` (still audited, not silently dropped). DL 1052 resolved (not replayed —
+genuinely not an invoice). The broad false-positive surface is tracked as
+separate invoice-capture-quality work, not a dead-letter cause.
+
+---
+
 ## 2026-05-01 — Metabase crash-loop on first boot
 
 **Symptom:** `homeai-metabase` crash-looping with
@@ -414,3 +476,13 @@ order:
 **Why this matters:** Item 1 of the 2026-05-08 sprint (synthetic email
 test) is blocked on this. Real Gmail Ingest will hit the same wall once
 emails start arriving. Resolving it is the precondition for Step 11.
+
+## 2026-05-30 — P9 vault path + dead-letter replay
+- **Root cause:** Report Ingestion (P9, report-ingestion-v1) fetched gmail creds from
+  `secret/data/gmail/<account>` → 404 (real path `secret/google/<account>`; admin/info
+  are service-account). Every `document.received` event routed to P9 failed → stale-lease
+  recovery dead-lettered them (31 items, 2026-05-25→30).
+- **Fix:** rewired P9's fetch to call google-fetch `/attachment/{account}/{mid}/{att_id}`
+  (handles oauth + service-account), dropped the Vault-Gmail-Creds + OAuth nodes, Decode
+  node now reads `data_b64url`. Same google-fetch pattern as u35/u49.
+- **Replay:** 31 dead-lettered `document.received` events re-queued (status=pending).

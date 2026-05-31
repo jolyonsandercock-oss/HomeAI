@@ -122,20 +122,23 @@ _SYS = ("Extract structured fields from the OCR text of a UK supplier invoice. "
 
 
 def extract_local(text):
-    """Ollama structured output (format=json schema). Returns dict or None."""
+    """Ollama structured output (format=json schema). Returns (dict|None, in_tok, out_tok, ms)."""
     payload = json.dumps({
         "model": LOCAL_MODEL, "stream": False, "format": _SCHEMA,
         "options": {"temperature": 0},
         "messages": [{"role": "system", "content": _SYS},
                      {"role": "user", "content": f"Invoice text:\n\n{text[:8000]}"}],
     }).encode()
+    t0 = time.time()
     try:
         r = urllib.request.urlopen(urllib.request.Request(
             f"{OLLAMA}/api/chat", data=payload, headers={"Content-Type": "application/json"}), timeout=120)
-        content = json.load(r)["message"]["content"]
-        return json.loads(content)
+        resp = json.load(r)
+        ms = int((time.time() - t0) * 1000)
+        return json.loads(resp["message"]["content"]), resp.get("prompt_eval_count", 0), resp.get("eval_count", 0), ms
     except Exception as e:
-        sys.stderr.write(f"local err: {str(e)[:120]}\n"); return None
+        sys.stderr.write(f"local err: {str(e)[:120]}\n")
+        return None, 0, 0, int((time.time() - t0) * 1000)
 
 
 def extract_anthropic(client, text, model):
@@ -174,6 +177,19 @@ def _cost(model, itok, otok):
     return itok * pin / 1e6 + otok * pout / 1e6
 
 
+async def log_usage(conn, model, tier, in_tok, out_tok, ms, provider, cost, vision=False):
+    """Write one ai_usage row per inference (local AND cloud) so the ledger is complete."""
+    try:
+        await conn.execute("""
+          INSERT INTO ai_usage (task_type, model_used, tier, prompt_tokens, completion_tokens,
+              latency_ms, cached, provider, realm, entity_id, cost_gbp, capability_tag, service)
+          VALUES ($1,$2,$3,$4,$5,$6,false,$7,'owner',1,$8,'CAP_INVOICE_EXTRACT','invoice-ladder')
+        """, 'invoice.extract_vision' if vision else 'invoice.extract', model, tier,
+             int(in_tok or 0), int(out_tok or 0), ms, provider, round(float(cost), 6))
+    except Exception as e:
+        sys.stderr.write(f"ai_usage log err: {str(e)[:90]}\n")
+
+
 # ─── Orchestration ──────────────────────────────────────────────
 async def run_ladder(client, conn, row, state):
     acct, mid = row["account"], row["source_email_id"]
@@ -203,7 +219,8 @@ async def run_ladder(client, conn, row, state):
 
     # Tier 0 — local (text only; qwen is not a vision model)
     if not use_vision:
-        d = extract_local(text)
+        d, l_in, l_out, l_ms = extract_local(text)
+        await log_usage(conn, LOCAL_MODEL, "local", l_in, l_out, l_ms, "ollama", 0.0)
         if d is not None:
             lastd = d; cf = float(d.get("confidence") or 0)
             if d.get("is_invoice") is False and cf >= TIER_THRESHOLD["local"]:
@@ -224,6 +241,7 @@ async def run_ladder(client, conn, row, state):
         state["cloud_usd"] += _cost(model, itok, otok)
         state["in_tok"] += itok; state["out_tok"] += otok
         state[f"calls_{tname}"] = state.get(f"calls_{tname}", 0) + 1
+        await log_usage(conn, model, tname, itok, otok, None, "anthropic", _cost(model, itok, otok), vision=use_vision)
         if d is None: continue
         lastd = d; cf = float(d.get("confidence") or 0)
         if d.get("is_invoice") is False and cf >= TIER_THRESHOLD[tname]:

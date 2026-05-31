@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -80,6 +80,30 @@ function bindNamedParams(sql: string, params: Record<string, unknown>): { sql: s
 // via the runSlug call; until that exists, owner-realm slugs are denied.
 const DEFAULT_REQUEST_REALM = 'work';
 
+// Run queries with app.current_realm pinned for the WHOLE transaction.
+// home_ai.set_realm uses set_config(..., is_local=true) — i.e. SET LOCAL,
+// scoped to the surrounding transaction. It MUST therefore share one
+// transaction with the dependent queries; otherwise each statement is its own
+// autocommit txn, the realm evaporates before the data query runs, and the RLS
+// realm_isolation policy falls back to its NULL/'' -> all-realms branch (U147
+// Bug A — the cause of cross-realm leakage on the read path). Wrapping here is
+// pool-safe: COMMIT/ROLLBACK clears the LOCAL setting for the next borrower.
+async function withRealm<T>(realm: string, fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT home_ai.set_realm($1)', [realm]);
+    const out = await fn(client);
+    await client.query('COMMIT');
+    return out;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch { /* already aborted */ }
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 async function runSlugDirect(slug: string, params: Record<string, unknown>, realm: string): Promise<unknown[]> {
   const p = pool();
   const def = await p.query(
@@ -92,14 +116,10 @@ async function runSlugDirect(slug: string, params: Record<string, unknown>, real
     throw new Error(`slug ${slug} is realm=${slug_realm}; refusing to serve to realm=${realm}`);
   }
   const { sql, args } = bindNamedParams(sql_template, params);
-  const client = await p.connect();
-  try {
-    await client.query(`SELECT home_ai.set_realm($1)`, [realm]);
+  return withRealm(realm, async (client) => {
     const r = await client.query(sql, args);
     return r.rows;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export async function runSlug(slug: string, params: Record<string, unknown> = {}, realm: string = DEFAULT_REQUEST_REALM): Promise<unknown[]> {
@@ -111,18 +131,13 @@ export async function runSlug(slug: string, params: Record<string, unknown> = {}
 // applies across the vendor). Write happens inside the SECURITY DEFINER
 // home_ai.verify_purchase fn, so the readonly role only needs EXECUTE.
 export async function verifyPurchase(body: { purchase_id: number; action: 'confirm' | 'categorise'; category?: string | null }) {
-  const p = pool();
-  const client = await p.connect();
-  try {
-    await client.query(`SELECT home_ai.set_realm('work')`);
+  return withRealm('work', async (client) => {
     const r = await client.query(
       `SELECT home_ai.verify_purchase($1, $2, $3) AS affected`,
       [body.purchase_id, body.action, body.category ?? null]
     );
     return { ok: true, affected: r.rows[0]?.affected ?? 0 };
-  } finally {
-    client.release();
-  }
+  });
 }
 
 export interface SandboxCommentPost {
@@ -164,10 +179,7 @@ export interface CashupInput {
 }
 
 export async function upsertCashupInput(body: CashupInput) {
-  const p = pool();
-  const client = await p.connect();
-  try {
-    await client.query(`SELECT home_ai.set_realm('work')`);
+  return withRealm('work', async (client) => {
     const r = await client.query(
       `INSERT INTO cashup_inputs (site, cashup_date, till_id, cash_taken_pence,
                                   caterpay_pence, collins_deposit_pence,
@@ -187,7 +199,7 @@ export async function upsertCashupInput(body: CashupInput) {
        body.entered_by ?? null]
     );
     return r.rows[0];
-  } finally { client.release(); }
+  });
 }
 
 export interface SafeMovement {
@@ -200,10 +212,7 @@ export interface SafeMovement {
 }
 
 export async function insertSafeMovement(body: SafeMovement) {
-  const p = pool();
-  const client = await p.connect();
-  try {
-    await client.query(`SELECT home_ai.set_realm('work')`);
+  return withRealm('work', async (client) => {
     const r = await client.query(
       `INSERT INTO safe_movements (movement_date, site, direction, amount_pence, notes, entered_by)
        VALUES ($1::date, $2, $3, $4, $5, $6)
@@ -212,7 +221,7 @@ export async function insertSafeMovement(body: SafeMovement) {
        body.notes ?? null, body.entered_by ?? null]
     );
     return r.rows[0];
-  } finally { client.release(); }
+  });
 }
 
 export async function getSandboxComments(componentId?: string, pagePath?: string) {
