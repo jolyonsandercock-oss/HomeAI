@@ -17,3 +17,4 @@
 * * * * * bash /home_ai/scripts/u66-telegram-bot.sh >> /home_ai/logs/u66-telegram-bot.log 2>&1
 */2 * * * * bash /home_ai/scripts/u29-instructions-poll.sh >> /home_ai/logs/u29-instructions-poll.log 2>&1
 * * * * * bash /home_ai/scripts/u33-bot-responder.sh >> /home_ai/logs/u33-bot-responder.log 2>&1
+17 * * * * bash /home_ai/scripts/u236-marketing-sweep.sh >> /home_ai/logs/u236-marketing-sweep.log 2>&1
