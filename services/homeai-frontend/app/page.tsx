@@ -8,6 +8,7 @@ import { Section } from '@/components/ui/Section';
 import { PlaceholderState } from '@/components/ui/PlaceholderState';
 import { PollClock } from '@/components/ui/PollClock';
 import { SandboxWrapper } from '@/components/sandbox/SandboxWrapper';
+import { KpiTrafficLight } from '@/components/ui/KpiTrafficLight';
 import { useSlug } from '@/lib/hooks';
 import { gbp, fmtDay, formatRoom } from '@/lib/format';
 import {
@@ -264,6 +265,13 @@ export default function DashboardPage() {
           <span className="text-red-300">numbers on this page may be out-of-date.</span>
         </div>
       )}
+      {/* KPI traffic-light band (U234) — management + operational, with levers */}
+      {isToday && (
+        <SandboxWrapper id="dashboard.kpis" label="KPI traffic light">
+          <KpiTrafficLight />
+        </SandboxWrapper>
+      )}
+
       {/* ROW 1: Revenue tile + Labour tile */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <SandboxWrapper id="dashboard.revenue" label="Revenue today">
