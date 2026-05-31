@@ -17,6 +17,7 @@ interface AIUsage {
 }
 interface ErrorRow { pipeline: string; action: string; occurrences: number; most_recent: string }
 interface Freshness { source: string; last_data: string; hours_stale: string | number | null }
+interface PipelineLogRow { pipeline: string; action: string; created_at: string; trace_id: string | null; record_type: string | null; record_id: number | null }
 
 function freshnessClass(h: number | null): string {
   if (h == null) return 'text-ink-500';
@@ -28,6 +29,7 @@ function freshnessClass(h: number | null): string {
 export default function BackendPage() {
   const cache = useSlug<Cache>('ai_cache_effectiveness', {}, { refetchInterval: 60_000 });
   const aiUsage = useSlug<AIUsage>('backend_ai_usage_24h', {}, { refetchInterval: 60_000 });
+const pipelineLogs = useSlug<PipelineLogRow>('pipeline_audit_recent');
   const errors  = useSlug<ErrorRow>('backend_errors_24h', {}, { refetchInterval: 60_000 });
   const fresh   = useSlug<Freshness>('backend_import_freshness', {}, { refetchInterval: 60_000 });
 
@@ -186,10 +188,35 @@ export default function BackendPage() {
       </SandboxWrapper>
 
       <SandboxWrapper id="backend.action-queue">
-        <Section title="Pipeline logs">
-          <PlaceholderState
-            message="audit_log live stream"
-            hint="Pipeline logs view is in the legacy /agents-ops surface. Migration to this page in next iteration." />
+        <Section title={`Pipeline logs — last 24h (${pipelineLogs.data?.length ?? 0})`}>
+          {pipelineLogs.isLoading ? (
+            <PlaceholderState message="Loading logs…" />
+          ) : (pipelineLogs.data ?? []).length === 0 ? (
+            <PlaceholderState message="No pipeline activity in the last 24h." />
+          ) : (
+            <div className="tile overflow-x-auto text-xs">
+              <table className="w-full font-mono">
+                <thead className="text-ink-500 uppercase tracking-wider">
+                  <tr>
+                    <th className="text-left py-1.5">Time</th>
+                    <th className="text-left">Pipeline</th>
+                    <th className="text-left">Action</th>
+                    <th className="text-left">Record</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(pipelineLogs.data ?? []).slice(0, 30).map((l, i) => (
+                    <tr key={l.trace_id || i} className="border-t border-ink-200">
+                      <td className="py-1 text-ink-500">{new Date(l.created_at).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'})}</td>
+                      <td className="text-ink-800">{l.pipeline}</td>
+                      <td className="text-ink-600">{l.action}</td>
+                      <td className="text-ink-500">{l.record_type || ''}{l.record_id ? ' #' + l.record_id : ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Section>
       </SandboxWrapper>
     </div>
