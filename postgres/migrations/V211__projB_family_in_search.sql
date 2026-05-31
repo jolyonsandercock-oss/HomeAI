@@ -1,15 +1,18 @@
 -- V211__projB_family_in_search.sql — expose product family (the reliable canonical
 -- level) in the search view + slugs, now that purchase_lines are 100% canonicalised.
 
+-- NB: family appended LAST so CREATE OR REPLACE works over the V207 view (can't
+-- insert a column mid-list). On a fresh DB the column order is cosmetic.
 CREATE OR REPLACE VIEW v_purchase_search AS
 SELECT p.id AS purchase_id, pl.id AS line_id, p.invoice_date,
        p.vendor_name, p.vendor_id,
        COALESCE(pl.category, p.category) AS category,
        m.department,
-       pl.product_canonical_id, pc.name AS product, pc.family AS family,
+       pl.product_canonical_id, pc.name AS product,
        pl.description, pl.quantity, pl.unit, pl.unit_price, pl.line_net,
        p.entity_id, p.realm, p.property_id, p.gross_amount AS invoice_gross,
-       p.gate_passed, p.verified
+       p.gate_passed, p.verified,
+       pc.family AS family
 FROM purchases p
 JOIN purchase_lines pl ON pl.purchase_id = p.id
 LEFT JOIN cogs_category_map m ON m.purchase_category = COALESCE(pl.category, p.category)
