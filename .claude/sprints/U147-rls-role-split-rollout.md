@@ -93,7 +93,28 @@ that the original plan didn't anticipate.
 - The RLS `NULL/'' -> TRUE` escape hatch still means any unwrapped query leaks —
   becomes default-deny in B5.
 
-## Phase B — role-layer defence (HIGH risk — PAUSE FOR JO'S GO)
+## Phase B front-half — app-layer realm gate (SHIPPED 2026-05-31)
+
+The work/owner (and personal) **request-realm gate** is built and verified —
+the frontend no longer hardcodes `'work'`. It derives realm from the trusted
+Authelia `Remote-Groups` header (Caddy already forwards it on the forward_auth
+`/app` route): owner→all, work/personal RLS-scoped, **defaults to `work` when
+unauthenticated** so owner/personal data never leaks. The slug-realm guard was
+relaxed so owner can read any slug (owner sees all). `lib/realm.ts` +
+`app/api/slug/[slug]/route.ts` + `lib/db.ts`.
+
+Verified: owner identity sees owner+work; work identity 403s owner slugs; no
+identity → work only. First use: local Ollama/qwen telemetry on `/backend`
+(owner-gated). **This unblocks adding owner/personal dashboard items.**
+
+Residual hardening (carry into the role-layer work below):
+- The IP-backdoor route (`http://:80`, no forward_auth) doesn't strip a
+  client-supplied `Remote-Groups` → spoofable *on-tailnet only*. Strip it /
+  remove the backdoor.
+- Writes (`verifyPurchase` etc.) still hardcode `work` — fine for now (work-only
+  writes), revisit when personal/owner write surfaces appear.
+
+## Phase B back-half — role-layer defence (HIGH risk — PAUSE FOR JO'S GO)
 
 Goal: defence-in-depth so a forgotten `set_realm` can't leak data, by binding
 each service to a realm role and removing the NULL→TRUE escape hatch.
