@@ -1,25 +1,30 @@
 # Next session — opening prompt (draft)
 
-_Updated 2026-05-31 (overnight). Read `MASTER.md` + the two specs + plan first._
+_Updated 2026-05-31 (overnight). Read `MASTER.md` first._
 
-## ACTIVE PROJECT: Invoice Intelligence (Project A → B)
-Specs: `docs/superpowers/specs/2026-05-30-invoice-{intelligence,cogs-analytics}-design.md`
-Plan:  `docs/superpowers/plans/2026-05-31-invoice-capture-projectA.md`
+## ACTIVE: Invoice Intelligence — A done, B search layer done
+Specs/plans in `docs/superpowers/{specs,plans}/2026-05-3*-invoice-*`.
 
-**Done + verified (shadow, zero prod impact):**
-- Stage 1 — `V206` migration applied: `purchases` + `purchase_lines` + `cogs_category_map`, RLS realm-isolation, indexes, grants, seeded map.
-- Stage 2 core — `scripts/projA/ladder.py`: `gate()` + `derive_realm()`, tested 11/11 (`python3 tests/projA/test_gate.py`); `ai_schemas/invoice_extract.schema.json`.
+**Done + verified (all shadow):**
+- **Project A capture** — `ladder.py` (OCR + local→Haiku→Sonnet→human, vision fallback).
+  **613 invoices, 3,411 line items, £226k captured**, 74 personal-realm. Run cost ≈ **$3.73**.
+- **Project B searchable layer** — V207 views (`v_purchase_search`, `v_cogs_period`,
+  `v_gross_margin_period`) + V208 slugs (`purchase_search`, `purchase_spend_summary`,
+  `gross_margin_period`, `cogs_capture_confidence`). **Verified searchable by vendor /
+  department / line-item / business+property** via the API; bot heuristic added.
 
-**Resume here (Stage 2 → 4, plan has the task list):**
-1. `scripts/projA/ocr.py` — pdfplumber + vision fallback, persist PDF.
-2. Ladder tier callers in `ladder.py` — local (Ollama qwen2.5 `format`) → Haiku → Sonnet tool-use against the schema; `run_ladder(row)` orchestration writing `purchases`/`purchase_lines` (idempotent, realm-tagged, gate-gated).
-3. `scripts/projA/backfill.py` — bounded 12-mo backfill with a **hard cloud-spend ceiling**; validate on `--limit 25` before scaling. **Why I paused here:** this is the first step that spends cloud $ and needs quality eyeballing — wanted a checkpoint, not a blind paid run.
-4. Slugs: `purchases_recent`, `purchases_unverified`, `purchases_by_category` (+ smoke-test).
-5. **[HUMAN]** `/invoices/review` UX, per-surface cutover behind flags + parity gate, retire legacy `invoices` — none of this autonomously.
+**Resume here:**
+1. **[HUMAN] Frontend filter table** — the visual table-filter surface (Tabulator-style
+   on `purchase_search`) + the `/sales` COGS section (GP% / category / vendor / price-creep
+   panels). Plan tasks S4 + Task 5. Needs Jo's eyeball.
+2. **Quality (lifts everything):** category backfill (currently **55.8% categorised** →
+   `vendor_category_rules` + Haiku) and **product/vendor canonicalisation** (collapse
+   "Guinness"/"Forest Produce" name variants → cleaner aggregation + truer GP%). Plan S1 + Task 1.
+3. **GP% caveat:** gross-margin reads high (95–100%) *because* COGS is undercounted while
+   categorisation is partial — fixing #2 firms it up. `cogs_capture_confidence` surfaces this.
+4. Diagnose the **252 unreadable PDFs** (don't render to text or image — likely not valid PDFs).
+5. Verify qwen actually maps "spend on Guinness" → `purchase_spend_summary` (heuristic added, untested).
 
-## Other open items (from before)
-- **Xero Sync (P3)** not live; **U147** RLS-role connection migration (services still on `postgres` superuser).
-- P9 fix validated only on replayed events — confirm next real `document.received` is clean.
-- Heartbeat now **6-hourly always-emit** — sanity-check Telegram volume.
-- Trail + Dojo scrapers parked (broken/CAPTCHA).
-- `booking-scraper.py`/`weather-sync.py` run from bot-responder `/app` writable layer → recreate wipes them.
+## Other open items
+- Xero Sync (P3) not live; U147 RLS-role connection migration (services on `postgres` superuser).
+- Heartbeat now 6-hourly always-emit; Trail/Dojo scrapers parked; booking/weather run from /app writable layer.
