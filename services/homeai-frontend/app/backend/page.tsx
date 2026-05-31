@@ -83,7 +83,7 @@ export default function BackendPage() {
         <Section title="AI usage — last 24h">
           {aiUsage.isLoading ? <PlaceholderState message="Loading…" /> :
            aiUsage.data && aiUsage.data.length > 0 ? (
-            <div className="tile">
+            <div className="tile overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-xs text-ink-500 uppercase tracking-wider">
                   <tr>
@@ -124,7 +124,7 @@ export default function BackendPage() {
         <Section title={`Errors / firing alerts — last 24h (${errors.data?.length ?? 0})`}>
           {errors.isLoading ? <PlaceholderState message="Loading…" /> :
            errors.data && errors.data.length > 0 ? (
-            <div className="tile">
+            <div className="tile overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-xs text-ink-500 uppercase tracking-wider">
                   <tr>
@@ -155,7 +155,7 @@ export default function BackendPage() {
           {cache.isLoading ? (
             <PlaceholderState message="Loading…" />
           ) : cache.data && cache.data.length > 0 ? (
-            <div className="tile">
+            <div className="tile overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-xs text-ink-500 uppercase tracking-wider">
                   <tr>

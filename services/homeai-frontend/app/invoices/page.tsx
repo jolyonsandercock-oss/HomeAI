@@ -255,9 +255,9 @@ export default function InvoicesPage() {
                   <div key={i}
                     title={`${String(r.month).slice(0, 7)} · captured ${gbp(num(r.captured_cogs))} · ${r.invoice_count} invoices · ${r.pct_of_prev3 ?? '—'}% of prior-3mo avg`}
                     className="flex flex-col items-center px-1.5 py-1 rounded border border-ink-200 bg-ink-50 min-w-[42px]">
-                    <span className="text-[9px] text-ink-500">{String(r.month).slice(0, 7).slice(2)}</span>
+                    <span className="text-[10px] text-ink-500">{String(r.month).slice(0, 7).slice(2)}</span>
                     <span className="w-2 h-2 rounded-full my-0.5" style={{ background: COV_COLOR[r.completeness] ?? '#64748b' }} />
-                    <span className="text-[9px] font-mono text-ink-600">{r.invoice_count}</span>
+                    <span className="text-[10px] font-mono text-ink-600">{r.invoice_count}</span>
                   </div>
                 ))}
               </div>

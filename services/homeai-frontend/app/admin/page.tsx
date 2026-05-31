@@ -33,7 +33,7 @@ export default function AdminPage() {
           {invs.isLoading ? (
             <PlaceholderState message="Loading invoices…" />
           ) : invs.data && invs.data.length > 0 ? (
-            <div className="tile">
+            <div className="tile overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-xs text-ink-500 uppercase tracking-wider">
                   <tr>
@@ -72,7 +72,7 @@ export default function AdminPage() {
       <SandboxWrapper id="admin.compliance" label="Compliance calendar">
         <Section title="Compliance / obligations — next 30 days">
           {obs.data && obs.data.length > 0 ? (
-            <div className="tile">
+            <div className="tile overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-xs text-ink-500 uppercase tracking-wider">
                   <tr>

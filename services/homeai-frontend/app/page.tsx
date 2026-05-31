@@ -235,7 +235,7 @@ export default function DashboardPage() {
   const viewedLabel = viewedDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {!isToday && (
         <div
           role="status"
