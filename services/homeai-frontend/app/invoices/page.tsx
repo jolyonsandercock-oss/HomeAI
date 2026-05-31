@@ -28,7 +28,9 @@ interface LineRow {
 }
 interface ExcRow { id: number; invoice_date: string | null; vendor_name: string | null; gross_amount: string | null; extraction_tier: string | null; confidence: string | null; issue: string }
 interface GmRow { month: string; dept: string | null; sales: string | null; cogs: string | null; gp_pct: string | null }
+interface CovRow { month: string; captured_cogs: string | null; invoice_count: string; vendor_count: string; prev3_avg_cogs: string | null; pct_of_prev3: string | null; completeness: 'ok' | 'low' | 'empty' }
 const GM_DEPTS = ['FOOD SALES', 'ALCOHOL SALES', 'HOT DRINKS'];
+const COV_COLOR: Record<string, string> = { ok: '#22c55e', low: '#f59e0b', empty: '#ef4444' };
 
 const DEPT_COLOR: Record<string, string> = {
   kitchen: '#f59e0b', bar: '#fb923c', overhead: '#64748b',
@@ -79,6 +81,7 @@ export default function InvoicesPage() {
   const lines   = useSlug<LineRow>('purchase_search', params);
   const excs    = useSlug<ExcRow>('purchase_exceptions', {}, { refetchInterval: 10 * 60_000 });
   const gm      = useSlug<GmRow>('gross_margin_period', { months: 6 }, { refetchInterval: 10 * 60_000 });
+  const cov     = useSlug<CovRow>('cogs_capture_coverage', { months: 12 }, { refetchInterval: 10 * 60_000 });
 
   const kpi = kpis.data?.[0];
   const confRow = conf.data?.[0];
@@ -236,7 +239,35 @@ export default function InvoicesPage() {
           <div className="text-[11px] text-ink-500 italic mb-2">
             Provisional: COGS is invoice-date based (lumpy) and the category→sales-department mapping is
             partial, so GP% currently reads high. Capture {confRow?.pct_categorised ?? '—'}% categorised — firms up as both improve.
+            {(() => {
+              const bad = (cov.data ?? []).filter(r => r.completeness !== 'ok');
+              if (bad.length === 0) return null;
+              return <> <span className="text-amber-500 not-italic">⚠ {bad.length} month{bad.length > 1 ? 's' : ''} with thin invoice capture — GP% for those is unreliable.</span></>;
+            })()}
           </div>
+
+          {/* Capture-completeness strip (U232 T3): per-month captured COGS vs trailing avg */}
+          {(cov.data ?? []).length > 0 && (
+            <div className="mb-3">
+              <div className="text-[10px] uppercase tracking-wide text-ink-500 mb-1">Capture completeness (last 12mo)</div>
+              <div className="flex flex-wrap gap-1">
+                {[...(cov.data ?? [])].reverse().map((r, i) => (
+                  <div key={i}
+                    title={`${String(r.month).slice(0, 7)} · captured ${gbp(num(r.captured_cogs))} · ${r.invoice_count} invoices · ${r.pct_of_prev3 ?? '—'}% of prior-3mo avg`}
+                    className="flex flex-col items-center px-1.5 py-1 rounded border border-ink-200 bg-ink-50 min-w-[42px]">
+                    <span className="text-[9px] text-ink-500">{String(r.month).slice(0, 7).slice(2)}</span>
+                    <span className="w-2 h-2 rounded-full my-0.5" style={{ background: COV_COLOR[r.completeness] ?? '#64748b' }} />
+                    <span className="text-[9px] font-mono text-ink-600">{r.invoice_count}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="text-[10px] text-ink-500 mt-1 flex gap-3">
+                <span><span className="inline-block w-2 h-2 rounded-full mr-1 align-middle" style={{ background: COV_COLOR.ok }} />ok</span>
+                <span><span className="inline-block w-2 h-2 rounded-full mr-1 align-middle" style={{ background: COV_COLOR.low }} />thin (&lt;50% of trailing avg)</span>
+                <span><span className="inline-block w-2 h-2 rounded-full mr-1 align-middle" style={{ background: COV_COLOR.empty }} />empty</span>
+              </div>
+            </div>
+          )}
           {gm.isLoading ? <div className="text-xs text-ink-500">Loading…</div> :
            (gm.data ?? []).filter(r => GM_DEPTS.includes(r.dept ?? '')).length === 0 ?
             <PlaceholderState message="No mapped gross-margin rows yet" /> : (

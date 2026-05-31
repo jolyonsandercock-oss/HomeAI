@@ -93,6 +93,22 @@ selector misses emit a debug dump + alert.
 
 ## Track 3 — Coverage indicator (honest GP%)
 
+> **Increment 1 SHIPPED 2026-05-31** (V217 + slug `cogs_capture_coverage` +
+> `/invoices` completeness strip). Self-contained (purchases-only): per-month
+> captured COGS with a trailing-3mo flag (empty/low/ok). Live verify: 2026-01
+> and 2025-05 flagged `low`; GP panel now warns when months are unreliable.
+>
+> **Increment 2 (bank-anchored true coverage) is BLOCKED — key finding:**
+> `bank_transactions` is well-populated (10,141 rows, 2019–2026, fully
+> categorised) but **~99% are tagged `realm='personal'`** (£4.28M) with only 87
+> `realm='work'` rows (£66k). For a pub-scale business this is almost certainly
+> the **business banking mis-classified as personal** — the same systemic realm
+> mis-assignment seen on invoices (Western Supply, RCC Roofing). A
+> captured-vs-paid coverage ratio needs that fixed first. **Recommend a
+> dedicated realm-reclassification / data-quality sprint** (also fixes invoice
+> realm accuracy and unblocks the work-realm rollout) — needs Jo's judgment on
+> what is genuinely business vs personal; not safe to auto-retag 10k rows.
+
 **Build**:
 - Migration `V217__u232_cogs_coverage.sql`: view `v_cogs_coverage` —
   per (month, realm='work'): `captured_cogs` (Σ `purchase_lines.line_net` over
