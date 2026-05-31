@@ -15,11 +15,14 @@ count=0
 for csv in "$INBOX"/Transactions_*.csv "$INBOX"/transactions*.csv "$INBOX"/dojo*.csv; do
   [ -f "$csv" ] || continue
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] importing $csv"
-  if docker exec -i homeai-postgres bash -c "cat > /tmp/dojo-$(basename "$csv")" < "$csv" \
-     && docker exec -e PG_DSN=postgresql://postgres@/homeai homeai-postgres \
-        python3 /home_ai/scripts/dojo-import.py "/tmp/dojo-$(basename "$csv")"; then
+  # Run the importer in homeai-bot-responder (has python3 + asyncpg + PG_DSN).
+  # NOTE: the postgres container has no python3 — running it there silently
+  # fails with "python3 not found" (U235 fix). cp the script + CSV in.
+  if docker cp /home_ai/scripts/dojo-import.py homeai-bot-responder:/tmp/dojo-import.py >/dev/null \
+     && docker cp "$csv" homeai-bot-responder:/tmp/dojo-in.csv >/dev/null \
+     && docker exec homeai-bot-responder python3 /tmp/dojo-import.py /tmp/dojo-in.csv; then
     mv "$csv" "$ARCHIVE/$(date +%Y%m%d-%H%M%S)-$(basename "$csv")"
-    docker exec homeai-postgres rm -f "/tmp/dojo-$(basename "$csv")" 2>/dev/null || true
+    docker exec homeai-bot-responder rm -f /tmp/dojo-in.csv 2>/dev/null || true
     count=$((count+1))
   else
     echo "[FAIL] $csv — left in place" >&2
