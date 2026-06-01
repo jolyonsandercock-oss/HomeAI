@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Receipt, FileText, Bed, UtensilsCrossed, Wine, Coffee,
-  Users, MessageSquare, ListChecks, Wrench, Activity,
+  Users, User, MessageSquare, ListChecks, Wrench, Activity,
 } from 'lucide-react';
 
 export const NAV = [
@@ -12,6 +12,7 @@ export const NAV = [
   { href: '/bar',           label: 'Bar',           icon: Wine,            mobile: false },
   { href: '/cafe',          label: 'Café',          icon: Coffee,          mobile: false },
   { href: '/staff',         label: 'Staff',         icon: Users,           mobile: false },
+  { href: '/personal',      label: 'Personal',      icon: User,            mobile: false },
   { href: '/comms',         label: 'Comms',         icon: MessageSquare,   mobile: true },
   { href: '/tasks',         label: 'Tasks',         icon: ListChecks,      mobile: false },
   { href: '/admin',         label: 'Admin',         icon: Wrench,          mobile: false },
