@@ -17,11 +17,7 @@ export function Sidebar() {
     window.location.href = url.toString();
   };
 
-  const visibleNav = NAV.filter(item => {
-    if (realm === 'personal') return item.realm === 'personal';
-    // In work mode: show work items first, then personal items at bottom
-    return true;
-  });
+  const visibleNav = NAV.filter(() => true); // personal sees all, work filters below
 
   const workItems = NAV.filter(i => i.realm === 'work');
   const personalItems = NAV.filter(i => i.realm === 'personal');
@@ -50,11 +46,11 @@ export function Sidebar() {
       </div>
       <nav className="px-2 py-3 space-y-0.5 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 140px)' }}>
         {realm === 'personal' ? (
-          // Personal mode — only personal items
-          personalItems.map(({ href, label, icon: Icon }) => {
+          // Personal mode — all items, no divider
+          NAV.map(({ href, label, icon: Icon }) => {
             const active = pathname === href || (href !== '/' && pathname.startsWith(href));
             return (
-              <Link key={href} href={`${href}?realm=personal`}
+              <Link key={href} href={href}
                 aria-current={active ? 'page' : undefined}
                 className={
                   'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ' +
@@ -93,7 +89,7 @@ export function Sidebar() {
             {personalItems.map(({ href, label, icon: Icon }) => {
               const active = pathname === href || (href !== '/' && pathname.startsWith(href));
               return (
-                <Link key={href} href={`${href}?realm=personal`}
+                <Link key={href} href={href}
                   aria-current={active ? 'page' : undefined}
                   className={
                     'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ' +
