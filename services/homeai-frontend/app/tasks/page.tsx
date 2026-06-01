@@ -31,6 +31,8 @@ interface LineDetail {
   has_pdf_text: boolean;
 }
 
+interface SnagRow { id: number; title: string; description: string | null; image_path: string | null; category: string; priority: number; status: string; source: string; submitted_by: string | null; created_at: string }
+
 interface ExpenseExceptionRow {
   kind: string;
   line_id: number | null;
@@ -372,6 +374,70 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
   );
 }
 
+function SnagInboxSection() {
+  const snags = useSlug<SnagRow>('snag_inbox_pending', {}, { refetchInterval: 60_000 });
+  const [actingId, setActingId] = useState<number | null>(null);
+
+  const counts = { pending: (snags.data ?? []).filter(s => s.status === 'pending').length, accepted: (snags.data ?? []).filter(s => s.status === 'accepted').length, in_progress: (snags.data ?? []).filter(s => s.status === 'in_progress').length };
+
+  const handleStatus = async (id: number, status: string) => {
+    setActingId(id);
+    try { await fetch('/app/api/snag/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, status }) }); } catch {}
+    setActingId(null);
+  };
+
+  return (
+    <>
+      {snags.isLoading ? (
+        <PlaceholderState message="Loading snag inbox\u2026" />
+      ) : (snags.data ?? []).length === 0 ? (
+        <PlaceholderState message="Snag inbox empty \u2014 all clear!" />
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-2 mb-3 text-xs">
+            <div className="bg-ink-100 rounded px-2 py-1 text-center"><span className="text-amber-400 font-bold">{counts.pending}</span> pending</div>
+            <div className="bg-ink-100 rounded px-2 py-1 text-center"><span className="text-blue-400 font-bold">{counts.in_progress}</span> in progress</div>
+            <div className="bg-ink-100 rounded px-2 py-1 text-center"><span className="text-ink-500 font-bold">{counts.accepted}</span> accepted</div>
+          </div>
+          <div className="tile overflow-x-auto text-xs">
+            <table className="w-full">
+              <thead className="text-ink-500 uppercase tracking-wider">
+                <tr>
+                  <th className="text-left py-1.5">P</th>
+                  <th className="text-left">Title</th>
+                  <th className="text-left">Category</th>
+                  <th className="text-right">Source</th>
+                  <th className="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(snags.data ?? []).map(s => (
+                  <tr key={s.id} className="border-t border-ink-200">
+                    <td className={'py-1.5 font-bold ' + (s.priority <= 2 ? 'text-red-400' : s.priority <= 3 ? 'text-amber-400' : 'text-ink-500')}>P{s.priority}</td>
+                    <td className="text-ink-800 max-w-[300px] truncate" title={s.title}>{s.title}</td>
+                    <td className="text-ink-500">{s.category}</td>
+                    <td className="text-right text-ink-500">{s.source}</td>
+                    <td className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => handleStatus(s.id, 'accepted')} disabled={actingId === s.id || s.status !== 'pending'}
+                          className="px-2 py-0.5 text-2xs rounded bg-blue-900/30 text-blue-400 hover:bg-blue-900/50 disabled:opacity-30">Accept</button>
+                        <button onClick={() => handleStatus(s.id, 'done')} disabled={actingId === s.id}
+                          className="px-2 py-0.5 text-2xs rounded bg-amber-500 text-ink-0 hover:bg-amber-400 disabled:opacity-30">Done</button>
+                        <button onClick={() => handleStatus(s.id, 'wontfix')} disabled={actingId === s.id}
+                          className="px-2 py-0.5 text-2xs rounded bg-red-900/30 text-red-400 hover:bg-red-900/50 disabled:opacity-30">Skip</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 function ExpenseExceptionSection() {
   const [selectedRow, setSelectedRow] = useState<ExpenseExceptionRow | null>(null);
   const [siteFilter, setSiteFilter] = useState('all');
@@ -482,6 +548,12 @@ function ExpenseExceptionSection() {
         </>
       )}
       {selectedRow && <AssignModal row={selectedRow} onClose={() => setSelectedRow(null)} />}
+
+      <SandboxWrapper id="tasks.snag-inbox" label="Snag inbox">
+        <Section title={`Snag inbox \u2014 improvements, complaints, UX feedback`}>
+          <SnagInboxSection />
+        </Section>
+      </SandboxWrapper>
     </div>
   );
 }
