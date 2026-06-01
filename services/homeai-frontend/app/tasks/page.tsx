@@ -375,6 +375,7 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
 }
 
 function SnagInboxSection() {
+  const [showForm, setShowForm] = useState(false);
   const snags = useSlug<SnagRow>('snag_inbox_pending', {}, { refetchInterval: 60_000 });
   const [actingId, setActingId] = useState<number | null>(null);
 
@@ -388,6 +389,84 @@ function SnagInboxSection() {
 
   return (
     <>
+      {/* Submission form */}
+      <div className="mb-4 tile p-3">
+        <div className="text-xs text-ink-500 uppercase mb-2">Submit new snag</div>
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          const form = e.currentTarget;
+          const fd = new FormData();
+          fd.append('title', (form.querySelector('[name=title]') as HTMLInputElement).value);
+          fd.append('description', (form.querySelector('[name=desc]') as HTMLTextAreaElement).value);
+          fd.append('category', (form.querySelector('[name=category]') as HTMLSelectElement).value);
+          fd.append('priority', (form.querySelector('[name=priority]') as HTMLSelectElement).value);
+          const fileInput = form.querySelector('[name=image]') as HTMLInputElement;
+          if (fileInput.files?.[0]) fd.append('image', fileInput.files[0]);
+          try {
+            const res = await fetch('/app/api/snag/upload', { method: 'POST', body: fd });
+            if (!res.ok) throw new Error('Upload failed');
+            (form as HTMLFormElement).reset();
+            (form.querySelector('.preview-img') as HTMLElement).style.display = 'none';
+            setShowForm(false);
+            setTimeout(() => window.location.reload(), 500);
+          } catch (err) { alert('Failed to submit. Try again.'); }
+        }} className="space-y-2">
+          <input name="title" placeholder="What's the issue?" required className="w-full bg-ink-50 border border-ink-200 rounded px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:outline-none focus:border-amber-500" />
+          <textarea name="desc" placeholder="Description (optional)" rows={2} className="w-full bg-ink-50 border border-ink-200 rounded px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:outline-none focus:border-amber-500" />
+          <div className="flex gap-2">
+            <select name="category" defaultValue="improvement" className="bg-ink-50 border border-ink-200 rounded px-2 py-1.5 text-xs text-ink-700">
+              <option value="improvement">Improvement</option>
+              <option value="bug">Bug</option>
+              <option value="complaint">Complaint</option>
+              <option value="ux">UX feedback</option>
+              <option value="other">Other</option>
+            </select>
+            <select name="priority" defaultValue="2" className="bg-ink-50 border border-ink-200 rounded px-2 py-1.5 text-xs text-ink-700">
+              <option value="1">P1 — Urgent</option>
+              <option value="2">P2 — Normal</option>
+              <option value="3">P3 — Low</option>
+            </select>
+          </div>
+          <div 
+            className="border-2 border-dashed border-ink-300 rounded p-3 text-center cursor-pointer hover:border-amber-500 transition-colors"
+            onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-amber-500'); }}
+            onDragLeave={(e) => e.currentTarget.classList.remove('border-amber-500')}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.currentTarget.classList.remove('border-amber-500');
+              const file = e.dataTransfer.files[0];
+              if (file && file.type.startsWith('image/')) {
+                const dt = new DataTransfer();
+                dt.items.add(file);
+                const input = e.currentTarget.querySelector('input[type=file]') as HTMLInputElement;
+                input.files = dt.files;
+                const preview = e.currentTarget.querySelector('.preview-img') as HTMLImageElement;
+                preview.src = URL.createObjectURL(file);
+                preview.style.display = 'block';
+              }
+            }}
+            onClick={(e) => {
+              const input = (e.currentTarget.querySelector('input[type=file]') as HTMLInputElement);
+              if (e.target !== input) input.click();
+            }}
+          >
+            <input 
+              type="file" name="image" accept="image/*" className="hidden"
+              onChange={(e) => {
+                const file = e.currentTarget.files?.[0];
+                if (file) {
+                  const preview = e.currentTarget.parentElement?.querySelector('.preview-img') as HTMLImageElement;
+                  if (preview) { preview.src = URL.createObjectURL(file); preview.style.display = 'block'; }
+                }
+              }}
+            />
+            <img className="preview-img hidden max-h-40 mx-auto mb-2 rounded" alt="Preview" />
+            <div className="text-xs text-ink-400">Drop a screenshot here or click to upload</div>
+          </div>
+          <button type="submit" className="w-full bg-amber-500 text-ink-50 rounded px-3 py-2 text-sm font-medium hover:bg-amber-400 transition-colors">Submit snag</button>
+        </form>
+      </div>
+
       {snags.isLoading ? (
         <PlaceholderState message="Loading snag inbox\u2026" />
       ) : (snags.data ?? []).length === 0 ? (
