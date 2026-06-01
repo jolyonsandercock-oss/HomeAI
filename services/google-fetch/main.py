@@ -540,6 +540,36 @@ async def send_email(account: str, req: SendEmailRequest):
     }
 
 
+@app.post("/draft/{account}")
+async def create_draft(account: str, req: SendEmailRequest):
+    """Create a Gmail DRAFT (not sent) as `account` — lands in the account's
+    Drafts folder for review/edit/send. Covered by gmail.modify."""
+    import base64
+    acc = await find_account(account)
+    tok = await access_token(acc)
+    raw = _build_rfc822(acc["email"], req)
+    encoded = base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+    t0 = time.time()
+    r = await app.state.http.post(
+        "https://gmail.googleapis.com/gmail/v1/users/me/drafts",
+        json={"message": {"raw": encoded}},
+        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+    )
+    dur = int((time.time() - t0) * 1000)
+    await log_call(account, "gmail", "drafts.create", r.status_code, dur,
+                   None if r.status_code == 200 else r.text[:300])
+    if r.status_code != 200:
+        raise HTTPException(r.status_code, r.text)
+    body = r.json()
+    return {
+        "account":    account,
+        "draft_id":   body.get("id"),
+        "message_id": body.get("message", {}).get("id"),
+        "to":         _as_list(req.to),
+        "subject":    req.subject,
+    }
+
+
 # ─── /forward — preserve attachments via raw RFC822 ────────────
 @app.post("/forward/{account}/{message_id}")
 async def forward_email(account: str, message_id: str,
