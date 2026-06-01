@@ -431,6 +431,25 @@ function SnagInboxSection() {
             className="border-2 border-dashed border-ink-300 rounded p-3 text-center cursor-pointer hover:border-amber-500 transition-colors"
             onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-amber-500'); }}
             onDragLeave={(e) => e.currentTarget.classList.remove('border-amber-500')}
+            onPaste={(e) => {
+              const items = e.clipboardData?.items;
+              if (!items) return;
+              for (let i = 0; i < items.length; i++) {
+                if (items[i].type.startsWith('image/')) {
+                  e.preventDefault();
+                  const file = items[i].getAsFile();
+                  if (!file) continue;
+                  const dt = new DataTransfer();
+                  dt.items.add(file);
+                  const input = e.currentTarget.querySelector('input[type=file]') as HTMLInputElement;
+                  input.files = dt.files;
+                  const preview = e.currentTarget.querySelector('.preview-img') as HTMLImageElement;
+                  preview.src = URL.createObjectURL(file);
+                  preview.style.display = 'block';
+                  break;
+                }
+              }
+            }}
             onDrop={(e) => {
               e.preventDefault();
               e.currentTarget.classList.remove('border-amber-500');
