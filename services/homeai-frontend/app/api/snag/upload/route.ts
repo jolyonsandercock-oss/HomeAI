@@ -27,14 +27,14 @@ export async function POST(req: NextRequest) {
 
   // Save image if provided
   if (image && image.size > 0) {
-    const dir = "/home_ai/storage/snags";
+    const dir = "/app/public/snags";
     await mkdir(dir, { recursive: true });
     const ext = image.name.split(".").pop() || "png";
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const filepath = join(dir, filename);
     const buffer = Buffer.from(await image.arrayBuffer());
     await writeFile(filepath, buffer);
-    imagePath = `/home_ai/storage/snags/${filename}`;
+    imagePath = `/snags/${filename}`;
   }
 
   // Insert into snag_inbox
