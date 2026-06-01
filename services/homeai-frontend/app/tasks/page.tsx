@@ -408,10 +408,10 @@ function SnagInboxSection() {
             (form as HTMLFormElement).reset();
             (form.querySelector('.preview-img') as HTMLElement).style.display = 'none';
             setShowForm(false);
-            setTimeout(() => window.location.reload(), 500);
+            
           } catch (err) { alert('Failed to submit. Try again.'); }
         }} className="space-y-2">
-          <input name="title" placeholder="What's the issue?" required className="w-full bg-ink-50 border border-ink-200 rounded px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:outline-none focus:border-amber-500" />
+          <input name="title" placeholder="What's the issue? (paste screenshot with Ctrl+V here)" required onPaste={(e) => { const items = e.clipboardData?.items; if (!items) return; for (let i = 0; i < items.length; i++) { if (items[i].type.startsWith("image/")) { e.preventDefault(); const file = items[i].getAsFile(); if (!file) continue; const dt = new DataTransfer(); dt.items.add(file); const fi = e.currentTarget.parentElement?.querySelector('input[type=file]') as HTMLInputElement; fi.files = dt.files; const pv = e.currentTarget.parentElement?.querySelector('.preview-img') as HTMLImageElement; if (pv) { pv.src = URL.createObjectURL(file); pv.style.display = "block"; } break; } } }} className="w-full bg-ink-50 border border-ink-200 rounded px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:outline-none focus:border-amber-500" />
           <textarea name="desc" placeholder="Description (optional)" rows={2} className="w-full bg-ink-50 border border-ink-200 rounded px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:outline-none focus:border-amber-500" />
           <div className="flex gap-2">
             <select name="category" defaultValue="improvement" className="bg-ink-50 border border-ink-200 rounded px-2 py-1.5 text-xs text-ink-700">
@@ -464,10 +464,7 @@ function SnagInboxSection() {
                 preview.style.display = 'block';
               }
             }}
-            onClick={(e) => {
-              const input = (e.currentTarget.querySelector('input[type=file]') as HTMLInputElement);
-              if (e.target !== input) input.click();
-            }}
+            
           >
             <input 
               type="file" name="image" accept="image/*" className="hidden"
@@ -480,7 +477,7 @@ function SnagInboxSection() {
               }}
             />
             <img className="preview-img hidden max-h-40 mx-auto mb-2 rounded" alt="Preview" />
-            <div className="text-xs text-ink-400">Drop a screenshot here or click to upload</div>
+            <div className="text-xs text-ink-400">Drop a screenshot, click to upload, or click here then Ctrl+V to paste</div>
           </div>
           <button type="submit" className="w-full bg-amber-500 text-ink-50 rounded px-3 py-2 text-sm font-medium hover:bg-amber-400 transition-colors">Submit snag</button>
         </form>
