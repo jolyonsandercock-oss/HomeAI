@@ -154,3 +154,37 @@ many pipeline jobs). Work landed:
 - dc2f416 hermes-reply.sh: fix printf bug with leading-dash format strings
 - 0276f0d U234 + U235 + U236: Mission Control upload tile, alerting close-out, Hermes outbox
 - 586d8d4 Action Hermes 2026-05-30 drops — CLAUDE.md + sunset/food analysis
+
+### 2026-05-31 → 06-01
+Big session. Security, COGS/KPIs, data backfills, comms restore.
+- **U147 Phase A (security) — cross-realm leak CLOSED.** `/invoices` (and all
+  slugs) were serving every realm to work requests: `set_realm` ran outside a
+  txn (SET LOCAL evaporated → RLS NULL→all) AND the invoice views bypassed RLS
+  (postgres-owned, no `security_invoker`). Fixed both (`withRealm()` txn wrapper
+  in lib/db.ts; V216 `security_invoker` on v_purchase_search/cogs/margin).
+  Verified personal data no longer reachable at work realm.
+- **U147 Phase B (front-half) — work/owner realm GATE shipped.** Frontend now
+  derives realm from the trusted Authelia `Remote-Groups` (lib/realm.ts) instead
+  of hardcoded 'work'; owner sees all, work/personal RLS-scoped, default-deny to
+  work. First use: local Ollama/qwen telemetry surfaced on /backend (owner-only,
+  V222). Unblocks owner/personal dashboard items. Role-layer migration still pending.
+- **U233 — invoice realm mis-classification fixed.** `derive_realm` checked inbox
+  before entity → 76 ARTL invoices tagged personal; made entity-authoritative,
+  retagged 74 → work (£92k→£147k correctly counted); St Joseph's/Math Academy → entity 4.
+- **U232/U234 — COGS coverage signal + KPI traffic-light dashboard.** v_cogs_capture_coverage;
+  kpi_targets + v_kpi_live + kpi_dashboard slug; KpiTrafficLight band on Mission
+  Control (mgmt+ops, action levers, provisional KPIs muted). Salaried-staff table —
+  Karl Ramsey GM £40k is source of truth, hourly Tanda shifts excluded (labour 18.6→16.8%).
+  Jo's real thresholds applied (V223). GP/prime provisional pending stock.
+- **U235/237 — 5yr Gmail backfill.** 72k email headers (info/admin/jo/pounana, 2021→),
+  idempotent, processed=true; bodies backfilling overnight (work first, ~69k).
+- **U236 — marketing/junk sweep.** 2,687 obvious-marketing emails → 'ignored'
+  (operational/family/regulatory protected); hourly forward cron.
+- **Dojo** CSV imported (→05-29; 2797 new); u135 sweep fixed (ran python3 in the
+  postgres container which has none → rerouted via bot-responder). NatWest last-import
+  dates emailed to Jo.
+- **Comms loop restored** — u66-telegram-bot + u29-instructions-poll + u33-bot-responder
+  crons were missing (silent); re-added, drained 3 stuck Telegram msgs. Crontab snapshot committed.
+- **Booking.com reviews** — 6 from screenshot loaded into guest_reviews.
+- **UX pass** — content max-width, mobile table overflow, mobile-first KPI grids, rhythm.
+- Migrations V216–V223. Many commits (d309160 … be5160d).
