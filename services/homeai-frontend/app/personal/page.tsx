@@ -52,6 +52,8 @@ interface MortgageRow {
   secured_against: string;
   document_count: number;
 }
+interface RentalIncomeRow { tenant_name: string; mortgage_ref: string; mortgage_label: string; mortgage_payment: string | number; expected_monthly: string | number; last_payment_date: string | null; last_payment_amount: string | number | null; avg_monthly_amount: string | number; payment_status: string; }
+
 interface BankTxRow {
   id: number;
   transaction_date: string;
@@ -70,6 +72,7 @@ export default function PersonalPage() {
   const creditCards = useSlug<CreditCardRow>('credit_card_status', {}, { refetchInterval: 5 * 60_000 });
   const mortgages = useSlug<MortgageRow>('mortgages_summary', {}, { refetchInterval: 10 * 60_000 });
   const transactions = useSlug<BankTxRow>('personal_bank_transactions', { limit: 50 }, { refetchInterval: 5 * 60_000 });
+  const rental = useSlug<RentalIncomeRow>('rental_income', {}, { refetchInterval: 10 * 60_000 });
   const personalLoans = useSlug<any>('personal_loans', {}, { refetchInterval: 10 * 60_000 });
 
   const nw = netWorth.data?.[0];
@@ -325,6 +328,63 @@ export default function PersonalPage() {
               ))}
             </div>
           ) : <PlaceholderState message="No personal loans." />}
+        </Section>
+      </SandboxWrapper>
+
+      <SandboxWrapper id="personal.rental-income" label="Rental income">
+        <Section title="Rental income vs mortgage payments">
+          {rental.isLoading ? <PlaceholderState message="Loading..." /> :
+           rental.data && rental.data.length > 0 ? (
+            <div className="space-y-4">
+              {(() => {
+                const byMortgage = {} as Record<string, any[]>;
+                (rental.data ?? []).forEach((r) => {
+                  if (!byMortgage[r.mortgage_label]) byMortgage[r.mortgage_label] = [];
+                  byMortgage[r.mortgage_label].push(r);
+                });
+                return Object.entries(byMortgage).map(([label, tenants], gi) => {
+                  const totalRent = tenants.reduce((s, t) => s + Number(t.expected_monthly ?? 0), 0);
+                  const mortgage = Number(tenants[0]?.mortgage_payment ?? 0);
+                  const headroom = totalRent - mortgage;
+                  const statusCls = (s: string) => s === 'paid' ? 'text-good' : s === 'late' ? 'text-amber-400' : 'text-warn';
+                  return (
+                    <div key={gi} className="tile p-2">
+                      <div className="flex justify-between items-center mb-2">
+                        <div className="text-xs text-ink-500 uppercase tracking-wider">{label}</div>
+                        <div className="text-xs text-ink-600">
+                          Rent roll <span className="text-ink-800 font-mono">{totalRent.toLocaleString()}</span>
+                          {' vs mortgage '}<span className="text-ink-800 font-mono">{mortgage.toLocaleString()}</span>
+                          {' = '}<span className={headroom >= 0 ? 'text-good font-mono' : 'text-warn font-mono'}>{(headroom >= 0 ? '+' : '')}{headroom.toLocaleString()}</span>/m
+                        </div>
+                      </div>
+                      <table className="w-full text-xs">
+                        <thead className="text-ink-500">
+                          <tr>
+                            <th className="text-left py-0.5">Tenant</th>
+                            <th className="text-right">Expected</th>
+                            <th className="text-right">Last payment</th>
+                            <th className="text-right">Date</th>
+                            <th className="text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tenants.map((t, i) => (
+                            <tr key={i} className="border-t border-ink-200">
+                              <td className="py-0.5 text-ink-700">{t.tenant_name}</td>
+                              <td className="text-right font-mono text-ink-500">{Number(t.expected_monthly).toLocaleString()}</td>
+                              <td className="text-right font-mono text-ink-600">{t.last_payment_amount ? Number(t.last_payment_amount).toLocaleString() : '–'}</td>
+                              <td className="text-right text-ink-500">{t.last_payment_date ? new Date(t.last_payment_date).toLocaleDateString('en-GB', {day:'numeric', month:'short'}) : '–'}</td>
+                              <td className="text-right"><span className={statusCls(t.payment_status)}>{t.payment_status}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          ) : <PlaceholderState message="No rental income data." />}
         </Section>
       </SandboxWrapper>
 
