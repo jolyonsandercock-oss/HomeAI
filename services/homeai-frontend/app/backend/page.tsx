@@ -31,6 +31,7 @@ export default function BackendPage() {
   const cache = useSlug<Cache>('ai_cache_effectiveness', {}, { refetchInterval: 60_000 });
   const aiUsage = useSlug<AIUsage>('backend_ai_usage_24h', {}, { refetchInterval: 60_000 });
 const pipelineLogs = useSlug<PipelineLogRow>('pipeline_audit_recent');
+  const loan = useSlug<any>('youleend_reconciliation', {}, { refetchInterval: 10 * 60_000 });
   const errors  = useSlug<ErrorRow>('backend_errors_24h', {}, { refetchInterval: 60_000 });
   const fresh   = useSlug<Freshness>('backend_import_freshness', {}, { refetchInterval: 60_000 });
   const localAI = useSlug<LocalAI>('backend_local_ai_30d', {}, { refetchInterval: 5 * 60_000 });
@@ -54,6 +55,51 @@ const pipelineLogs = useSlug<PipelineLogRow>('pipeline_audit_recent');
 
       <SandboxWrapper id="backend.expense-rollup" label="Expense rollup">
         <ExpenseRollup />
+      </SandboxWrapper>
+
+      <SandboxWrapper id="backend.loans" label="Loans">
+        <Section title="YouLend — Merchant Cash Advance">
+          {loan.isLoading ? <PlaceholderState message="Loading..." /> :
+           loan.data && loan.data.length > 0 ? (
+            <div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                <KPICard label="Original advance" value={`£${(Number(loan.data[0].original_balance) ?? 0).toLocaleString()}`} />
+                <KPICard label="Remaining balance" value={`£${(Number(loan.data[0].current_balance) ?? 0).toLocaleString()}`} />
+                <KPICard label="Repaid to date" value={`£${((Number(loan.data[0].original_balance) ?? 0) - (Number(loan.data[0].current_balance) ?? 0)).toLocaleString()}`} />
+              </div>
+              <div className="tile overflow-x-auto text-xs">
+                <table className="w-full">
+                  <thead className="text-ink-500 uppercase">
+                    <tr>
+                      <th className="text-left py-1">Date</th>
+                      <th className="text-right">YouLend took</th>
+                      <th className="text-right">Dojo gross</th>
+                      <th className="text-right">Expected 10%</th>
+                      <th className="text-right">Variance</th>
+                      <th className="text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(loan.data ?? []).slice(0, 14).map((r, i) => (
+                      <tr key={i} className="border-t border-ink-200">
+                        <td className="py-1">{new Date(r.repayment_date).toLocaleDateString('en-GB', {day:'numeric', month:'short'})}</td>
+                        <td className="text-right font-mono">{r.youleend_took != null ? `£${Number(r.youleend_took).toFixed(2)}` : '–'}</td>
+                        <td className="text-right font-mono text-ink-500">{r.dojo_gross != null ? `£${Number(r.dojo_gross).toFixed(2)}` : '–'}</td>
+                        <td className="text-right font-mono text-ink-500">£{Number(r.expected_10pct).toFixed(2)}</td>
+                        <td className={`text-right font-mono ${Math.abs(Number(r.variance)) > 0.05 ? 'text-warn' : 'text-ink-500'}`}>{Number(r.variance).toFixed(2)}</td>
+                        <td className="text-center">
+                          <span className={`text-2xs px-1.5 py-0.5 rounded ${r.status === 'match' ? 'bg-green-900/30 text-green-400' : r.status === 'mismatch' ? 'bg-red-900/30 text-red-400' : 'bg-ink-200 text-ink-500'}`}>
+                            {r.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : <PlaceholderState message="No loan data." />}
+        </Section>
       </SandboxWrapper>
 
       <SandboxWrapper id="backend.freshness" label="Import freshness">
