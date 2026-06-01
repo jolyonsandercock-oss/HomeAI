@@ -6,7 +6,6 @@ import { PlaceholderState } from '@/components/ui/PlaceholderState';
 import { SandboxWrapper } from '@/components/sandbox/SandboxWrapper';
 import { KPICard } from '@/components/ui/KPICard';
 import { useSlug } from '@/lib/hooks';
-import { SparkLine } from '@/components/ui/SparkLine';
 import { Star, ExternalLink, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
 
 interface ReviewRow {
@@ -159,17 +158,13 @@ export default function CommsPage() {
                 <div className="label">30d avg rating</div>
                 <div className="kpi-xl mt-1">{sp.avg_rating_30d ? `${parseFloat(sp.avg_rating_30d).toFixed(2)}★` : '—'}</div>
                 <div className="text-xs text-ink-500 mt-0.5">days with reviews only</div>
-                <div className="mt-2 h-10 opacity-70">
-                  <SparkLine values={ratingSeries} colour="#f59e0b" />
-                </div>
+
               </div>
               <div className="tile">
                 <div className="label">30d review count</div>
                 <div className="kpi-xl mt-1">{sp.total_reviews_30d}</div>
                 <div className="text-xs text-ink-500 mt-0.5">total this window</div>
-                <div className="mt-2 h-10 opacity-70">
-                  <SparkLine values={countSeries} colour="#06b6d4" />
-                </div>
+
               </div>
             </div>
           ) : <PlaceholderState message="No reviews in the last 30 days." />}
@@ -179,7 +174,7 @@ export default function CommsPage() {
       <SandboxWrapper id="comms.reviews" label="Reviews">
         <Section title="Reviews — by source (all normalised /5)">
           {reviewSum.isLoading ? <PlaceholderState message="Loading…" /> : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
               {(reviewSum.data ?? []).map((r) => {
                 const avg30   = r.avg_30d      != null ? parseFloat(String(r.avg_30d))      : null;
                 const avgAll  = r.avg_all_time != null ? parseFloat(String(r.avg_all_time)) : null;
@@ -192,12 +187,12 @@ export default function CommsPage() {
                 const trend = (r.trend_4w ?? []).map(v => parseFloat(String(v)) || 0).filter(v => v > 0);
                 const lastReviewDays = r.last_review_at ? Math.floor((Date.now() - new Date(r.last_review_at).getTime()) / 86_400_000) : null;
                 return (
-                  <div key={r.source} className={'tile p-3 ' + (isAggregate ? 'border-amber-500 border-2' : '')}>
+                  <div key={r.source} className={'tile p-2 ' + (isAggregate ? 'border-amber-500 border-2' : '')}>
                     <div className="flex items-center justify-between">
                       <div className="text-xs text-ink-500 uppercase tracking-wider">{r.label}{isAggregate && ' (aggregate)'}</div>
                       {r.source === 'booking_com' && <div className="text-xs text-ink-500" title="Booking.com rates /10; halved here for parity">/10 → /5</div>}
                     </div>
-                    <div className="mt-1 text-2xl font-mono font-semibold text-ink-900">
+                    <div className="mt-0.5 text-lg font-mono font-semibold text-ink-900">
                       {avg30 != null ? `${avg30.toFixed(2)}★` : (avgAll != null ? `${avgAll.toFixed(2)}★` : '—')}
                       <span className="ml-1 text-xs text-ink-500 font-sans normal-case tracking-normal">{avg30 != null ? '30d' : (avgAll != null ? 'all-time' : '')}</span>
                     </div>
@@ -210,11 +205,7 @@ export default function CommsPage() {
                     <div className={'mt-1 text-xs font-mono ' + deltaCls}>
                       7d vs prev 7d: {deltaStr}{delta != null && '★'}
                     </div>
-                    {trend.length > 1 && (
-                      <div className="mt-2 h-6 opacity-70" title="Weekly avg, last 4 weeks">
-                        <SparkLine values={trend} colour={isAggregate ? '#f59e0b' : '#06b6d4'} />
-                      </div>
-                    )}
+
                   </div>
                 );
               })}
