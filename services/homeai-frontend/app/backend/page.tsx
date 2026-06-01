@@ -88,7 +88,7 @@ const pipelineLogs = useSlug<PipelineLogRow>('pipeline_audit_recent');
                         <td className="text-right font-mono text-ink-500">£{Number(r.expected_10pct).toFixed(2)}</td>
                         <td className={`text-right font-mono ${Math.abs(Number(r.variance)) > 0.05 ? 'text-warn' : 'text-ink-500'}`}>{Number(r.variance).toFixed(2)}</td>
                         <td className="text-center">
-                          <span className={`text-2xs px-1.5 py-0.5 rounded ${r.status === 'match' ? 'bg-green-900/30 text-green-400' : r.status === 'mismatch' ? 'bg-red-900/30 text-red-400' : 'bg-ink-200 text-ink-500'}`}>
+                          <span className={`text-2xs px-1.5 py-0.5 rounded ${r.status === 'match' ? 'bg-green-900/30 text-green-400' : r.status === 'manual_topup' ? 'bg-amber-900/30 text-amber-400' : r.status === 'needs_review' ? 'bg-red-900/30 text-red-400' : 'bg-ink-200 text-ink-500'}`}>
                             {r.status}
                           </span>
                         </td>
