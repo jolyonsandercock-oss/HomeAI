@@ -12,11 +12,14 @@ set -uo pipefail
 TODAY=$(date '+%Y-%m-%d')
 
 # ── Overlap guard ────────────────────────────────────────────
-# If any scrape finished within the last 8 minutes, bail. */10 cadence with
-# a 2-3 min runtime per pass means we never naturally re-enter, but a long
+# If a scrape FOR TODAY finished within the last 8 minutes, bail. */10 cadence
+# with a 2-3 min runtime per pass means we never naturally re-enter, but a long
 # stall could queue another invocation; the guard prevents pile-up.
+# NB: scoped to report_date = CURRENT_DATE so a concurrent historical backfill
+# (which writes old report_dates every ~35s) can't permanently trip this guard
+# and starve today's live scrape. See U-fix 2026-06-01.
 LAST_AGE_SEC=$(docker exec homeai-postgres psql -U postgres -d homeai -tA -c \
-  "SELECT COALESCE(EXTRACT(EPOCH FROM (now() - MAX(scraped_at)))::int, 99999) FROM touchoffice_scrapes WHERE scraped_at >= now() - interval '1 hour';" 2>/dev/null || echo 99999)
+  "SELECT COALESCE(EXTRACT(EPOCH FROM (now() - MAX(scraped_at)))::int, 99999) FROM touchoffice_scrapes WHERE scraped_at >= now() - interval '1 hour' AND report_date = CURRENT_DATE;" 2>/dev/null || echo 99999)
 
 if [[ "$LAST_AGE_SEC" =~ ^[0-9]+$ ]] && (( LAST_AGE_SEC < 480 )); then
   echo "$(date -Iseconds) skip — last scrape ${LAST_AGE_SEC}s ago (< 480s)"
