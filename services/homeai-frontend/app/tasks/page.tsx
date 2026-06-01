@@ -391,7 +391,7 @@ function SnagInboxSection() {
       {snags.isLoading ? (
         <PlaceholderState message="Loading snag inbox\u2026" />
       ) : (snags.data ?? []).length === 0 ? (
-        <PlaceholderState message="Snag inbox empty \u2014 all clear!" />
+        <PlaceholderState message="Snag inbox empty \— all clear!" />
       ) : (
         <>
           <div className="grid grid-cols-3 gap-2 mb-3 text-xs">
@@ -550,7 +550,7 @@ function ExpenseExceptionSection() {
       {selectedRow && <AssignModal row={selectedRow} onClose={() => setSelectedRow(null)} />}
 
       <SandboxWrapper id="tasks.snag-inbox" label="Snag inbox">
-        <Section title={`Snag inbox \u2014 improvements, complaints, UX feedback`}>
+        <Section title={`Snag inbox \— improvements, complaints, UX feedback`}>
           <SnagInboxSection />
         </Section>
       </SandboxWrapper>
