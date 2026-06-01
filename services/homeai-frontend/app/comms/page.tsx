@@ -276,12 +276,14 @@ export default function CommsPage() {
                 </thead>
                 <tbody>
                   {tableRows.map(r => {
-                    const score = r.rating5 != null ? parseFloat(String(r.rating5)) : null;
+                    const isBooking = r.source === 'booking_com';
+                    const displayScore = isBooking ? (r.rating_raw != null ? r.rating_raw : null) : (r.rating5 != null ? parseFloat(String(r.rating5)) : null);
+                    const starScore = isBooking && r.rating_raw != null ? r.rating_raw / 2 : displayScore;
                     return (
                       <tr key={r.review_id} className="border-t border-ink-200 align-top">
                         <td className="px-2 py-1.5 font-mono whitespace-nowrap">
-                          <span className="text-amber-500">{score != null ? score.toFixed(1) : '—'}</span>
-                          <span className="ml-1 text-xs text-ink-500">{stars(score != null ? Math.round(score) : null)}</span>
+                          <span className="text-amber-500">{displayScore != null ? displayScore + (isBooking ? '/10' : '') : '—'}</span>
+                          <span className="ml-1 text-xs text-ink-500">{stars(starScore != null ? Math.round(Number(starScore)) : null)}</span>
                         </td>
                         <td className="px-2 py-1.5">{sourceLabel(r.source)}</td>
                         <td className="px-2 py-1.5 whitespace-nowrap text-ink-700">{r.posted_at ? new Date(r.posted_at).toLocaleDateString('en-GB') : '—'}</td>
