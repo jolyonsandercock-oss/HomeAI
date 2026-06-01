@@ -70,6 +70,7 @@ export default function PersonalPage() {
   const creditCards = useSlug<CreditCardRow>('credit_card_status', {}, { refetchInterval: 5 * 60_000 });
   const mortgages = useSlug<MortgageRow>('mortgages_summary', {}, { refetchInterval: 10 * 60_000 });
   const transactions = useSlug<BankTxRow>('personal_bank_transactions', { limit: 50 }, { refetchInterval: 5 * 60_000 });
+  const personalLoans = useSlug<any>('personal_loans', {}, { refetchInterval: 10 * 60_000 });
 
   const nw = netWorth.data?.[0];
   const netWorthNum = nw ? parseFloat(nw.net_worth) : null;
@@ -303,6 +304,27 @@ export default function PersonalPage() {
           ) : (
             <PlaceholderState message="No mortgage accounts." hint="Mortgage data is tracked in the mortgage_accounts table." />
           )}
+        </Section>
+      </SandboxWrapper>
+
+      <SandboxWrapper id="personal.loans" label="Personal loans">
+        <Section title="Personal loans">
+          {personalLoans.isLoading ? <PlaceholderState message="Loading..." /> :
+           personalLoans.data && personalLoans.data.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {personalLoans.data.map((l: any, i: number) => (
+                <div key={i} className="tile p-3">
+                  <div className="text-xs text-ink-500 uppercase">{l.lender}</div>
+                  <div className="text-sm text-ink-700 mt-0.5">{l.account_name}</div>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                    <div><span className="text-ink-500">Original</span><br/><span className="text-ink-800 font-mono">{Number(l.original_balance).toLocaleString()}</span></div>
+                    <div><span className="text-ink-500">Remaining</span><br/><span className="text-warn font-mono">{Number(l.current_balance).toLocaleString()}</span></div>
+                    <div><span className="text-ink-500">Repaid</span><br/><span className="text-good font-mono">{(Number(l.original_balance) - Number(l.current_balance)).toLocaleString()}</span></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : <PlaceholderState message="No personal loans." />}
         </Section>
       </SandboxWrapper>
 
