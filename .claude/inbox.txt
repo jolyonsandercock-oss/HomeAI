@@ -1,0 +1,1 @@
+Task waiting at /home_ai/.claude/tasks/touchoffice-backfill-5y.md — run: cd /home_ai && nohup bash scripts/u27-touchoffice-backfill.sh 2021-06-01 2026-05-30 2 >> logs/u63-touchoffice-backfill-5y.log 2>&1 &
