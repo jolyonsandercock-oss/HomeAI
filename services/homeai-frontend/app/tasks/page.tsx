@@ -376,10 +376,10 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
 
 function SnagInboxSection() {
   const [showForm, setShowForm] = useState(false);
-  const snags = useSlug<SnagRow>('snag_inbox_pending', {}, { refetchInterval: 60_000 });
+  const snags = useSlug<SnagRow>('snag_inbox_pending', {}, { refetchInterval: 5_000 });
   const [actingId, setActingId] = useState<number | null>(null);
 
-  const counts = { pending: (snags.data ?? []).filter(s => s.status === 'pending').length, accepted: (snags.data ?? []).filter(s => s.status === 'accepted').length, in_progress: (snags.data ?? []).filter(s => s.status === 'in_progress').length };
+  const counts = { pending: (snags.data ?? []).filter(s => s.status === 'pending').length, accepted: (snags.data ?? []).filter(s => s.status === 'accepted').length, in_progress: (snags.data ?? []).filter(s => s.status === 'in_progress').length, done: (snags.data ?? []).filter(s => s.status === 'done').length };
 
   const handleStatus = async (id: number, status: string) => {
     setActingId(id);
@@ -489,10 +489,23 @@ function SnagInboxSection() {
         <PlaceholderState message="Snag inbox empty \— all clear!" />
       ) : (
         <>
-          <div className="grid grid-cols-3 gap-2 mb-3 text-xs">
-            <div className="bg-ink-100 rounded px-2 py-1 text-center"><span className="text-amber-400 font-bold">{counts.pending}</span> pending</div>
-            <div className="bg-ink-100 rounded px-2 py-1 text-center"><span className="text-blue-400 font-bold">{counts.in_progress}</span> in progress</div>
-            <div className="bg-ink-100 rounded px-2 py-1 text-center"><span className="text-ink-500 font-bold">{counts.accepted}</span> accepted</div>
+          <div className="grid grid-cols-4 gap-2 mb-3 text-2xs">
+            <div className="bg-amber-900/20 rounded px-2 py-1.5 text-center">
+              <div className="text-amber-400 text-lg font-bold">{counts.pending}</div>
+              <div className="text-amber-500/80">pending</div>
+            </div>
+            <div className="bg-blue-900/20 rounded px-2 py-1.5 text-center">
+              <div className="text-blue-400 text-lg font-bold">{counts.in_progress}</div>
+              <div className="text-blue-400/80">in progress</div>
+            </div>
+            <div className="bg-ink-200 rounded px-2 py-1.5 text-center">
+              <div className="text-ink-600 text-lg font-bold">{counts.accepted}</div>
+              <div className="text-ink-500">accepted</div>
+            </div>
+            <div className="bg-green-900/20 rounded px-2 py-1.5 text-center">
+              <div className="text-green-400 text-lg font-bold">{counts.done}</div>
+              <div className="text-green-500/80">done</div>
+            </div>
           </div>
           <div className="tile overflow-x-auto text-xs">
             <table className="w-full">
