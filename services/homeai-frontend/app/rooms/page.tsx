@@ -31,6 +31,20 @@ interface AccomToday { arrivals: number; departures: number; staying: number }
 interface WeekEcon { week_start: string; room_nights_sold: string; room_nights_capacity: string; pct_occupied: string | null; avg_stay_nights: string | null; room_nights_unsold: string }
 interface RoomRevenue { room_type: string; nights_sold: string; revenue_gbp: string; avg_rate: string }
 
+interface GuestDinner {
+  room: string;
+  guest_name: string | null;
+  guest_email: string | null;
+  guest_phone: string | null;
+  has_dinner_booking: boolean;
+  booking_date: string | null;
+  booking_time: string | null;
+  party_size: number | null;
+  reminder_sent: boolean;
+  reminder_replied: boolean;
+  booking_id: number;
+}
+
 const ROOMS_MASTER = [
   'Room 1 - Double Room', 'Room 2 - Family Room',
   'Room 3 - Double Room', 'Room 4 - Single Room',
@@ -106,6 +120,9 @@ export default function RoomsPage() {
   const accomTomorrow = useSlug<AccomToday>('frontend_accommodation_today', { date: tomorrowDate });
   const weekEcon = useSlug<WeekEcon>('rooms_week_economics', {});
   const roomRev = useSlug<RoomRevenue>('revenue_by_room_type_30d', {});
+  const dinners = useSlug<GuestDinner>('rooms_guest_dinners', dateParam);
+  const [sendingReminder, setSendingReminder] = useState<Record<number, boolean>>({});
+  const [reminderSent, setReminderSent] = useState<Record<number, string>>({});
   const [selected, setSelected] = useState<Room | null>(null);
   const router = useRouter();
   const sp = useSearchParams();
@@ -226,6 +243,95 @@ export default function RoomsPage() {
           </div>
           <div className="text-xs text-ink-500 mt-2">
             Today = guests departing today (stayed last night). Tomorrow = guests departing tomorrow (staying tonight). Counts are guest headcount (adults + children).
+          </div>
+        </Section>
+      </SandboxWrapper>
+
+      {/* #40: Dinner booking tracker */}
+      <SandboxWrapper id="rooms.dinners" label="Dinner bookings">
+        <Section title="Dinner bookings">
+          {/* Scoreboard */}
+          {dinners.data && (
+            <div className="mb-3 flex flex-wrap gap-2 text-xs">
+              <span className="px-2 py-1 bg-good/20 text-good rounded font-mono">
+                {dinners.data.filter(d => d.has_dinner_booking).length}/{dinners.data.length} booked
+              </span>
+              <span className="px-2 py-1 bg-amber-500/20 text-amber-400 rounded font-mono">
+                {dinners.data.filter(d => d.reminder_sent).length} reminders sent
+              </span>
+              <span className="px-2 py-1 bg-ink-200 text-ink-600 rounded font-mono">
+                {dinners.data.filter(d => d.guest_email).length} with email
+              </span>
+            </div>
+          )}
+          <div className="space-y-2">
+            {dinners.isLoading && <div className="text-xs text-ink-500">Loading dinner status…</div>}
+            {dinners.data?.map((d) => (
+              <div key={d.booking_id} className="flex items-center justify-between gap-3 py-2 border-b border-ink-200 last:border-0">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-mono text-ink-900 truncate" title={d.guest_name ?? ''}>
+                    {d.guest_name ?? '—'}
+                  </div>
+                  <div className="text-xs text-ink-500 truncate">{d.room}</div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {d.has_dinner_booking ? (
+                    <span className="text-xs px-2 py-0.5 bg-good/20 text-good rounded font-mono">
+                      booked {d.party_size != null ? `(${d.party_size}p)` : ''}
+                      {d.booking_date ? ` ${new Date(d.booking_date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}` : ''}
+                      {d.booking_time ? ` ${d.booking_time.toString().slice(0, 5)}` : ''}
+                    </span>
+                  ) : d.guest_email ? (
+                    <button
+                      onClick={async () => {
+                        const bid = d.booking_id;
+                        setSendingReminder(prev => ({ ...prev, [bid]: true }));
+                        try {
+                          const resp = await fetch('/api/dinner/remind', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ booking_id: bid, guest_email: d.guest_email }),
+                          });
+                          const data = await resp.json();
+                          setReminderSent(prev => ({ ...prev, [bid]: data.message || 'Sent' }));
+                        } catch (e) {
+                          setReminderSent(prev => ({ ...prev, [bid]: 'Failed' }));
+                        } finally {
+                          setSendingReminder(prev => ({ ...prev, [bid]: false }));
+                          // Refetch after a short delay
+                          setTimeout(() => dinners.refetch?.(), 1000);
+                        }
+                      }}
+                      disabled={sendingReminder[d.booking_id] || !!reminderSent[d.booking_id] || d.reminder_sent}
+                      className={'text-xs px-2 py-0.5 rounded font-mono transition-colors ' +
+                        (d.reminder_sent
+                          ? 'bg-amber-500/20 text-amber-400 cursor-default'
+                          : reminderSent[d.booking_id]
+                            ? 'bg-good/20 text-good cursor-default'
+                            : 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/40 cursor-pointer')}
+                    >
+                      {d.reminder_sent
+                        ? d.reminder_replied ? 'replied' : 'reminded'
+                        : reminderSent[d.booking_id]
+                          ? reminderSent[d.booking_id]
+                          : sendingReminder[d.booking_id]
+                            ? 'sending…'
+                            : 'invite to book'}
+                    </button>
+                  ) : (
+                    <span className="text-xs px-2 py-0.5 bg-ink-200 text-ink-500 rounded font-mono">
+                      no email
+                    </span>
+                  )}
+                  {d.reminder_replied && (
+                    <span className="text-xs text-good">✓</span>
+                  )}
+                </div>
+              </div>
+            ))}
+            {dinners.data?.length === 0 && !dinners.isLoading && (
+              <div className="text-xs text-ink-500 italic">No in-house guests today.</div>
+            )}
           </div>
         </Section>
       </SandboxWrapper>
