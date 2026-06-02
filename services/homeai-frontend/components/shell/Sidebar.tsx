@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { NAV } from './nav';
 import { Briefcase, User } from 'lucide-react';
+import { SnagTicker } from './SnagTicker';
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -106,6 +107,7 @@ export function Sidebar() {
           </>
         )}
       </nav>
+      <SnagTicker />
     </aside>
   );
 }
