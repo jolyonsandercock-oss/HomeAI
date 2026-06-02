@@ -132,9 +132,9 @@ export default function RestaurantPage() {
           {list.isLoading ? (
             <PlaceholderState message="Loading reservations…" />
           ) : list.data && list.data.length > 0 ? (
-            <div className="tile">
+            <div className="tile max-h-[420px] overflow-y-auto">
               <table className="w-full text-sm">
-                <thead className="text-xs text-ink-500 uppercase tracking-wider">
+                <thead className="text-xs text-ink-500 uppercase tracking-wider sticky top-0 bg-ink-0 z-10">
                   <tr>
                     <th className="text-left py-2 font-medium">Time</th>
                     <th className="text-left font-medium">Guest</th>
@@ -166,7 +166,7 @@ export default function RestaurantPage() {
         <Section title={`Kitchen team on today (${kitchen.length})`}>
           {rota.isLoading ? <PlaceholderState message="Loading rota…" /> :
            kitchen.length > 0 ? (
-            <div className="tile">
+            <div className="tile max-h-[420px] overflow-y-auto">
               <div className="flex items-center justify-between mb-2 text-xs">
                 <div className="text-ink-500 uppercase tracking-wider">{kitchenHours.toFixed(1)} hours · {gbp(kitchenCost)}</div>
               </div>

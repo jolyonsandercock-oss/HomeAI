@@ -9,6 +9,7 @@ interface Body {
   category: string;
   site: string;
   vendor_display?: string;
+  realm?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -26,12 +27,13 @@ export async function POST(req: NextRequest) {
     await client.query("SELECT home_ai.set_realm('owner')");
 
     const result = await client.query(
-      `SELECT rule_id FROM home_ai.upsert_vendor_rule($1, $2, $3, $4)`,
+      `SELECT rule_id FROM home_ai.upsert_vendor_rule($1, $2, $3, $4, $5)`,
       [
         body.domain_pattern.toLowerCase().trim(),
         body.category || null,
         body.vendor_display || body.domain_pattern,
         body.site || "shared",
+        body.realm || "work",
       ]
     );
 

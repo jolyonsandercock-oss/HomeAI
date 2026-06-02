@@ -190,10 +190,10 @@ export default function CommsPage() {
                   <div key={r.source} className={'tile p-2 ' + (isAggregate ? 'border-amber-500 border-2' : '')}>
                     <div className="flex items-center justify-between">
                       <div className="text-xs text-ink-500 uppercase tracking-wider">{r.label}{isAggregate && ' (aggregate)'}</div>
-                      {r.source === 'booking_com' && <div className="text-xs text-ink-500" title="Booking.com rates /10; halved here for parity">/10 → /5</div>}
+                      {r.source === 'booking_com' && <div className="text-xs text-ink-500" title="Booking.com raw /10 score (not halved)">/10 (raw)</div>}
                     </div>
                     <div className="mt-0.5 text-lg font-mono font-semibold text-ink-900">
-                      {avg30 != null ? `${avg30.toFixed(2)}★` : (avgAll != null ? `${avgAll.toFixed(2)}★` : '—')}
+                      {r.source === 'booking_com' ? (avg30 != null ? `${(avg30 * 2).toFixed(1)}/10` : (avgAll != null ? `${(avgAll * 2).toFixed(1)}/10` : '—')) : (avg30 != null ? `${avg30.toFixed(2)}★` : (avgAll != null ? `${avgAll.toFixed(2)}★` : '—'))}
                       <span className="ml-1 text-xs text-ink-500 font-sans normal-case tracking-normal">{avg30 != null ? '30d' : (avgAll != null ? 'all-time' : '')}</span>
                     </div>
                     <div className="mt-1 text-xs text-ink-500">

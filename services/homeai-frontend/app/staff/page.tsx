@@ -180,7 +180,7 @@ export default function StaffPage() {
               <div className="flex-1">
                 <div className={`text-sm font-semibold ${tandaState.cls} uppercase tracking-wider`}>{tandaState.label}</div>
                 <div className="text-xs text-ink-700 mt-0.5">Last user-sync {ago(statusRow.users_last_sync)} · {statusRow.active_user_count} active employees</div>
-                <div className="text-xs text-ink-500 mt-0.5">Latest shift in DB: {statusRow.latest_shift_date} · {statusRow.upcoming_shifts} upcoming</div>
+                <div className="text-xs text-ink-500 mt-0.5">Latest shift in DB: {statusRow.latest_shift_date ? new Date(statusRow.latest_shift_date).toLocaleDateString('en-GB') : '—'} · {statusRow.upcoming_shifts} upcoming</div>
               </div>
             </div>
           )}

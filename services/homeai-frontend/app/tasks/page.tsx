@@ -194,6 +194,7 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
   const [dept, setDept] = useState('');
   const [category, setCategory] = useState('');
   const [site, setSite] = useState('');
+  const [realm, setRealm] = useState('work');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [lines, setLines] = useState<LineDetail[] | null>(null);
@@ -201,6 +202,8 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
   const [lineAssignments, setLineAssignments] = useState<Record<number, { dept: string; cat: string }>>({});
   // #10+#27: Apply-to-all tickbox
   const [applyToAll, setApplyToAll] = useState(false);
+  // #49: Selected line for email view
+  const [selectedLineForEmail, setSelectedLineForEmail] = useState<LineDetail | null>(null);
 
   // Fetch line items when modal opens for unassigned_line
   useEffect(() => {
@@ -221,11 +224,13 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
     setDept('');
     setCategory('');
     setSite('');
+    setRealm('work');
     setMessage('');
     setLines(null);
     setLoadingLines(false);
     setLineAssignments({});
     setApplyToAll(false);
+    setSelectedLineForEmail(null);
   }, [row?.vendor_domain, row?.kind]);
 
   if (!row) return null;
@@ -235,6 +240,11 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
   const gmailLink = emailLine?.source_email_id
     ? `https://mail.google.com/mail/u/0/#inbox/${emailLine.source_email_id}`
     : null;
+
+  // #49: For selected line, get its email link
+  const selectedLineGmailLink = selectedLineForEmail?.source_email_id
+    ? `https://mail.google.com/mail/u/0/#inbox/${selectedLineForEmail.source_email_id}`
+    : (selectedLineForEmail ? `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(selectedLineForEmail.description.slice(0, 40))}` : null);
 
   const handleAssign = async () => {
     setSaving(true);
@@ -254,6 +264,7 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
               site: site || row.site || 'shared',
               vendor_display: row.vendor_display,
               department: dept || null,
+              realm: realm,
             }),
           });
         }
@@ -293,6 +304,7 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
             category: category || null,
             site: site || row.site || 'shared',
             vendor_display: row.vendor_display,
+            realm: realm,
           }),
         });
         const data = await res.json();
@@ -312,14 +324,14 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div className="bg-ink-50 border border-ink-200 rounded-lg w-full max-w-md p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-ink-50 border border-ink-200 rounded-lg w-full max-w-lg p-5 shadow-xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-medium text-ink-800">Assign {row.kind === 'unassigned_line' ? 'line item' : 'vendor'}</h3>
           <button onClick={onClose} className="text-ink-400 hover:text-ink-600 text-lg leading-none">&times;</button>
         </div>
         <div className="space-y-2 text-xs text-ink-600 mb-4">
           <p><span className="text-ink-500">Vendor:</span> {row.vendor_display}</p>
-          {/* #14+#26: Email view link */}
+          {/* #14+#26+#49: Email view link */}
           {gmailLink && (
             <p>
               <a href={gmailLink} target="_blank" rel="noopener noreferrer"
@@ -328,8 +340,22 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
               </a>
             </p>
           )}
+          {!gmailLink && row.kind === 'unassigned_line' && (
+            <p>
+              <a href={'https://mail.google.com/mail/u/0/#search/' + encodeURIComponent(row.detail.slice(0, 40))}
+                 target="_blank" rel="noopener noreferrer"
+                 className="text-amber-500 hover:text-amber-400 underline inline-flex items-center gap-1">
+                &#x2197; Search in Gmail for "{row.detail.slice(0, 40)}"
+              </a>
+            </p>
+          )}
           {row.kind === 'unassigned_line' && lines ? (
-            <p><span className="text-ink-500">Lines:</span> {lines.length} line items from this vendor</p>
+            <>
+              <p><span className="text-ink-500">Lines:</span> {lines.length} line items from this vendor</p>
+              {lines.filter(l => !l.department).length > 0 && (
+                <p className="text-warn">{lines.filter(l => !l.department).length} unassigned lines</p>
+              )}
+            </>
           ) : (
             <>
               <p><span className="text-ink-500">Detail:</span> {row.detail}</p>
@@ -350,6 +376,7 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
                     <th className="text-left py-1">Description</th>
                     <th className="text-right py-1">Amount</th>
                     <th className="text-right py-1">Dept</th>
+                    <th className="text-right py-1">Email</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -369,18 +396,63 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
                           <option value="overhead">Overhead</option>
                         </select>
                       </td>
+                      {/* #49: Email link per line */}
+                      <td className="py-1 text-center">
+                        <button
+                          onClick={() => setSelectedLineForEmail(selectedLineForEmail?.line_id === l.line_id ? null : l)}
+                          className="text-amber-500 hover:text-amber-400 text-2xs underline"
+                          title="View source email">
+                          {selectedLineForEmail?.line_id === l.line_id ? 'hide' : 'view'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   {lines.filter(l => !l.department).length === 0 && (
-                    <tr><td colSpan={3} className="py-2 text-center text-ink-500">All lines assigned</td></tr>
+                    <tr><td colSpan={4} className="py-2 text-center text-ink-500">All lines assigned</td></tr>
                   )}
                 </tbody>
               </table>
+            )}
+            {/* #49: Selected line email detail */}
+            {selectedLineForEmail && (
+              <div className="bg-ink-100 border border-ink-200 rounded p-3 text-xs space-y-1 mt-2">
+                <div className="text-ink-500 font-medium">Line detail — {selectedLineForEmail.description}</div>
+                <div><span className="text-ink-500">Subject:</span> {selectedLineForEmail.subject || '—'}</div>
+                <div><span className="text-ink-500">Received:</span> {selectedLineForEmail.received_at ? new Date(selectedLineForEmail.received_at).toLocaleDateString('en-GB', {day:'numeric', month:'short', year:'numeric'}) : '—'}</div>
+                <div><span className="text-ink-500">Has PDF:</span> {selectedLineForEmail.has_pdf_text ? 'Yes' : 'No'}</div>
+                {selectedLineGmailLink && (
+                  <div>
+                    <a href={selectedLineGmailLink} target="_blank" rel="noopener noreferrer"
+                       className="text-amber-500 hover:text-amber-400 underline inline-flex items-center gap-1">
+                      &#x2197; Open in Gmail
+                    </a>
+                  </div>
+                )}
+                {!selectedLineForEmail.source_email_id && (
+                  <div>
+                    <a href={'https://mail.google.com/mail/u/0/#search/' + encodeURIComponent(selectedLineForEmail.description.slice(0, 40))}
+                       target="_blank" rel="noopener noreferrer"
+                       className="text-amber-500 hover:text-amber-400 underline inline-flex items-center gap-1">
+                      &#x2197; Search Gmail for "{selectedLineForEmail.description.slice(0, 30)}"
+                    </a>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         ) : (
           /* Single-item view for vendors */
           <div className="space-y-3">
+            {/* #48: Realm dropdown */}
+            <div>
+              <label className="block text-xs text-ink-500 mb-1">Realm</label>
+              <select value={realm} onChange={(e) => setRealm(e.target.value)}
+                className="w-full bg-ink-100 border border-ink-200 text-ink-800 rounded px-2 py-1.5 text-xs">
+                <option value="work">Work</option>
+                <option value="personal">Personal</option>
+                <option value="arel">AREL (Estates)</option>
+              </select>
+            </div>
             <div>
               <label className="block text-xs text-ink-500 mb-1">Business area</label>
               <select value={site} onChange={(e) => setSite(e.target.value)}
@@ -406,9 +478,19 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
             </div>
           </div>
         )}
-        {/* #10+#27: Apply-to-all tickbox */}
+        {/* #48: Realm dropdown for line-item view too */}
         {row.kind === 'unassigned_line' && (
-          <div className="mt-3">
+          <div className="mt-3 space-y-3">
+            <div>
+              <label className="block text-xs text-ink-500 mb-1">Realm</label>
+              <select value={realm} onChange={(e) => setRealm(e.target.value)}
+                className="w-full bg-ink-100 border border-ink-200 text-ink-800 rounded px-2 py-1.5 text-xs">
+                <option value="work">Work</option>
+                <option value="personal">Personal</option>
+                <option value="arel">AREL (Estates)</option>
+              </select>
+              <div className="text-2xs text-ink-400 mt-0.5">Sets the realm for vendor rule when applying to all items</div>
+            </div>
             <label className="flex items-center gap-2 text-xs text-ink-600 cursor-pointer">
               <input type="checkbox" checked={applyToAll} onChange={(e) => setApplyToAll(e.target.checked)}
                 className="rounded border-ink-300 text-amber-500 focus:ring-amber-500" />

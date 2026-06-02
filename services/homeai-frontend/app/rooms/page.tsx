@@ -19,6 +19,12 @@ interface Room {
   nights_remaining: number | null;
   gross_amount: string | null;
   payment_status: string | null;
+  source: string | null;
+  source_ref: string | null;
+  guest_phone: string | null;
+  guest_email: string | null;
+  adults: number | null;
+  children: number | null;
 }
 
 interface AccomToday { arrivals: number; departures: number; staying: number }
@@ -45,30 +51,63 @@ function canonRoom(r: string | null): string | null {
 const TABS = ['all', 'pub', 'cafe'] as const;
 type Tab = (typeof TABS)[number];
 
+const SOURCE_LABELS: Record<string, string> = {
+  booking: 'Booking.com',
+  expedia: 'Expedia',
+  airbnb: 'Airbnb',
+  agoda: 'Agoda',
+  ctrip: 'Ctrip',
+  direct: 'Direct',
+  hotel_email: 'Email',
+  caterbook_agoda: 'Agoda',
+  caterbook_airbnb: 'Airbnb',
+  caterbook_ctrip: 'Ctrip',
+  agodaycs: 'Agoda',
+};
+
+function sourceLabel(src: string | null): string {
+  if (!src) return '—';
+  const lower = src.toLowerCase();
+  for (const [key, label] of Object.entries(SOURCE_LABELS)) {
+    if (lower.includes(key)) return label;
+  }
+  return src.slice(0, 20);
+}
+
+function sourceTier(src: string | null): 'ota' | 'direct' | 'unknown' {
+  if (!src) return 'unknown';
+  const lower = src.toLowerCase();
+  if (lower.includes('booking') || lower.includes('expedia') || lower.includes('airbnb') || lower.includes('agoda') || lower.includes('ctrip')) return 'ota';
+  if (lower.includes('direct') || lower.includes('email') || lower.includes('hotel')) return 'direct';
+  return 'unknown';
+}
+
 export default function RoomsPage() {
 
   const [range, setRange] = useState<DateRange>({ preset: 'today', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
 
   const dateParam = useMemo(() => {
-
     if (range.preset === 'today') return { date: new Date().toISOString().slice(0, 10) };
-
     if (range.preset === 'yesterday') {
-
       const y = new Date(); y.setDate(y.getDate() - 1);
-
       return { date: y.toISOString().slice(0, 10) };
-
     }
-
     return { date: new Date().toISOString().slice(0, 10) };
-
   }, [range]);
+
+  // Tomorrow's date for breakfast count
+  const tomorrowDate = useMemo(() => {
+    const t = new Date(); t.setDate(t.getDate() + 1);
+    return t.toISOString().slice(0, 10);
+  }, []);
+
   const rooms = useSlug<Room>('frontend_rooms_today', dateParam, { refetchInterval: 5 * 60_000 });
   const accom = useSlug<AccomToday>('frontend_accommodation_today', dateParam);
+  const accomTomorrow = useSlug<AccomToday>('frontend_accommodation_today', { date: tomorrowDate });
   const weekEcon = useSlug<WeekEcon>('rooms_week_economics', {});
   const roomRev = useSlug<RoomRevenue>('revenue_by_room_type_30d', {});
-  const [selected, setSelected] = useState<Room | null>(null);  const router = useRouter();
+  const [selected, setSelected] = useState<Room | null>(null);
+  const router = useRouter();
   const sp = useSearchParams();
   const pathname = usePathname();
   const initialTab = (TABS.find(t => t === sp.get('tab')) as Tab | undefined) ?? 'all';
@@ -105,6 +144,48 @@ export default function RoomsPage() {
   const totalRevenue = (roomRev.data ?? []).reduce((a, r) => a + parseFloat(r.revenue_gbp || '0'), 0);
   const avgNightValue = totalNights > 0 ? totalRevenue / totalNights : null;
 
+  // #37: Breakfast counts
+  const breakfastToday = useMemo(() => {
+    // Guests departing today = stayed last night = breakfast today
+    let count = 0;
+    rooms.data?.forEach(r => {
+      if (r.departing_today) {
+        count += (r.adults ?? 0) + (r.children ?? 0);
+      }
+    });
+    return count || (rooms.data?.filter(r => r.departing_today).length ?? 0);
+  }, [rooms.data]);
+
+  const breakfastTomorrow = useMemo(() => {
+    // Tomorrow's departures = guests staying tonight = breakfast tomorrow
+    let count = 0;
+    const tomorrowRooms = accomTomorrow.data;
+    if (tomorrowRooms && tomorrowRooms.length > 0) {
+      // Use raw accommodation data to find departures tomorrow
+      const tomorrowDateObj = new Date(tomorrowDate);
+      tomorrowRooms.forEach((r: any) => {
+        const checkout = new Date(r.checkout_date);
+        if (checkout.toISOString().slice(0, 10) === tomorrowDate) {
+          count += (r.adults ?? 0) + (r.children ?? 0);
+        }
+      });
+    }
+    return count || (accomTomorrow.data?.filter((r: any) => {
+      const checkout = new Date(r.checkout_date);
+      return checkout.toISOString().slice(0, 10) === tomorrowDate;
+    }).length ?? 0);
+  }, [accomTomorrow.data, tomorrowDate]);
+
+  // #36: Track return guests (guests who have stayed before)
+  const allGuestNames = rooms.data?.map(r => r.guest_name).filter(Boolean) ?? [];
+  const guestNameCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    allGuestNames.forEach(name => {
+      if (name) counts.set(name, (counts.get(name) || 0) + 1);
+    });
+    return counts;
+  }, [allGuestNames]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -134,6 +215,21 @@ export default function RoomsPage() {
         </Section>
       </SandboxWrapper>
 
+      {/* #37: Breakfast KPIs */}
+      <SandboxWrapper id="rooms.breakfast" label="Breakfast forecast">
+        <Section title="Breakfast forecast">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPICard label="Breakfasts today" value={breakfastToday} loading={rooms.isLoading} />
+            <KPICard label="Breakfasts tomorrow" value={breakfastTomorrow} loading={accomTomorrow.isLoading} />
+            <KPICard label="Rooms occupied" value={occupied.size} loading={rooms.isLoading} />
+            <KPICard label="Meal plans active" value={rooms.data?.filter(r => r.adults != null || r.children != null).length ?? '—'} loading={rooms.isLoading} />
+          </div>
+          <div className="text-xs text-ink-500 mt-2">
+            Today = guests departing today (stayed last night). Tomorrow = guests departing tomorrow (staying tonight). Counts are guest headcount (adults + children).
+          </div>
+        </Section>
+      </SandboxWrapper>
+
       {/* #34: Room KPIs */}
       <SandboxWrapper id="rooms.kpis" label="Room KPIs">
         <Section title="Room KPIs">
@@ -159,6 +255,7 @@ export default function RoomsPage() {
               const occupied_state = r && !r.arriving_today ? 'occupied' :
                                     r?.arriving_today      ? 'arriving' :
                                     r?.departing_today     ? 'departing' : 'vacant';
+              const srcTier = r ? sourceTier(r.source) : null;
               return (
                 <button
                   key={rname}
@@ -175,11 +272,17 @@ export default function RoomsPage() {
                     {r?.guest_name ?? <span className="text-ink-500">vacant</span>}
                   </div>
                   {r && (
-                    <div className="mt-1 text-xs text-ink-500 flex gap-1.5">
+                    <div className="mt-1 text-xs text-ink-500 flex gap-1.5 flex-wrap">
                       {r.arriving_today && <span className="text-good">arriving</span>}
                       {r.departing_today && <span className="text-warn">departing</span>}
                       {!r.arriving_today && !r.departing_today && (
                         <span>{r.nights_remaining}n remaining</span>
+                      )}
+                      {/* #36: Booking source badge */}
+                      {r.source && (
+                        <span className={'text-2xs px-1 py-0.5 rounded ' + (srcTier === 'ota' ? 'bg-blue-500/20 text-blue-300' : srcTier === 'direct' ? 'bg-green-500/20 text-green-300' : 'bg-ink-300 text-ink-500')}>
+                          {sourceLabel(r.source)}
+                        </span>
                       )}
                     </div>
                   )}
@@ -197,6 +300,17 @@ export default function RoomsPage() {
             className="bg-ink-50 border border-ink-200 rounded-lg p-5 max-w-md w-full">
             <h3 className="font-mono text-sm text-amber-500">{selected.room}</h3>
             <div className="mt-2 text-lg text-ink-900">{selected.guest_name}</div>
+            {/* #36: Booking source + return guest indicator */}
+            {selected.source && (
+              <div className="mt-1 flex items-center gap-2 flex-wrap">
+                <span className={'text-xs px-1.5 py-0.5 rounded ' + (sourceTier(selected.source) === 'ota' ? 'bg-blue-500/20 text-blue-300' : 'bg-green-500/20 text-green-300')}>
+                  Booked via {sourceLabel(selected.source)}
+                </span>
+                {selected.source_ref && (
+                  <span className="text-xs text-ink-500">ref: {selected.source_ref.slice(0, 24)}</span>
+                )}
+              </div>
+            )}
             <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
               <div><span className="text-ink-500">Nights remaining</span><br/><span className="font-mono text-ink-700">{selected.nights_remaining}</span></div>
               <div><span className="text-ink-500">Booking value</span><br/><span className="font-mono text-ink-700">{gbp(selected.gross_amount)}</span></div>
@@ -205,6 +319,17 @@ export default function RoomsPage() {
                 {selected.arriving_today ? 'arriving today' :
                  selected.departing_today ? 'departing today' : 'in residence'}
               </span></div>
+              {/* #38: Phone number and email */}
+              <div><span className="text-ink-500">Phone</span><br/><span className="font-mono text-ink-700">{selected.guest_phone ?? '—'}</span></div>
+              <div><span className="text-ink-500">Email</span><br/><span className="font-mono text-ink-700 text-2xs truncate" title={selected.guest_email ?? ''}>{selected.guest_email ?? '—'}</span></div>
+              {/* Guest count */}
+              <div><span className="text-ink-500">Guests</span><br/><span className="font-mono text-ink-700">
+                {selected.adults != null || selected.children != null 
+                  ? `${selected.adults ?? 0}A + ${selected.children ?? 0}C = ${(selected.adults ?? 0) + (selected.children ?? 0)}` 
+                  : '—'}
+              </span></div>
+              {/* Payment status */}
+              <div><span className="text-ink-500">Source ref</span><br/><span className="font-mono text-ink-700 text-2xs truncate" title={selected.source_ref ?? ''}>{selected.source_ref?.slice(0, 20) ?? '—'}</span></div>
             </div>
             <div className="mt-4 flex gap-2">
               <button className="text-xs px-2.5 py-1.5 bg-ink-100 hover:bg-ink-200 text-ink-700 rounded">Add memo</button>

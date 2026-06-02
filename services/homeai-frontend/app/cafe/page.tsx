@@ -40,12 +40,8 @@ type Tab = (typeof TABS)[number];
 export default function CafePage() {
   const [range, setRange] = useState<DateRange>({ preset: 'today', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
   const dateParam = useMemo(() => {
-    if (range.preset === 'today') return { date: new Date().toISOString().slice(0, 10) };
-    if (range.preset === 'yesterday') {
-      const y = new Date(); y.setDate(y.getDate() - 1);
-      return { date: y.toISOString().slice(0, 10) };
-    }
-    return { date: new Date().toISOString().slice(0, 10) };
+    if (range.preset === 'today' || range.preset === 'yesterday') return { date: range.start } as Record<string, string>;
+    return { from: range.start, to: range.end } as Record<string, string>;
   }, [range]);
   const today    = useSlug<TodayGross>('frontend_today_gross', dateParam);
   const todayDpt = useSlug<CafeDeptToday>('cafe_today_depts', dateParam);
@@ -124,7 +120,7 @@ export default function CafePage() {
         <Section title="Till — 7-day £ per cafe department">
           {spark7d.isLoading ? <PlaceholderState message="Loading till data…" /> :
            spark7d.data && spark7d.data.length > 0 ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="max-h-[500px] overflow-y-auto border border-ink-100 rounded"><div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-1">
               {spark7d.data
                 .filter(g => parseFloat(g.total_value) > 0)
                 .map(g => (
@@ -137,6 +133,7 @@ export default function CafePage() {
                   </div>
                 </div>
               ))}
+            </div>
             </div>
           ) : <PlaceholderState message="No cafe till data scraped yet." />}
         </Section>

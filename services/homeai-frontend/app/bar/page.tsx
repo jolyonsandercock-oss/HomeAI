@@ -19,6 +19,16 @@ interface TodayGross { site: string; gross: string }
 interface BarWage   { days: number; labour: string | null; sales: string | null; purchases: string | null; pct: string | null }
 // U225 T5: till groups now expose £ value (total_value) instead of count (total_qty).
 interface TillGroup { grp: string; values: number[]; total_value: string }
+interface MenuRow {
+  site: string;
+  course: 'main' | 'starter' | 'dessert' | 'side' | 'drink' | 'other';
+  plu_number: string;
+  descriptor: string;
+  qty: string;
+  gross_gbp: string;
+  avg_price: string | null;
+  rank_in_course: number;
+}
 
 const GRP_LABEL: Record<string, string> = {
   beer: 'Beer', wine: 'Wine', cocktail: 'Cocktails',
@@ -42,28 +52,32 @@ const PERIOD_LABELS: Record<number, string> = { 1: 'Yesterday', 7: 'Last 7 days'
 const TABS = ['all', 'pub', 'cafe'] as const;
 type Tab = (typeof TABS)[number];
 
+// Drink filter categories (#51)
+const DRINK_FILTERS = ['All', 'Beers', 'Wines', 'Spirits', 'Soft Drinks'] as const;
+type DrinkFilter = (typeof DRINK_FILTERS)[number];
+
+const DRINK_PATTERNS: Record<Exclude<DrinkFilter, 'All'>, RegExp> = {
+  Beers:       /ale|lager|cider|ipa|stout/i,
+  Wines:       /wine|chardonnay|sauvignon|pinot|merlot|rosé|rose/i,
+  Spirits:     /gin|vodka|whisky|rum|cocktail/i,
+  'Soft Drinks': /soda|water|juice|lemonade|cola|pepsi|tonic/i,
+};
+
 export default function BarPage() {
 
   const [range, setRange] = useState<DateRange>({ preset: 'today', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) });
-
+  // #42/#43: fix dateParam to pass proper from/to for range presets so slug re-fetches
   const dateParam = useMemo(() => {
-
-    if (range.preset === 'today') return { date: new Date().toISOString().slice(0, 10) };
-
-    if (range.preset === 'yesterday') {
-
-      const y = new Date(); y.setDate(y.getDate() - 1);
-
-      return { date: y.toISOString().slice(0, 10) };
-
-    }
-
-    return { date: new Date().toISOString().slice(0, 10) };
-
+    if (range.preset === 'today' || range.preset === 'yesterday') return { date: range.start } as Record<string, string>;
+    return { from: range.start, to: range.end } as Record<string, string>;
   }, [range]);
   const today = useSlug<TodayGross>('frontend_today_gross', dateParam);
   const wage  = useSlug<BarWage>('bar_wage_summary', dateParam);
   const till  = useSlug<TillGroup>('bar_till_groups_spark_7d');
+  // #44: menu performance for drinks
+  const menu  = useSlug<MenuRow>('menu_performance_by_course_7d', {}, { refetchInterval: 30 * 60_000 });
+  // #51: drink filter state
+  const [drinkFilter, setDrinkFilter] = useState<DrinkFilter>('All');
   const pub   = today.data?.find(r => r.site === 'malthouse');  const router = useRouter();
   const sp = useSearchParams();
   const pathname = usePathname();
@@ -86,6 +100,18 @@ export default function BarPage() {
   const pollFor = (source: string) => (poller.data ?? []).find((p: any) => p.source === source)?.last_poll ?? null;
 
   const w = (d: number) => wage.data?.find(x => Number(x.days) === d);
+
+  // #44 + #51: filtered drinks from menu performance
+  const drinks = useMemo(() => {
+    const all = (menu.data ?? [])
+      .filter(r => r.site === 'malthouse' && r.course === 'drink');
+    if (drinkFilter === 'All') return all;
+    const pat = DRINK_PATTERNS[drinkFilter];
+    return all.filter(r => pat.test(r.descriptor));
+  }, [menu.data, drinkFilter]);
+
+  const top10    = useMemo(() => [...drinks].sort((a, b) => parseFloat(b.gross_gbp) - parseFloat(a.gross_gbp)).slice(0, 10), [drinks]);
+  const bottom10 = useMemo(() => [...drinks].filter(d => parseFloat(d.gross_gbp) > 0).sort((a, b) => parseFloat(a.gross_gbp) - parseFloat(b.gross_gbp)).slice(0, 10), [drinks]);
 
   return (
     <div className="space-y-6">
@@ -173,7 +199,7 @@ export default function BarPage() {
         <Section title="Till performance — 7-day £ per drink group">
           {till.isLoading ? <PlaceholderState message="Loading till data…" /> :
            till.data && till.data.length > 0 ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="max-h-[500px] overflow-y-auto border border-ink-100 rounded"><div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-1">
               {till.data.map(g => (
                 <div key={g.grp} className="tile">
                   <div className="label">{GRP_LABEL[g.grp] ?? g.grp}</div>
@@ -191,7 +217,82 @@ export default function BarPage() {
                 </div>
               ))}
             </div>
+            </div>
           ) : <PlaceholderState message="No till data yet." />}
+        </Section>
+      </SandboxWrapper>
+
+      {/* #44 + #51: Top 10 / Bottom 10 drinks with filter */}
+      <SandboxWrapper id="bar.drink-leaderboard" label="Drink Leaderboard">
+        <Section title="Top & Bottom 10 Drinks (7 days)">
+          {/* #51: drink filter tabs */}
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-xs text-ink-500">Filter:</span>
+            <div className="flex bg-ink-100 border border-ink-200 rounded-md overflow-hidden text-xs">
+              {DRINK_FILTERS.map((f) => (
+                <button key={f} onClick={() => setDrinkFilter(f)}
+                  className={'px-2.5 py-1.5 ' + (drinkFilter === f ? 'bg-amber-500 text-ink-0' : 'text-ink-600 hover:text-ink-800')}>{f}</button>
+              ))}
+            </div>
+            <span className="text-xs text-ink-400 ml-2">{drinks.length} drinks</span>
+          </div>
+          {menu.isLoading ? <PlaceholderState message="Loading drink performance…" /> :
+           drinks.length === 0 ? <PlaceholderState message="No drink data available." /> : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Top 10 */}
+              <div>
+                <div className="text-xs uppercase tracking-wide text-ink-500 mb-2 font-semibold">Top 10 by Revenue</div>
+                <div className="border border-ink-100 rounded overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-ink-50 text-ink-500 uppercase tracking-wide">
+                        <th className="text-left px-2 py-1.5">#</th>
+                        <th className="text-left px-2 py-1.5">Drink</th>
+                        <th className="text-right px-2 py-1.5">Qty</th>
+                        <th className="text-right px-2 py-1.5">Gross</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {top10.map((d, i) => (
+                        <tr key={d.plu_number} className={i % 2 === 0 ? 'bg-ink-0' : 'bg-ink-50/50'}>
+                          <td className="px-2 py-1.5 text-ink-400 font-mono">{i + 1}</td>
+                          <td className="px-2 py-1.5 truncate max-w-[160px]" title={d.descriptor}>{d.descriptor}</td>
+                          <td className="px-2 py-1.5 text-right font-mono">{parseFloat(d.qty).toFixed(0)}</td>
+                          <td className="px-2 py-1.5 text-right font-mono">{gbp(parseFloat(d.gross_gbp) || 0, 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              {/* Bottom 10 */}
+              <div>
+                <div className="text-xs uppercase tracking-wide text-ink-500 mb-2 font-semibold">Bottom 10 by Revenue</div>
+                <div className="border border-ink-100 rounded overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-ink-50 text-ink-500 uppercase tracking-wide">
+                        <th className="text-left px-2 py-1.5">#</th>
+                        <th className="text-left px-2 py-1.5">Drink</th>
+                        <th className="text-right px-2 py-1.5">Qty</th>
+                        <th className="text-right px-2 py-1.5">Gross</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bottom10.map((d, i) => (
+                        <tr key={d.plu_number} className={i % 2 === 0 ? 'bg-ink-0' : 'bg-ink-50/50'}>
+                          <td className="px-2 py-1.5 text-ink-400 font-mono">{i + 1}</td>
+                          <td className="px-2 py-1.5 truncate max-w-[160px]" title={d.descriptor}>{d.descriptor}</td>
+                          <td className="px-2 py-1.5 text-right font-mono">{parseFloat(d.qty).toFixed(0)}</td>
+                          <td className="px-2 py-1.5 text-right font-mono">{gbp(parseFloat(d.gross_gbp) || 0, 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </Section>
       </SandboxWrapper>
     </div>
