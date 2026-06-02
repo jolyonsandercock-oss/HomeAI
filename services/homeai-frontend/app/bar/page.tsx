@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { DateRangePicker, DateRange } from '@/components/ui/DateRangePicker';
 import { PollClock } from '@/components/ui/PollClock';
 import { Section } from '@/components/ui/Section';
@@ -108,6 +109,11 @@ export default function BarPage() {
       <SandboxWrapper id="bar.kpi" label="Bar KPIs">
         <Section title="Bar — today">
           <KPICard label="Pub gross today" size="xl" value={gbp(pub?.gross ?? 0)} loading={today.isLoading} />
+          <div className="text-xs text-ink-500 mt-1">
+            <Link href="/app/invoices?department=bar" className="text-amber-500 hover:text-amber-400 underline">
+              → View bar invoices
+            </Link>
+          </div>
         </Section>
       </SandboxWrapper>
 
@@ -155,7 +161,10 @@ export default function BarPage() {
           </div>
           <div className="text-xs text-ink-500 mt-1">
             Wage % = FOH labour ÷ Pub sales · threshold 30%.
-            Purchases = Beverage vendor invoices.
+            Purchases = Beverage vendor invoices. {' '}
+            <Link href="/app/invoices" className="text-amber-500 hover:text-amber-400 underline">
+              → View invoices / COGS
+            </Link>
           </div>
         </Section>
       </SandboxWrapper>
@@ -173,6 +182,12 @@ export default function BarPage() {
                   <div className="mt-2 h-8 opacity-70">
                     <SparkLine values={g.values.map(v => Number(v) || 0)} colour={GRP_COLOUR[g.grp]} />
                   </div>
+                  <Link
+                    href={`/app/invoices?department=bar&q=${encodeURIComponent(GRP_LABEL[g.grp] || g.grp)}`}
+                    className="text-xs text-amber-500 hover:text-amber-400 underline mt-1 inline-block"
+                  >
+                    → Drill into invoices
+                  </Link>
                 </div>
               ))}
             </div>

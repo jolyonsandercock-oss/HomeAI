@@ -29,6 +29,7 @@ interface LineDetail {
   subject: string;
   received_at: string;
   has_pdf_text: boolean;
+  source_email_id: string | null;
 }
 
 interface SnagRow { id: number; title: string; description: string | null; image_path: string | null; category: string; priority: number; status: string; source: string; submitted_by: string | null; created_at: string }
@@ -198,6 +199,8 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
   const [lines, setLines] = useState<LineDetail[] | null>(null);
   const [loadingLines, setLoadingLines] = useState(false);
   const [lineAssignments, setLineAssignments] = useState<Record<number, { dept: string; cat: string }>>({});
+  // #10+#27: Apply-to-all tickbox
+  const [applyToAll, setApplyToAll] = useState(false);
 
   // Fetch line items when modal opens for unassigned_line
   useEffect(() => {
@@ -213,13 +216,48 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
     }
   }, [row]);
 
+  // Reset state when row changes
+  useEffect(() => {
+    setDept('');
+    setCategory('');
+    setSite('');
+    setMessage('');
+    setLines(null);
+    setLoadingLines(false);
+    setLineAssignments({});
+    setApplyToAll(false);
+  }, [row?.vendor_domain, row?.kind]);
+
   if (!row) return null;
+
+  // Get the source email ID from the first line that has one (for email view link #14+#26)
+  const emailLine = lines?.find(l => l.source_email_id);
+  const gmailLink = emailLine?.source_email_id
+    ? `https://mail.google.com/mail/u/0/#inbox/${emailLine.source_email_id}`
+    : null;
 
   const handleAssign = async () => {
     setSaving(true);
     setMessage('');
     try {
       if (row.kind === 'unassigned_line' && lines) {
+        // #10+#27: If apply-to-all is checked, create a vendor rule first
+        if (applyToAll && (dept || category)) {
+          const domainPart = row.vendor_domain.split('@').pop() || row.vendor_domain;
+          const cleanDomain = domainPart.replace(/^www\./, '');
+          await fetch('/app/api/categorise/vendor', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              domain_pattern: cleanDomain,
+              category: category || null,
+              site: site || row.site || 'shared',
+              vendor_display: row.vendor_display,
+              department: dept || null,
+            }),
+          });
+        }
+
         const unassigned = lines.filter(l => !l.department);
         let success = 0;
         let lastError = '';
@@ -281,6 +319,15 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
         </div>
         <div className="space-y-2 text-xs text-ink-600 mb-4">
           <p><span className="text-ink-500">Vendor:</span> {row.vendor_display}</p>
+          {/* #14+#26: Email view link */}
+          {gmailLink && (
+            <p>
+              <a href={gmailLink} target="_blank" rel="noopener noreferrer"
+                 className="text-amber-500 hover:text-amber-400 underline inline-flex items-center gap-1">
+                &#x2197; View original email in Gmail
+              </a>
+            </p>
+          )}
           {row.kind === 'unassigned_line' && lines ? (
             <p><span className="text-ink-500">Lines:</span> {lines.length} line items from this vendor</p>
           ) : (
@@ -357,6 +404,16 @@ function AssignModal({ row, onClose }: { row: ExpenseExceptionRow | null; onClos
                 <option value="Other">Other</option>
               </select>
             </div>
+          </div>
+        )}
+        {/* #10+#27: Apply-to-all tickbox */}
+        {row.kind === 'unassigned_line' && (
+          <div className="mt-3">
+            <label className="flex items-center gap-2 text-xs text-ink-600 cursor-pointer">
+              <input type="checkbox" checked={applyToAll} onChange={(e) => setApplyToAll(e.target.checked)}
+                className="rounded border-ink-300 text-amber-500 focus:ring-amber-500" />
+              Apply category to all items from this vendor
+            </label>
           </div>
         )}
         {message && (
@@ -576,6 +633,11 @@ function ExpenseExceptionSection() {
             </select>
             <span className="text-ink-400">|</span>
             <span className="text-ink-500">{filtered.length} items</span>
+            {/* #32: Link to manual inspection workflow */}
+            <span className="text-ink-400">|</span>
+            <a href="/app/invoices" className="text-amber-500 hover:text-amber-400 underline text-xs">
+              → Manual inspection (invoices)
+            </a>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <KPICard label="Uncat. vendors" value={uncatVendors.length} />
@@ -584,23 +646,26 @@ function ExpenseExceptionSection() {
             <KPICard label="Unassigned £" value={gbp(unassignGross)} />
           </div>
 
-          {uncatVendors.length > 0 && (
-            <Section title={`Uncategorised vendors (${uncatVendors.length}) — needs domain rule in vendor_category_rules`}>
+          {/* #32: Combined section — uncategorised vendors + unassigned line items in one view */}
+          {(uncatVendors.length > 0 || unassignedLines.length > 0) && (
+            <Section title={`Expense exceptions (${uncatVendors.length} vendors, ${unassignedLines.length} line items) — click to assign`}>
               <div className="tile overflow-x-auto text-xs">
                 <table className="w-full font-mono">
                   <thead className="text-ink-500 uppercase tracking-wider">
                     <tr>
-                      <th className="text-left py-1.5">Vendor</th>
-                      <th className="text-right">Invoices</th>
+                      <th className="text-left py-1.5">Type</th>
+                      <th className="text-left">Vendor / Detail</th>
+                      <th className="text-right">Invoices / Qty</th>
                       <th className="text-right">Total £</th>
-                      <th className="text-right">Current cat.</th>
+                      <th className="text-right">Status</th>
                       <th className="text-right">Last seen</th>
                     </tr>
                   </thead>
                   <tbody>
                     {uncatVendors.slice(0, 15).map(r => (
-                      <tr key={r.vendor_domain + r.detail} className="border-t border-ink-200 cursor-pointer hover:bg-ink-100/50" onClick={() => setSelectedRow(r)}>
-                        <td className="py-1.5 text-ink-900">
+                      <tr key={'v-' + r.vendor_domain + r.detail} className="border-t border-ink-200 cursor-pointer hover:bg-ink-100/50" onClick={() => setSelectedRow(r)}>
+                        <td className="py-1.5"><span className="px-1.5 py-0.5 rounded text-2xs bg-amber-500/20 text-amber-300">vendor</span></td>
+                        <td className="text-ink-900">
                           {r.vendor_display}
                           <a href={'https://mail.google.com/mail/u/0/#search/from%3A' + encodeURIComponent(r.vendor_domain)}
                              target="_blank" rel="noopener noreferrer"
@@ -614,30 +679,12 @@ function ExpenseExceptionSection() {
                         <td className="text-right text-ink-500">{new Date(r.last_seen).toLocaleDateString('en-GB', {day:'numeric', month:'short'})}</td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </Section>
-          )}
-
-          {unassignedLines.length > 0 && (
-            <Section title={`Unassigned line items (${unassignedLines.length}) — needs department assignment`}>
-              <div className="tile overflow-x-auto text-xs">
-                <table className="w-full font-mono">
-                  <thead className="text-ink-500 uppercase tracking-wider">
-                    <tr>
-                      <th className="text-left py-1.5">Vendor</th>
-                      <th className="text-left">Description</th>
-                      <th className="text-right">Qty</th>
-                      <th className="text-right">Total £</th>
-                    </tr>
-                  </thead>
-                  <tbody>
                     {unassignedLines.slice(0, 20).map((r, i) => (
-                      <tr key={r.vendor_domain + r.detail + i} className="border-t border-ink-200 cursor-pointer hover:bg-ink-100/50" onClick={() => setSelectedRow(r)}>
-                        <td className="py-1.5 text-ink-700">{r.vendor_display.slice(0, 25)}</td>
-                        <td className="text-ink-900">
-                          {r.detail}
+                      <tr key={'l-' + r.vendor_domain + r.detail + i} className="border-t border-ink-200 cursor-pointer hover:bg-ink-100/50" onClick={() => setSelectedRow(r)}>
+                        <td className="py-1.5"><span className="px-1.5 py-0.5 rounded text-2xs bg-blue-500/20 text-blue-300">line</span></td>
+                        <td className="text-ink-700">
+                          {r.vendor_display.slice(0, 25)}
+                          <span className="text-ink-500 ml-1">· {r.detail}</span>
                           <a href={'https://mail.google.com/mail/u/0/#search/' + encodeURIComponent(r.detail.slice(0, 40))}
                              target="_blank" rel="noopener noreferrer"
                              className="ml-2 text-xs text-amber-500 hover:text-amber-400"
@@ -646,6 +693,8 @@ function ExpenseExceptionSection() {
                         </td>
                         <td className="text-right text-ink-500">{r.invoice_count}</td>
                         <td className="text-right text-amber-400">{gbp(parseFloat(r.total_gross))}</td>
+                        <td className="text-right text-ink-500">unassigned</td>
+                        <td className="text-right text-ink-500">{new Date(r.last_seen).toLocaleDateString('en-GB', {day:'numeric', month:'short'})}</td>
                       </tr>
                     ))}
                   </tbody>

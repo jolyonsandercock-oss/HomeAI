@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { DateRangePicker, DateRange } from '@/components/ui/DateRangePicker';
 import { PollClock } from '@/components/ui/PollClock';
@@ -21,6 +22,8 @@ interface Room {
 }
 
 interface AccomToday { arrivals: number; departures: number; staying: number }
+interface WeekEcon { week_start: string; room_nights_sold: string; room_nights_capacity: string; pct_occupied: string | null; avg_stay_nights: string | null; room_nights_unsold: string }
+interface RoomRevenue { room_type: string; nights_sold: string; revenue_gbp: string; avg_rate: string }
 
 const ROOMS_MASTER = [
   'Room 1 - Double Room', 'Room 2 - Family Room',
@@ -63,6 +66,8 @@ export default function RoomsPage() {
   }, [range]);
   const rooms = useSlug<Room>('frontend_rooms_today', dateParam, { refetchInterval: 5 * 60_000 });
   const accom = useSlug<AccomToday>('frontend_accommodation_today', dateParam);
+  const weekEcon = useSlug<WeekEcon>('rooms_week_economics', {});
+  const roomRev = useSlug<RoomRevenue>('revenue_by_room_type_30d', {});
   const [selected, setSelected] = useState<Room | null>(null);  const router = useRouter();
   const sp = useSearchParams();
   const pathname = usePathname();
@@ -90,6 +95,16 @@ export default function RoomsPage() {
     if (c) occupied.set(c, r);
   });
 
+  // #34: Room KPI computations
+  const roomsToSellToday = ROOMS_MASTER.length - occupied.size;
+  const weekData = weekEcon.data?.[0];
+  const roomsToSellWeek = weekData?.room_nights_unsold ? parseInt(weekData.room_nights_unsold) : null;
+  const avgStayNights = weekData?.avg_stay_nights ? parseFloat(weekData.avg_stay_nights) : null;
+  // Average room night value from revenue data
+  const totalNights = (roomRev.data ?? []).reduce((a, r) => a + parseInt(r.nights_sold || '0'), 0);
+  const totalRevenue = (roomRev.data ?? []).reduce((a, r) => a + parseFloat(r.revenue_gbp || '0'), 0);
+  const avgNightValue = totalNights > 0 ? totalRevenue / totalNights : null;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -115,6 +130,23 @@ export default function RoomsPage() {
             <KPICard label="Arrivals" value={accom.data?.[0]?.arrivals ?? '—'} />
             <KPICard label="Staying" value={accom.data?.[0]?.staying ?? '—'} />
             <KPICard label="Departures" value={accom.data?.[0]?.departures ?? '—'} />
+          </div>
+        </Section>
+      </SandboxWrapper>
+
+      {/* #34: Room KPIs */}
+      <SandboxWrapper id="rooms.kpis" label="Room KPIs">
+        <Section title="Room KPIs">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPICard label="Rooms to sell today" value={roomsToSellToday} loading={rooms.isLoading} />
+            <KPICard label="Rooms to sell this week" value={roomsToSellWeek ?? '—'} loading={weekEcon.isLoading} />
+            <KPICard label="Avg stay (nights)" value={avgStayNights?.toFixed(1) ?? '—'} loading={weekEcon.isLoading} />
+            <KPICard label="Avg night value" value={avgNightValue != null ? gbp(avgNightValue) : '—'} loading={roomRev.isLoading} />
+          </div>
+          <div className="text-xs text-ink-500 mt-2">
+            <Link href="/app/invoices" className="text-amber-500 hover:text-amber-400 underline">→ View invoices / COGS</Link>
+            <span className="mx-2">|</span>
+            Rooms to sell = total rooms ({ROOMS_MASTER.length}) minus occupied. Avg night value from last 30 days of caterbook room nights.
           </div>
         </Section>
       </SandboxWrapper>

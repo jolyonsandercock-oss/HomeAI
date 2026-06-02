@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { DateRangePicker, DateRange } from '@/components/ui/DateRangePicker';
 import { KPICard } from '@/components/ui/KPICard';
 import { Section } from '@/components/ui/Section';
@@ -148,6 +149,13 @@ export default function SalesPage() {
     return Object.values(bySite).reduce((a, b) => a + b, 0);
   }, [daily30.data, tab]);
 
+  // #31: Compute total COGS (7-day avg) for reference line in category bar chart
+  const totalCogs7d = useMemo(() => {
+    const vals = Object.values(cogsMap);
+    if (vals.length === 0) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  }, [cogsMap]);
+
   // Filterable table rows
   const tableRows = useMemo(() => {
     let rows = table.data ?? [];
@@ -232,6 +240,11 @@ export default function SalesPage() {
             <KPICard label="Café (all)" value={gbp(cafeTotal)} />
             <KPICard label="Accommodation (pub till)" value={gbp(pubAccom)} />
           </div>
+          <div className="text-xs text-ink-500 mt-1">
+            <Link href="/app/invoices" className="text-amber-500 hover:text-amber-400 underline">
+              → View invoices / COGS breakdown
+            </Link>
+          </div>
         </Section>
       </SandboxWrapper>
 
@@ -267,6 +280,10 @@ export default function SalesPage() {
                     {target7d != null && (
                       <ReferenceLine x={target7d} stroke="#22d3ee" strokeDasharray="4 4" label={{ value: `7d avg target £${Math.round(target7d).toLocaleString()}`, fill: '#22d3ee', fontSize: 10, position: 'insideTopRight' }} />
                     )}
+                    {/* #31: Total COGS reference line */}
+                    {totalCogs7d != null && totalCogs7d > 0 && (
+                      <ReferenceLine x={totalCogs7d} stroke="#ef4444" strokeDasharray="2 2" strokeWidth={1.5} label={{ value: `COGS 7d avg £${Math.round(totalCogs7d).toLocaleString()}`, fill: '#ef4444', fontSize: 10, position: 'insideBottomRight' }} />
+                    )}
                   </BarChart>
                 </ResponsiveContainer>
               </figure>
@@ -276,6 +293,9 @@ export default function SalesPage() {
                   {catPct.map(d => (
                     <span key={d.label}>{d.label}: <span className="text-ink-300">{d.pct.toFixed(1)}%</span></span>
                   ))}
+                  {totalCogs7d != null && catChart.reduce((a, c) => a + c.total, 0) > 0 && (
+                    <span>COGS (7d avg): <span className="text-red-400">£{Math.round(totalCogs7d).toLocaleString()} ({(totalCogs7d / catChart.reduce((a, c) => a + c.total, 0) * 100).toFixed(1)}% of sales)</span></span>
+                  )}
                 </div>
               )}
             </div>
@@ -477,6 +497,11 @@ export default function SalesPage() {
             Labour % = labour cost ÷ sales for that category. COGS is overall (xero contacts not yet site-categorised).
             Pub COGS vs Café COGS will split once vendor-to-site mapping is wired.
             Accommodation revenue lives in caterbook and is intentionally excluded from sales totals to avoid double-counting.
+            {' '}
+            <span className="text-ink-400">
+              Note: Labour% confidence depends on Tanda shift costs (polled via workforce_shifts). Days where shifts haven&apos;t landed show &ldquo;—&rdquo;.
+              All-labour% includes FOH + BOH; Pub threshold is 30% (FOH-only). Combined threshold may read lower due to cafe inclusion.
+            </span>
           </p>
         </Section>
       </SandboxWrapper>
