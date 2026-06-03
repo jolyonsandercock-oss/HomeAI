@@ -26,6 +26,7 @@ export const NAV: NavItem[] = [
   { href: '/admin',         label: 'Admin',         icon: Wrench,          mobile: false, realm: 'work' },
   // Personal realm items — shown at bottom in work mode, full view in personal mode
   { href: '/personal',      label: 'Personal',      icon: User,            mobile: false, realm: 'personal' },
+  { href: '/personal/accounts', label: 'Accounts',     icon: Building2,       mobile: false, realm: 'personal' },
   { href: '/personal/emails', label: 'Emails',       icon: Mail,           mobile: false, realm: 'personal' },
   { href: '/backend',       label: 'Back-end',      icon: Activity,        mobile: false, realm: 'personal' },
 ];
