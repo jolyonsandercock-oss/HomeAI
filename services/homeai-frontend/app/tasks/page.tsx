@@ -646,9 +646,9 @@ function SnagInboxSection() {
               <div className="text-green-500/80">done</div>
             </div>
           </div>
-          <div className="tile overflow-x-auto text-xs">
+          <div className="tile overflow-x-auto text-xs max-h-[380px] overflow-y-auto">
             <table className="w-full">
-              <thead className="text-ink-500 uppercase tracking-wider">
+              <thead className="text-ink-500 uppercase tracking-wider sticky top-0 bg-ink-50">
                 <tr>
                   <th className="text-left py-1.5">P</th>
                   <th className="text-left">Title</th>
@@ -665,14 +665,9 @@ function SnagInboxSection() {
                     <td className="text-ink-500">{s.category}</td>
                     <td className="text-right text-ink-500">{s.source}</td>
                     <td className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => handleStatus(s.id, 'accepted')} disabled={actingId === s.id || s.status !== 'pending'}
-                          className="px-2 py-0.5 text-2xs rounded bg-blue-900/30 text-blue-400 hover:bg-blue-900/50 disabled:opacity-30">Accept</button>
-                        <button onClick={() => handleStatus(s.id, 'done')} disabled={actingId === s.id}
-                          className="px-2 py-0.5 text-2xs rounded bg-amber-500 text-ink-0 hover:bg-amber-400 disabled:opacity-30">Done</button>
-                        <button onClick={() => handleStatus(s.id, 'wontfix')} disabled={actingId === s.id}
-                          className="px-2 py-0.5 text-2xs rounded bg-red-900/30 text-red-400 hover:bg-red-900/50 disabled:opacity-30">Skip</button>
-                      </div>
+                      <span className={'text-2xs ' + (s.status === 'pending' ? 'text-amber-400' : s.status === 'done' ? 'text-green-400' : s.status === 'accepted' ? 'text-blue-400' : 'text-ink-500')}>
+                        {s.status}
+                      </span>
                     </td>
                   </tr>
                 ))}

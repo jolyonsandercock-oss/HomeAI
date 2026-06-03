@@ -39,7 +39,7 @@ import urllib.request, json, urllib.error, sys
 u = 'http://localhost:8001/ingest/touchoffice?site=$site&date=$cur'
 req = urllib.request.Request(u, method='POST')
 try:
-    r = urllib.request.urlopen(req, timeout=300)
+    r = urllib.request.urlopen(req, timeout=600)
     o = json.loads(r.read())
     ws = o.get('widgets', {})
     parts = []
