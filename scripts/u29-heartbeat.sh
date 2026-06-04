@@ -46,6 +46,10 @@ async def main():
       "SELECT MAX(started_at) FROM workforce_sync_log WHERE http_status=200")
     dead_letter_open = await conn.fetchval(
       "SELECT COUNT(*) FROM dead_letter WHERE resolved=false")
+    sys_state = await conn.fetchval(
+      "SELECT value->>'state' FROM static_context WHERE key='system.state'")
+    sys_pause_reason = await conn.fetchval(
+      "SELECT value->>'paused_reason' FROM static_context WHERE key='system.state'")
 
     def age_h(ts):
         if ts is None: return 99999
@@ -56,8 +60,15 @@ async def main():
         if h < 1:   return f"{int(h*60)}m"
         return f"{int(h)}h"
 
-    # Compute degraded reasons
+    # Compute degraded reasons. A global PAUSE is the loudest signal — it halts
+    # all event processing (email/document/invoice), so it leads the list and
+    # escalates severity to emergency. (Learned 2026-06-04: an auto_pause sat
+    # unnoticed for 3 days because nothing checked system.state AND Telegram was
+    # down — email ingestion was dead the whole time.)
     reasons = []
+    paused = (sys_state == 'paused')
+    if paused:
+        reasons.append(f"🛑 SYSTEM PAUSED ({sys_pause_reason or 'unknown'}) — event processing halted; run /resume-all once the cause is cleared")
     if firing > 0:                  reasons.append(f"{firing} alert(s) firing")
     if pending_inst > 0:            reasons.append(f"{pending_inst} pending instruction(s)")
     if dead_letter_open > 5:        reasons.append(f"DL open {dead_letter_open}")
@@ -66,7 +77,7 @@ async def main():
     if age_h(last_wf) > 26:         reasons.append(f"WF stale {stale_str(last_wf,26)}")
 
     degraded = bool(reasons)
-    severity = "warn" if degraded else "info"
+    severity = "emergency" if paused else ("warn" if degraded else "info")
 
     now_str = datetime.now().strftime("%H:%M")
     if degraded:
