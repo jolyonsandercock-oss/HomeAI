@@ -18,3 +18,8 @@
 */2 * * * * bash /home_ai/scripts/u29-instructions-poll.sh >> /home_ai/logs/u29-instructions-poll.log 2>&1
 * * * * * bash /home_ai/scripts/u33-bot-responder.sh >> /home_ai/logs/u33-bot-responder.log 2>&1
 17 * * * * bash /home_ai/scripts/u236-marketing-sweep.sh >> /home_ai/logs/u236-marketing-sweep.log 2>&1
+*/30 * * * * bash /home_ai/scripts/snag-trigger.sh
+0 17 * * * cd /home_ai && python3 scripts/u160-breakfast-send.py 2>&1 | tee -a logs/u160-breakfast.log
+0 6 * * * cd /home_ai && python3 scripts/u160-breakfast-kitchen.py 2>&1 | tee -a logs/u160-breakfast.log
+0 */3 * * * cd /home_ai && bash scripts/u163-reviews-simple.sh 2>&1 | tee -a logs/u163-tripadvisor.log
+*/5 * * * * bash /home_ai/scripts/u239-event-close-sweep.sh >> /home_ai/logs/u239-event-close-sweep.log 2>&1
