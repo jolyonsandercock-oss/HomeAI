@@ -29,7 +29,7 @@ export default function AdminPage() {
       </SandboxWrapper>
 
       <SandboxWrapper id="admin.invoices" label="Invoices">
-        <Section title="Recent invoices (30d)">
+        <Section title="Recent invoices (30d)" action={<Link href="/app/invoices" className="text-xs text-amber-500 hover:text-amber-400 underline">View all invoices →</Link>}>
           {invs.isLoading ? (
             <PlaceholderState message="Loading invoices…" />
           ) : invs.data && invs.data.length > 0 ? (

@@ -94,7 +94,9 @@ export default function RestaurantPage() {
   const total = list.data?.length ?? 0;
   const pax   = list.data?.reduce((s, r) => s + (r.party_size ?? 0), 0) ?? 0;
 
-  const kitchen = (rota.data ?? []).filter(r => r.team === 'kitchen');
+  // #67/#68: filter out phantom rota rows with null hours / zero cost
+  const validRota = (rota.data ?? []).filter(r => r.hours_worked != null && parseFloat(String(r.hours_worked)) > 0);
+  const kitchen = validRota.filter(r => r.team === 'kitchen');
   const kitchenHours = kitchen.reduce((s, r) => s + parseFloat(String(r.hours_worked)), 0);
   const kitchenCost  = kitchen.reduce((s, r) => s + parseFloat(String(r.shift_cost)), 0);
 

@@ -145,6 +145,8 @@ services:
 
   ollama:
     image: ollama/ollama:0.22.1
+    mem_limit: 8g
+    mem_reservation: 3g
     container_name: homeai-ollama
     # ai-egress added in U66 so `ollama pull` can reach registry.ollama.ai.
     # Outbound model fetches only; existing service-to-ollama DNS unchanged.
@@ -326,6 +328,8 @@ services:
 
   netdata:
     image: netdata/netdata:v2.10.3
+    mem_limit: 512m
+    cpus: "1.0"
     container_name: homeai-netdata
     pid: host
     network_mode: host
@@ -362,6 +366,7 @@ services:
 
   pdfplumber-service:
     build: ./services/pdfplumber
+    mem_limit: 1g
     container_name: homeai-pdfplumber
     networks: [ai-internal]
     ports: ["8003:8003"]
@@ -432,6 +437,7 @@ services:
   homeai-presidio:
     build: ./services/homeai-presidio
     image: homeai-presidio:1.0
+    mem_limit: 2g
     container_name: homeai-presidio
     networks: [ai-internal]
     environment:
@@ -642,6 +648,7 @@ services:
   # Behind the existing Caddy/Authelia stack on port 8011.
   paperless:
     image: ghcr.io/paperless-ngx/paperless-ngx:2.13.5
+    mem_limit: 1g
     container_name: homeai-paperless
     # ai-proxy added so 100.104.82.53:8011 host port works (ai-internal +
     # ai-services are both internal:true and block port publishing).

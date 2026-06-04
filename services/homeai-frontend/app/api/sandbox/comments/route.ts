@@ -1,3 +1,4 @@
+import { realmFromRequest } from '@/lib/realm';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSandboxComments, postSandboxComment } from '@/lib/db';
 
@@ -12,6 +13,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const realm = realmFromRequest(req);
+  if (realm !== 'owner' && realm !== 'work') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+ NextRequest) {
   const body = await req.json();
   if (!body?.component_id || !body?.comment_text) {
     return NextResponse.json({ error: 'component_id + comment_text required' }, { status: 400 });

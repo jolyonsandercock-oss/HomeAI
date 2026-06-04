@@ -2429,8 +2429,16 @@ async def api_research_ask(body: dict = Body(...)):
     question = (body.get("question") or "").strip()
     if not question:
         return JSONResponse({"error": "missing 'question'"}, status_code=400)
-    sources = body.get("sources") or ["email", "invoice_line", "document"]
+    sources = body.get("sources") or ["email_chunk", "invoice_line", "document"]
     top_k   = int(body.get("top_k") or 12)
+    # build-dashboard connects as superuser → RLS is bypassed, so we MUST filter by
+    # realm explicitly here (the realm middleware only gates access, not row visibility).
+    _realm = _current_realm.get()
+    allowed_realms = {
+        "owner":    ["owner", "work", "personal", "shared"],
+        "work":     ["work", "shared"],
+        "personal": ["personal", "shared"],
+    }.get(_realm, ["shared"])
     # 50/50 FTS/cosine — nomic-embed-text gives much sharper retrieval than
     # qwen-as-embedding; this default lets the dense pass pull its weight
     # while FTS keeps proper-noun matches honest.
@@ -2465,9 +2473,10 @@ async def api_research_ask(body: dict = Body(...)):
           FROM v_research_corpus, q
          WHERE ts @@ q.tsq
            AND source_table = ANY($2::text[])
+           AND realm = ANY($3::text[])
          ORDER BY rank DESC, event_at DESC NULLS LAST
          LIMIT 50
-    """, or_query, sources)
+    """, or_query, sources, allowed_realms)
     fts_by_id  = {(r["source_table"], r["source_id"]): r for r in fts_rows}
     fts_scores = {(r["source_table"], r["source_id"]): float(r["rank"]) for r in fts_rows}
 
@@ -2475,12 +2484,20 @@ async def api_research_ask(body: dict = Body(...)):
     qvec = await _ollama_embed(question)
     vec_rows = []
     if qvec:
+        # Scale: email_chunk has ~130k vectors — too many to pull into Python per
+        # query. Full dense scan for the small sources (invoice_line/document); for
+        # email_chunk go lexical-first — only score the FTS candidates. Realm-filtered
+        # (superuser bypasses RLS, so filter explicitly).
+        small_sources  = [s for s in sources if s != "email_chunk"]
+        email_cand_ids = [sid for (sk, sid) in fts_scores if sk == "email_chunk"]
         vec_rows = await db_all("""
             SELECT source_kind AS source_table, source_id, embedding
               FROM search_vectors
              WHERE model = 'nomic-embed-text'
-               AND source_kind = ANY($1::text[])
-        """, sources)
+               AND realm = ANY($3::text[])
+               AND ( source_kind = ANY($1::text[])
+                     OR (source_kind = 'email_chunk' AND source_id = ANY($2::bigint[])) )
+        """, small_sources, email_cand_ids, allowed_realms)
 
     vec_scores = {}
     for r in vec_rows:
@@ -2511,7 +2528,8 @@ async def api_research_ask(body: dict = Body(...)):
               FROM v_research_corpus
              WHERE source_table = ANY($1::text[])
                AND source_id    = ANY($2::bigint[])
-        """, st_array, id_array)
+               AND realm        = ANY($3::text[])
+        """, st_array, id_array, allowed_realms)
     extra_by_id = {(r["source_table"], r["source_id"]): r for r in extra_rows}
 
     passages = []

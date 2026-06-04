@@ -449,7 +449,7 @@ export default function DashboardPage() {
                       </div>
                     )}
                     {/* Staff on rota + rota cost */}
-                    {dayExtras && dayExtras.staff_total > 0 && (
+                    {dayExtras && dayExtras.staff_total > 0 && parseFloat(String(dayExtras.rota_cost || 0)) > 0 && (
                       <>
                         <div className="flex items-center gap-1 text-xs text-ink-700">
                           <Users size={11} className="text-ink-500" />

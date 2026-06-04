@@ -1,11 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { Section } from '@/components/ui/Section';
 import { KPICard } from '@/components/ui/KPICard';
 import { PlaceholderState } from '@/components/ui/PlaceholderState';
 import { SandboxWrapper } from '@/components/sandbox/SandboxWrapper';
 import { useSlug } from '@/lib/hooks';
-import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileText } from 'lucide-react';
 import { QuotaStatusTile } from '@/components/admin/QuotaStatusTile';
 import { ExpenseRollup } from '@/components/admin/ExpenseRollup';
 
@@ -55,6 +56,11 @@ const pipelineLogs = useSlug<PipelineLogRow>('pipeline_audit_recent');
 
       <SandboxWrapper id="backend.expense-rollup" label="Expense rollup">
         <ExpenseRollup />
+        <div className="mt-2 text-xs">
+          <Link href="/app/invoices" className="text-amber-500 hover:text-amber-400 underline inline-flex items-center gap-1">
+            <FileText size={12} /> View invoices / COGS breakdown
+          </Link>
+        </div>
       </SandboxWrapper>
 
       <SandboxWrapper id="backend.loans" label="Loans">

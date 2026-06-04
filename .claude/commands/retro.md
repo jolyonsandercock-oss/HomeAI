@@ -14,6 +14,9 @@ File each learning to the correct location:
 
 Then **reconcile `MASTER.md` §1–§3** (the living reference, MANDATORY): move work shipped this session into §1 Completed, demote anything broken/replaced into §3 Degraded/Superseded, refresh §2 Next phases, and bump "Last curated" to today. (§4 commit log auto-appends nightly — leave it.)
 
+Regenerate the capability index (MANDATORY): `python3 /home_ai/scripts/gen-capabilities.py`
+(keeps `CAPABILITIES.md` current so the next session can check what exists before building).
+
 Then update **STATUS.md** (MANDATORY):
 
 - Update "Last updated" date

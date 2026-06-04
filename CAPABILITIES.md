@@ -1,0 +1,852 @@
+# CAPABILITIES — generated index of what exists where
+
+Auto-generated 2026-06-04 by `scripts/gen-capabilities.py`. **Do not hand-edit.**
+Regenerate on `/retro`. Check this BEFORE designing or building anything — the codebase is large and parallel implementations have been built by mistake.
+
+## HTTP endpoints (214 across 10 services)
+
+### build-dashboard
+- `GET    /` — U84 Phase 7: route the unprefixed root to the new IA based on the
+- `GET    /index` — Old Mission Control page. Preserved at /index so existing
+- `GET    /api/healthz` — Shallow liveness — selftest checks this at startup."""
+- `GET    /api/whoami` — U153 diagnostic: echo the Authelia forward_auth identity headers so we
+- `GET    /api/healthz-deep` — Real health check: probes Postgres + n8n + google-fetch with timeouts.
+- `GET    /api/phases` — Phase-gate progress for the master progress bar.
+- `GET    /api/snapshot`
+- `GET    /api/recent`
+- `GET    /api/hardware`
+- `GET    /api/agents` — Daily velocity (£ saved) for the last N days. Heuristic: 3 min × £20/hr
+- `GET    /api/spend`
+- `GET    /api/context-pressure`
+- `GET    /api/dreaming`
+- `GET    /api/sovereignty`
+- `GET    /api/leaderboard` — Aggregate model_usage_history by context_layer + tier so the dashboard
+- `GET    /api/lifecycle`
+- `GET    /api/tiers` — Cross-reference nvidia-smi VRAM totals with Ollama /api/ps loaded models.
+- `GET    /api/hardware/vram-resident` — Per-hour local-vs-cloud call ratio, last N hours."""
+- `GET    /api/sovereignty/trend`
+- `POST   /api/benchmark/run` — Quick: trigger the model-evaluator webhook. Deep: not streamable from
+- `GET    /playground`
+- `GET    /landing` — Run the gmail-ingest-v1 classifier prompt against arbitrary input.
+- `POST   /api/playground/classify` — Run the gmail-ingest-v1 classifier prompt against arbitrary input.
+- `GET    /pub`
+- `GET    /economics`
+- `GET    /m`
+- `POST   /api/breakfast/submit` — Public endpoint — receives form-POST from the breakfast email.
+- `GET    /desktop`
+- `GET    /desktop/work/today`
+- `GET    /desktop/work/docs`
+- `GET    /desktop/work/actions`
+- `GET    /desktop/work/staff`
+- `GET    /desktop/work/email`
+- `GET    /desktop/work/finance`
+- `GET    /desktop/private/today`
+- `GET    /desktop/private/docs`
+- `GET    /desktop/private/family`
+- `GET    /desktop/build/pipelines`
+- `GET    /desktop/build/models`
+- `GET    /desktop/build/forensics`
+- `GET    /desktop/all`
+- `GET    /work/today`
+- `GET    /private/today`
+- `GET    /private/family`
+- `GET    /private/email`
+- `GET    /private/docs`
+- `GET    /private/actions`
+- `GET    /private/more`
+- `GET    /work/actions`
+- `GET    /work/docs`
+- `GET    /work/staff`
+- `GET    /work/email`
+- `GET    /work/finance`
+- `GET    /work/more`
+- `POST   /api/actions/{source}/{ref}/resolve` — Mark an action-queue item resolved. Polymorphic by source.
+- `POST   /api/actions/{source}/{ref}/snooze` — Snooze an action until a given date. For mart.exceptions only at first
+- `GET    /build/pipelines`
+- `GET    /build/models`
+- `GET    /build/forensics`
+- `GET    /all` — Sitemap: every GET route + every approved slug + every public view.
+- `GET    /api/all/sitemap` — Sitemap: every GET route + every approved slug + every public view.
+- `GET    /api/all/search` — Search the sitemap. Trgm similarity over page paths, slug names,
+- `GET    /vehicles`
+- `GET    /agents-ops` — U72 T3 — health overview of long-running services backed by DB state.
+- `GET    /api/agents/services` — U72 T3 — health overview of long-running services backed by DB state.
+- `GET    /dojo` — Per-site Dojo daily totals from v_dojo_daily. WORK realm only —
+- `GET    /api/dojo/daily` — Per-site Dojo daily totals from v_dojo_daily. WORK realm only —
+- `GET    /api/m/mobile` — Compact roll-up for the phone landing page."""
+- `GET    /api/kpi/pending-instructions`
+- `GET    /api/gp/rolling` — U46/U47 — rolling-window GP over any date range. Defaults to last 30 days
+- `GET    /api/gp/daily` — U45 — daily GP% series for the invoices header strip.
+- `GET    /api/classifier/uncertain` — U47a — low-confidence classifier queue. Surfaces emails the AI flagged
+- `POST   /api/classifier/feedback` — U47a — Jo submits a correction or confirmation for an uncertain email."""
+- `GET    /api/email-tasks/open` — U46 — open email tasks ranked by urgency (age × severity)."""
+- `GET    /api/weather/5day` — U46 — 5-day forecast + last-7-day actuals for Mission Control weather tile."""
+- `GET    /api/invoice/{invoice_id}/pdf` — U44 — serve the stored PDF for a vendor_invoice_inbox row.
+- `GET    /search`
+- `GET    /api/coverage/summary`
+- `GET    /api/coverage/recent-gaps`
+- `GET    /coverage`
+- `GET    /research` — Call homeai-ollama for an embedding. `mode` is 'query' or 'document' —
+- `POST   /api/research/ask`
+- `GET    /api/calendar/upcoming` — SELECT id, source_account, title, location, start_at, end_at, all_day,
+- `GET    /tasks`
+- `GET    /api/tasks/list` — SELECT * FROM v_tasks_unified
+- `POST   /api/tasks/create`
+- `POST   /api/tasks/{task_id}/complete` — UPDATE tasks
+- `POST   /api/tasks/{task_id}/snooze`
+- `POST   /api/tasks/{task_id}/reopen` — UPDATE tasks
+- `GET    /api/documents/expiry-due`
+- `GET    /reconciliation` — Currently-open reconciliation exceptions from:
+- `GET    /api/reconciliation/exceptions` — Currently-open reconciliation exceptions from:
+- `POST   /api/reconciliation/flags/{flag_id}/resolve`
+- `POST   /api/reconciliation/rules` — Insert a new bank_transaction_rules row. Used from /reconciliation UI
+- `POST   /api/bot/ask`
+- `GET    /documents` — U70 T1: Paperless post-consume webhook.
+- `POST   /api/documents/ingest-from-paperless` — U70 T1: Paperless post-consume webhook.
+- `POST   /api/documents/upload` — Upload a document — PDF or image. We OCR it (PDFs only for now via
+- `GET    /api/documents/list` — SELECT id, title, category, mime_type, file_path,
+- `GET    /api/documents/by-link/{table}/{linked_id}` — SELECT id, title, category, mime_type, file_path, linked_by,
+- `GET    /api/documents/{doc_id}/file`
+- `GET    /api/documents/review-queue` — Docs that the linker couldn't auto-attach OR the Haiku classifier
+- `GET    /api/documents/link-options` — List candidate rows for the manual-link picker on /documents."""
+- `POST   /api/documents/{doc_id}/link` — Manually attach a document to a record. Also marks the classification
+- `POST   /api/documents/{doc_id}/reject` — Reject the suggested classification — leaves doc unlinked but marked
+- `GET    /api/emails/search`
+- `GET    /api/invoices/{invoice_id}/lines` — List line items for an invoice, joined to product_canonical."""
+- `GET    /api/invoices/{invoice_id}/preview-image` — Page-1 PNG render, cached on disk under /home_ai/storage/invoice-previews/."""
+- `PUT    /api/invoices/{invoice_id}/notes` — Append a plain-text note to vendor_invoice_inbox.notes. Format:
+- `GET    /api/invoices/{invoice_id}/notes`
+- `POST   /api/invoice/{invoice_id}/feedback` — U44 — record plain-text user feedback about an invoice. Sonnet applier
+- `GET    /api/reviews/queue` — U39 — Action Queue feed for guest reviews. Returns drafted-but-not-actioned
+- `POST   /api/reviews/approve` — U39 — Approve (with optional edit) or reject a draft.
+- `POST   /api/reviews/mark_posted` — U39 — Jo manually posts the response to Google/TripAdvisor, then clicks 'mark posted'."""
+- `GET    /api/drift/current` — v_ai_worker_drift consumer — current AI worker drift status.
+- `GET    /api/dreaming/heuristics` — Recent dreaming proposals + run history."""
+- `GET    /api/anomalies` — KPI anomalies: today vs 7-day rolling avg, flag if outside ±50%.
+- `GET    /api/kpi/sparklines` — 7-14d series for the top KPIs surfaced in the ribbon. Used for
+- `GET    /api/vehicles` — U51 T5 — vehicles + 30-day expiry alerts. U66 — also surfaces docs
+- `POST   /api/manager-notes` — U54 D: post a manager note for a date (any author can write).
+- `GET    /api/manager-notes` — SELECT id, note_date, body, author, created_at
+- `POST   /api/till-recon` — U71 T1: record a till-reconciliation row from /m.
+- `POST   /api/till-recon/{recon_id}/resolve` — U54 D: mark a flagged till_reconciliation row as resolved with a note."""
+- `GET    /api/economics/overview` — SELECT COALESCE(SUM(rate_per_night), 0)::numeric(10,2) AS room_revenue
+- `GET    /api/economics/period-summary` — SELECT report_date,
+- `GET    /viewer/email/{account}/{message_id}` — Render a Gmail message body inline. HTML is wrapped in a sandboxed
+- `GET    /viewer/snapshot/{filename}` — Stream an HTML or PNG snapshot file from the whitelisted directories."""
+- `GET    /viewer/pdf` — Stream a PDF — `path` must resolve under a whitelisted root."""
+- `GET    /workforce`
+- `GET    /api/workforce/overview` — SELECT COUNT(*) AS shifts,
+- `GET    /api/workforce/rota_today` — U45/U47b — who's on today (or the most-recently-loaded shift date if
+- `GET    /api/workforce/income_vs_cost` — U45 — per-team labour cost vs the income stream it serves.
+- `GET    /api/workforce/forecast_vs_actual` — U47b — forecast (sum of shifts) vs actual (workforce_timesheets) per week.
+- `GET    /api/workforce/sales_per_hour` — U47b — per-staff attributable sales leaderboard over a window.
+- `GET    /api/accommodation/adr` — U45 — Average Daily Rate + max/min per room over the window."""
+- `GET    /api/accommodation/occupancy_now` — U45 — current occupancy grid: list of rooms + whether each is occupied tonight."""
+- `GET    /invoices`
+- `GET    /invoices/needs-review` — U75 — slim feed of vendor_invoice_inbox rows in 'needs_review' for the
+- `GET    /api/invoices/needs-review` — U75 — slim feed of vendor_invoice_inbox rows in 'needs_review' for the
+- `POST   /api/invoices/{invoice_id}/mark` — U75 — change vendor_invoice_inbox.status. Body: {status: 'extracted'|'ignored'|'needs_revi…
+- `GET    /api/invoices/list`
+- `GET    /caterbook`
+- `GET    /api/caterbook/overview` — SELECT COUNT(DISTINCT report_date) AS days_loaded,
+- `GET    /touchoffice` — Summary + per-day NET sales/covers across both sites for the last N days."""
+- `GET    /api/touchoffice/overview` — Summary + per-day NET sales/covers across both sites for the last N days."""
+- `GET    /api/pub/snapshot` — U47a — Pub-side metrics from real tables (caterbook + touchoffice).
+- `GET    /forensics` — Unresolved dead letters with the most useful diagnostic fields."""
+- `GET    /api/forensics/dead-letters` — Unresolved dead letters with the most useful diagnostic fields."""
+- `GET    /api/forensics/event/{event_id}` — Drill-down for one event: full payload, downstream-presence check,
+- `POST   /api/forensics/resolve` — Mark a dead letter resolved. Three verdicts:
+- `GET    /api/benchmark/stream` — Server-Sent Events: streams stdout from /app/run_benchmark.py inside
+- `GET    /finance`
+- `GET    /recon` — U69 T3: top-of-page tiles for /recon — counts per level + cash variance."""
+- `GET    /api/recon/summary` — U69 T3: top-of-page tiles for /recon — counts per level + cash variance."""
+- `GET    /api/recon/exceptions` — U69 T3: mart.exceptions filtered + sorted for Tabulator."""
+- `GET    /api/recipes/sales-vs-consumption` — U66 T3: sales→consumption from recipe expansion vs invoice purchases.
+- `GET    /api/recipes/list` — Inventory of recipes + components for the UI."""
+- `GET    /api/finance/kpis`
+- `GET    /api/finance/slugs` — List of finance slugs available to the dashboard."""
+- `GET    /api/finance/slug/{slug}` — Run a finance slug directly. Query-string params bind into SQL."""
+- `POST   /api/finance/ask` — Natural-language entry point. Routes the question to Haiku-tool-use,
+
+### google-fetch
+- `GET    /healthz`
+- `GET    /accounts`
+- `GET    /messages` — Returns Gmail messages with header metadata.
+- `GET    /message/{account}/{message_id}` — Fetch full message body — used by classifier when it needs the body."""
+- `GET    /thread/{account}/{thread_id}` — Fetch the full thread — used by reply-polling pipelines (u112/u113).
+- `GET    /attachments/{account}/{message_id}` — List all attachments on a message — filename, mime_type, attachment_id, size."""
+- `GET    /attachment/{account}/{message_id}/{attachment_id}` — Fetch raw attachment bytes (base64-decoded). Returns content-type +
+- `GET    /sheets/values/{account}/{spreadsheet_id}/{range_a1:path}` — Fetch a range from Google Sheets. Account must have spreadsheets scope.
+- `POST   /send/{account}` — Send an email via Gmail API as `account`. Requires gmail.send (covered
+- `POST   /draft/{account}` — Create a Gmail DRAFT (not sent) as `account` — lands in the account's
+- `POST   /forward/{account}/{message_id}` — U128: forward a Gmail message verbatim (with attachments) to `to`.
+- `POST   /poll-and-emit` — One-call multi-account ingestion. Iterates all active accounts, fetches new
+
+### homeai-data-proxy
+- `GET    /healthz`
+- `GET    /slug/{slug}`
+- `GET    /slug/{slug}`
+- `POST   /sandbox/comments`
+- `GET    /sandbox/comments`
+
+### homeai-presidio
+- `GET    /healthcheck`
+- `POST   /redact`
+
+### llm-router
+- `GET    /healthcheck`
+- `POST   /route`
+- `GET    /stats`
+
+### markitdown
+- `POST   /convert`
+- `GET    /healthcheck`
+
+### model-evaluator
+- `GET    /healthcheck`
+- `POST   /api/scan`
+- `GET    /api/models` — SELECT model_name, family, params_b, vram_gb, installed,
+- `POST   /api/models/{model_name}/deploy/{tier}`
+- `POST   /webhook/model-evaluator-manual` — If `model` is provided: benchmark just that model at the given tier
+
+### pdfplumber
+- `POST   /extract-pdf`
+- `POST   /parse-xlsx`
+- `POST   /parse-csv`
+- `POST   /render-page1-png` — U61 T2 — render page 1 of a PDF as a PNG (Wand/ImageMagick under the
+- `GET    /healthcheck`
+
+### playwright
+- `GET    /healthz`
+- `GET    /readyz`
+- `POST   /scrape/touchoffice` — Scrape TouchOffice home-page widgets (FIXED TOTALS, DEPARTMENT SALES
+- `POST   /scrape/touchoffice-z`
+- `POST   /ingest/touchoffice` — Scrape a (site, date) and INSERT each of the 3 widgets into its table.
+- `POST   /scrape/caterbook-arrivals` — PARKED — Caterbook is ingested from email (U28), not browser-scraped.
+- `POST   /ingest/caterbook` — Fetch a Caterbook 'Arrivals and Departures' email by message_id,
+- `POST   /scrape/dojo` — Scrape Dojo merchant dashboard transactions. Stub until on-site pairing.
+- `POST   /ingest/dojo` — Scrape Dojo + upsert into dojo_transactions on (transaction_id)."""
+- `POST   /scrape/trail` — Scrape Trail food-hygiene reports via OIDC SSO. Stub until on-site pairing."""
+- `POST   /ingest/trail` — Scrape Trail + upsert into trail_reports on (trail_report_id, report_date)."""
+
+### wa-bridge
+- `GET    /healthz`
+- `GET    /accounts`
+- `POST   /accounts/{account}/pair` — Open WhatsApp Web in HEADED mode for one-time QR pairing.
+- `POST   /accounts/{account}/scrape` — Open WA Web, walk recent threads, insert any new messages."""
+- `POST   /accounts/{account}/send` — Direct send — used by /outbound/dispatch + manual override.
+- `GET    /accounts/{account}/threads` — SELECT thread_jid,
+- `GET    /accounts/{account}/thread/{jid:path}` — SELECT direction, body, sent_at
+- `POST   /outbound/dispatch` — Ship every status='approved' row in wa_outbound_queue."""
+
+## SQL functions — home_ai.* (21)
+- `home_ai.accounts_overview()`
+- `home_ai.ai_usage_autopopulate()`
+- `home_ai.auto_dismiss_email_tasks()`
+- `home_ai.compute_ai_cost_gbp(p_model text, p_prompt_tokens integer, p_completio…)`
+- `home_ai.consolidate_brands()`
+- `home_ai.flag_invoice_re_extract(p_invoice_id bigint)`
+- `home_ai.insert_email_ignore_rule(p_domain text, p_created_by text DEFAULT 'system':…)`
+- `home_ai.insert_snag(p_title text, p_description text DEFAULT NULL::tex…)`
+- `home_ai.propagate_vendor_categories()`
+- `home_ai.quota_check(p_tier text, p_est_cost_gbp numeric DEFAULT 0)`
+- `home_ai.realm_override(p_table text, p_id bigint, p_new_realm text, p_rea…)` — Owner-only chokepoint for mutating a row's realm. Refuses unless app.current_realm = 'owner'. Sets app.realm_override_active = '1' around the UPDATE so BEFORE UPDATE triggers let it through. Inserts an audit_log row. See SPEC §2.5 "Misdirected invoice" edge case.
+- `home_ai.salaried_cost(w_start date, w_end date)`
+- `home_ai.sanitise_full(t text)` — U235: non-truncating prompt-injection sanitiser for RAG. Mirrors _sanitise() without the 2000-char cap.
+- `home_ai.set_realm(p_realm text)` — R2 chokepoint: validate and set app.current_realm for the current transaction. Use this instead of raw SET LOCAL so unrecognised values fail fast.
+- `home_ai.trg_realm_immutable()`
+- `home_ai.update_email_task_status(p_task_id bigint, p_status text, p_notes text DEFA…)`
+- `home_ai.update_snag_status(p_id bigint, p_status text, p_notes text DEFAULT N…)`
+- `home_ai.upsert_email_priority_keyword(p_keyword text, p_label text DEFAULT NULL::text)`
+- `home_ai.upsert_vendor_rule(p_domain_pattern text, p_category text, p_vendor_d…)`
+- `home_ai.upsert_vendor_rule(p_domain_pattern text, p_category text, p_vendor_d…)`
+- `home_ai.verify_purchase(p_id bigint, p_action text, p_category text DEFAUL…)`
+
+## Views — v_* (111)
+- `v_account_balances_now` — Latest balance per bank_account. Sign convention: positive = asset, negative = debt (credit cards always negative, overdrawn currents too).
+- `v_account_transfers_open` — Transfer-flagged bank_transactions rows not yet paired in account_transfers.
+- `v_action_queue`
+- `v_action_queue_stratified`
+- `v_ai_cache_effectiveness` — U109 V128. Per-service cache hit-rate over last 7d. pct_input_cached close to 0% means caching not engaging (prefix too small for the model tier).
+- `v_ai_calls_by_realm` — U55 R6: AI usage rolled up by (day, realm, task, model). If a task shows up under realm=owner that should be realm=work (e.g. invoice extraction tagged owner), the worker is missing SET app.current_realm.
+- `v_ai_spend_7d`
+- `v_ai_spend_7d_by_capability`
+- `v_ai_spend_today`
+- `v_ai_worker_drift`
+- `v_bank_category_month_summary` — Phase A analytic spine: rolled-up bank activity by (month, entity, category).
+- `v_bank_interest_cost_summary` — Phase A analytic: net interest cost (charged minus received) per entity per quarter. Useful for the overdraft-cost discussion and to spot any entity where the interest line is creeping.
+- `v_bank_recurring_charges` — Phase A analytic: recurring DDs / loan repayments — at least 3 months in a row. Sorted by annual run-rate. Use to spot creeping subscriptions.
+- `v_breakfast_tomorrow`
+- `v_build_forensic_summary` — U84 /build/forensics — DLQ + drift + classifier-uncertain counts (V102).
+- `v_build_model_spend_30d` — U84 /build/models — per-model tokens + cost over last 30 days (V102).
+- `v_build_pipeline_status` — U84 /build/pipelines — AI pipeline activity by provider over 7 days (V102).
+- `v_calendar_upcoming` — Next 30 days of calendar events across all synced Google accounts.
+- `v_capital_summary`
+- `v_card_fees_interest_by_month` — Credit-card finance-cost rollup. Per (card, month): interest + fees + counts.
+- `v_card_reconciliation` — U54 T4: per-day-per-site card-takings reconciliation. Dojo (gross_sales) minus TouchOffice CREDIT in Drawer. delta>£1 = minor; >£25 = mismatch; one-sided rows = missing_dojo / missing_touchoffice.
+- `v_card_statements_summary` — One row per credit-card billing cycle with the headline numbers.
+- `v_cash_variance_day` — V85: day-level cash variance (pos vs till) without site dim. The proper per-shift per-operator surveillance lives in v_op_* views below — inert today; activates when per-ticket TouchOffice data lands.
+- `v_category_band_baseline` — U111 V130. Per (category × weather band × day-of-week) avg + median revenue over trailing 90 days. Feeds v_revenue_forecast_tomorrow.
+- `v_classifier_uncertain` — U47a — emails the classifier was unsure about (confidence <= 0.85, not yet reviewed). Surfaces in Mission Control "AI uncertain" card.
+- `v_clover_daily`
+- `v_cogs_capture_coverage` — U232 T3 increment 1: per-month captured COGS (work realm) with a trailing-3mo completeness flag (empty/low/ok). Relative signal to qualify GP%; NOT absolute coverage (bank-anchored version blocked on bank realm re-classification).
+- `v_cogs_period`
+- `v_consumption_vs_purchase` — U66 T3: weekly implied consumption (from PLU sales × recipe) vs invoice purchases per product_canonical. Negative gap = stock used faster than bought (waste? incorrect recipe?). Positive gap = over-purchasing or stocking up. First-cut — coverage limited by recipe seed (~10 PLUs).
+- `v_daily_accom_revenue`
+- `v_daily_cost_vs_sales`
+- `v_daily_gp` — U84 V110. Daily GP. wet/dry split sourced from v_pub_sales_mix (real TouchOffice ALCOHOL/FOOD departments); falls back to 60/40 if a date has no scraped sales. Also: cost date uses COALESCE(delivery_date, invoice_date) only — never received_at (U84 invoice-date discipline).
+- `v_daily_labour_by_team`
+- `v_daily_spend`
+- `v_daily_unit_economics`
+- `v_documents_expiry_due` — Docs in expired / expiring_soon (≤30d) / review_due states. Drives the u62-doc-alerts.sh cron + Mission Control "needs review" tile.
+- `v_documents_linked` — Linked-document feed used by /api/documents/by-link/{table}/{id} and the Mission Control "unlinked docs needing filing" tile.
+- `v_documents_needing_review` — U68 — drives /documents review-queue chip. Unlinked docs + low-confidence classifier outputs that need Jo's eye.
+- `v_dojo_daily` — Daily authorised-only Dojo totals per site. Source of truth for dashboard /api/dojo/daily and future reconciliation against TouchOffice card tender.
+- `v_dojo_freshness`
+- `v_email_tasks_open` — U46 — open email tasks ranked by urgency (age × severity).
+- `v_feed_coverage_clean` — V84: feed_coverage with closure days reclassified status=closed so the missing-rows widget no longer cries about expected zeros.
+- `v_feed_coverage_recent_gaps` — Last-30d gaps for the Mission Control "Coverage" tile.
+- `v_feed_coverage_summary` — One-row-per-feed snapshot of coverage health. Lowest pct_ok first.
+- `v_feed_coverage_summary_clean`
+- `v_finance_kpis` — Single-row finance KPI pack. total_credit_card_debt stays positive (magnitude); net_worth signs everything together.
+- `v_finance_monthly_summary` — Per-month rollup: one row per (month, entity, account_type, category).
+- `v_finance_recent_unified` — Last 90d of every finance event — bank txn, invoice, dojo settlement — in one stream for /finance recent-activity tab.
+- `v_gross_margin_period`
+- `v_guest_ltv`
+- `v_inter_entity_owings` — Net flow per entity-pair from confirmed account_transfers. Positive net_flow_a_to_b = A has paid net £N to B. Excludes 737 unpaired transfer rows still in v_account_transfers_open.
+- `v_invoice_lines_resolved` — Invoice line items joined to product_canonical for "how much X did I buy" queries.
+- `v_kpi_anomalies`
+- `v_kpi_live`
+- `v_live_ops_kpis`
+- `v_mortgage_coverage`
+- `v_mortgage_summary`
+- `v_net_worth_summary`
+- `v_obligations` — U121 V133 + U124-A V135. All dated obligations. Mortgage payments now use mortgage_accounts.payment_day_of_month.
+- `v_obligations_due_3d`
+- `v_op_comp_drift`
+- `v_op_late_night_skew`
+- `v_op_open_tabs_eod`
+- `v_op_persistent_unders` — V85: operators with ≥3 small-under (£5 or less) cash-shorts in last 30d. Active once per-ticket TouchOffice data lands.
+- `v_op_refund_clusters`
+- `v_op_refund_spikes_weekly`
+- `v_private_docs_kpis`
+- `v_private_family_kpis`
+- `v_product_purchases`
+- `v_property_comparable_summary`
+- `v_pub_sales_mix` — U84 V110. Per-day pub wet/dry sales mix from TouchOffice departments ALCOHOL SALES / FOOD SALES. Used by v_daily_gp instead of hardcoded 60/40.
+- `v_purchase_search`
+- `v_quota_status`
+- `v_realm_audit` — R1: lists every public.* base table and whether it has the realm column. A new home_ai-domain table without realm=true is a lint failure.
+- `v_realm_audit_violations` — R2/R5 audit: rows where realm disagrees with entity_id-implied realm. Excludes emails and events — those derive realm from mailbox-of-receipt (spec §2.5 ingest rule), so an entity_id comparison there is a category error.
+- `v_realm_policy_coverage` — R2 audit: every realm-bearing public table (excluding partition children) and whether it carries a realm_isolation policy. Post-V65/V65b every row should have has_realm_policy = true.
+- `v_recent_gp`
+- `v_recent_invoices_window`
+- `v_recent_labour`
+- `v_redaction_24h`
+- `v_rental_income`
+- `v_repeat_arrivals`
+- `v_research_corpus` — U64 FTS-based research corpus. Replace with vector-RAG view in U65 once a real embed model is reachable.
+- `v_revenue_forecast_tomorrow` — U111 V130. Tomorrow predicted revenue per category given forecast weather band + day-of-week, looked up against last-90d baseline.
+- `v_route_telemetry_7d`
+- `v_session_integrity_findings` — U93 V118. Till recon rows that have data in some fields but are missing others (z_reading, card_total, or cash_counted). 30-day window.
+- `v_staff_with_meta`
+- `v_tasks_unified` — Manual tasks + AI-extracted email_tasks in one feed for /tasks UI.
+- `v_till_variance_findings` — U84 V111. Till-reconciliation rows with abs variance >= £20 in last 60 days.
+- `v_today_bookings`
+- `v_today_bookings_by_source`
+- `v_today_kpis_private`
+- `v_today_kpis_work`
+- `v_today_pub_sales`
+- `v_today_restaurant`
+- `v_today_stay_dine_crosslink` — U108 V126. Guests staying AND dining tonight, matched on canonical_name (whitespace-insensitive).
+- `v_top_vendors_window` — Top vendors by 12-month spend, from vendor_invoice_inbox.
+- `v_uncategorised_summary` — Phase A diagnostic: where is the auto-categoriser still leaving gaps?
+- `v_vehicle_alerts` — U99 V120. Vehicle alerts with severity de-escalated to "low" when a renewal signal (DVLA / insurer / etc.) landed in the last 60 days.
+- `v_weather_5day`
+- `v_weather_sales_correlation`
+- `v_weather_seasonality` — U47a — weather year-on-year comparison. Becomes meaningful once 400d backfill is in.
+- `v_weekly_spend`
+- `v_work_docs_kpis`
+- `v_work_email_kpis`
+- `v_work_staff_kpis`
+- `v_workforce_forecast_vs_actual` — U222: per-user pay-period comparison of Tanda timesheets (actual) vs workforce_shifts rota (planned). One row per finalised timesheet.
+- `v_workforce_shifts_costed`
+- `v_xero_bills`
+- `v_xero_orphan_inbox`
+- `v_youleend_reconciliation`
+
+## Whitelisted slugs (209) — frontend reads via /api/slug/<slug>
+- `account_balances` (work) — Most recent balance on each bank or credit-card account. is_liability=true means…
+- `accounts_overview` (shared) — Returns all bank accounts with current balance, transaction count, and date rang…
+- `action_queue` (owner) — U84 action queue (top 100, severity then age sorted)
+- `ai_cache_effectiveness` (owner) — Anthropic prompt-cache hit-rate per service over last week
+- `ai_spend_7d_by_capability` (shared) — Per-capability_tag × business_priority spend over last 7 days.
+- `ai_spend_today` (shared) — Per-tier (P0..P3) spend today in GBP, call count, and would-have-blocked count f…
+- `audit_log_by_actor_7d` (shared) — Per-staff action counts: who did what across the dashboard. Drives multi-user ac…
+- `backend_ai_usage_24h` (owner) — Per-model rollup of token usage + latency over the trailing 24h.
+- `backend_errors_24h` (owner) — audit_log rows whose action ends ":firing" or contains "error" / "fail" / "stuck…
+- `backend_import_freshness` (work) — How recent each upstream sync is. Drives the "stalled imports" red banner.
+- `backend_local_ai_30d` (owner) — Local model workload (30d)
+- `bank_holidays_next_90d` (shared) — UK (England + Wales) bank holidays in the next 90 days
+- `bar_till_groups_spark_7d` (shared) — U210→U225: per-drink-group 7-day daily £ value array, for sparkline per group. S…
+- `bar_wage_summary` (shared) — U210→U225: bar staff = FOH team. Adds purchase_total (Beverage vendor invoices).…
+- `beer_garden_dow_baseline` (shared) — U196: historical food+drink revenue on same DoW. Compared against today by oracl…
+- `bot_instructions_pending` (owner) — Pending instructions queue
+- `breakfast_coverage_next_7d` (shared) — U160: per-night arrivals count vs breakfast orders submitted. Identifies "no bre…
+- `breakfast_forecast_tomorrow` (shared) — U160: tomorrow per-item portion counts, grouped by service_time slot. Drives kit…
+- `breakfast_orders_by_token` (shared) — U160: all orders for a stay (email_token). Drives kitchen detail view.
+- `breakfast_orders_today` (work) — All breakfast orders for today with room, dish, allergies, and notes
+- `breakfast_tomorrow` (owner) — Guests staying tomorrow + their breakfast choices if submitted
+- `build_forensic_summary` (owner) — Exception counts by severity, anomaly z-score count, classifier uncertain
+- `build_model_spend_30d` (owner) — Token counts + crude cost (GBP) per model over last 30 days
+- `build_pipeline_status` (owner) — AI provider activity over 7d: live/recent/stale/cold + 24h + 1h call counts
+- `cafe_demand_dow_baseline` (shared) — U197: historical cafe revenue + ice-cream sales on same DoW.
+- `cafe_dept_spark_7d` (shared) — U225 T6: per-department 7-day daily £ array for cafe (site=sandwich) sparklines.
+- `cafe_today_depts` (shared) — U225 T6: per-department £ value for site=sandwich on the most recent scraped dat…
+- `capital_summary` (owner) — Properties + current valuation + mortgage exposure + equity per property.
+- `cash_drift_per_till_30d` (shared) — U176: per-till variance summary. Which till most/least reliable.
+- `cashup_reconciliation_today` (work) — Joins Z-reads (TouchOffice) + Dojo cards + Caterpay + Collins + cashup_inputs.ca…
+- `cash_variance_unexplained_7d` (shared) — U176: per-till per-day variances > £10 needing investigation.
+- `children` (owner) — Children with school + DOB
+- `cogs_capture_confidence` (work) — COGS capture confidence
+- `cogs_capture_coverage` (work) — COGS capture coverage (monthly)
+- `containers_restart_storm` (shared) — U198: surfaces container instability that docker ps masks (since restart-loops s…
+- `cost_by_capability_30d` (shared) — U165: per capability_tag spend + utilization vs tier ceiling.
+- `cost_centre_breakdown` (owner) — Cost-centre split (pub/cafe/shared) with extracted-amount and seen-amount totals
+- `credit_card_status` (work) — Latest closing balance, min payment, credit limit, due date per card.
+- `cron_failures_7d` (shared) — U168: failed/retried runs over last 7 days, with exit code + log excerpt.
+- `cron_jobs_missed_today` (shared) — U168: jobs expected to have run by now but no success record.
+- `daily_cogs_7d_avg` (work) — Daily COGS 7d rolling avg
+- `daily_gp_recent` (owner) — Daily GP with wet/dry/cafe %, last 14 days
+- `daily_pnl` (shared) — U178: per-day operational P&L. Revenue (rooms + food/drink) minus matched suppli…
+- `dashboard_checkins_today` (shared) — Tonight arrivals: name + room
+- `dashboard_checkouts_today` (shared) — Today departures: name + room
+- `dashboard_covers_today` (shared) — Restaurant covers today by service + group count
+- `dashboard_email_priority` (work) — High-priority email tasks matching urgency keywords, plus a summary count
+- `dashboard_labour_yesterday` (shared) — Labour cost vs sales yesterday + 7d/30d rolling — pub/cafe split
+- `dashboard_specials_next_7d` (work) — Group bookings (restaurant party_size >= 8) and group stays (accommodation adult…
+- `dashboard_special_today` (shared) — Special occasions: large reservations + group stays
+- `dashboard_stayovers_today` (work) — Guests checked in before today and checking out after today — i.e. staying tonig…
+- `dashboard_tides_next_7d` (work) — High and low tides for Boscastle, today through today+6. Driven by weekly Sunday…
+- `dashboard_week_strip` (shared) — Dashboard 7-day strip with weather + room/cover counts
+- `dashboard_week_strip_extras` (work) — Per-day rota head count by team, total rota cost, room inventory (booked / total…
+- `data_quality_issues_open` (shared) — U166: union of all recon_* slugs as a single severity-ranked list.
+- `data_source_freshness` (shared) — U165: per upstream source, max(timestamp) vs expected cadence. Flags stale > 2x …
+- `email_detail` (work) — Full sanitised body + metadata for a single email by id.
+- `emails_accounts` (work) — Distinct accounts with counts, for the account filter dropdown.
+- `emails_browse` (work) — Filter/sort/search/paginate emails; returns total_count for pagination.
+- `emails_classifications` (work) — Distinct classifications with counts, for the type filter dropdown.
+- `email_search` (work) — Full-text search across emails
+- `email_tasks_open` (shared) — Open email-derived tasks
+- `entity_summary` (owner) — Quick snapshot for an entity: name plus counts of pending instructions and docum…
+- `expense_by_department` (shared) — Rolls vendor_invoice_lines.line_gross by department over a date window. NULL dep…
+- `expense_invoice_lines_for_vendor` (work) — Returns all line items from invoices for a given vendor domain, unassigned lines…
+- `expense_tasks_exceptions` (work) — Uncategorised vendors and unassigned line items needing classification
+- `expense_top_categories` (shared) — Top categories by gross spend on vendor_invoice_inbox in the window. Uses catego…
+- `expense_top_families` (shared) — Top product families by line_gross. Joins vendor_invoice_lines → product_canonic…
+- `expense_top_vendors` (shared) — Top vendors by gross spend in the window. Collapses pub/cafe duplicates into a c…
+- `expense_totals` (shared) — Totals of vendor_invoice_inbox over a date range, optionally filtered by site (p…
+- `fees_paid_window` (owner) — Sum of "bank_fee" category — service charges, FX fees, returned-item fees, unaut…
+- `finance_kpis` (owner) — Cash balance total, credit-card debt total, month-to-date in/out, transfers in l…
+- `frontend_accommodation_today` (shared) — Today arrivals/staying/departures counts for Dashboard row 4
+- `frontend_action_queue` (shared) — Open action queue items for Tasks/Back-end pages
+- `frontend_action_queue_stratified` (shared) — U190: action queue with urgency_bucket (overdue/today/this_week/backlog).
+- `frontend_invoices_recent` (shared) — Recent invoices for Admin page
+- `frontend_restaurant_today` (shared) — Restaurant run sheet for today
+- `frontend_revenue_7d` (shared) — U159: rolling 7d gross revenue per day, faceted by source. Drives sparkline.
+- `frontend_revenue_breakdown_by_day` (shared) — U159: detailed per-source revenue for a given date. Drives /work/revenue drill-d…
+- `frontend_revenue_today` (shared) — U159: today gross revenue split across rooms, food+drink, card payments.
+- `frontend_revenue_today_vs_last_week` (shared) — U159: percentage delta of today gross vs same-DOW 7 days ago. Drives traffic-lig…
+- `frontend_rooms_today` (shared) — Frontend Rooms page primary data
+- `frontend_seven_day_strip` (owner) — Frontend Dashboard 7-day strip
+- `frontend_today_gross` (shared) — Frontend Dashboard row 1: today gross by site
+- `frontend_wage_pct_summary` (shared) — Wage % rollup 1/7/30 day windows
+- `ghost_shifts_recent` (owner) — Days with sales but no shift coverage
+- `gross_margin_30d` (shared) — U174: revenue minus food/drink supplier spend. Crude — does not yet attribute pe…
+- `gross_margin_period` (work) — Gross margin by month/department
+- `guest_contact_coverage` (owner) — How many bookings in the last 90 days have phone/email captured
+- `guest_ltv_top` (owner) — Top 50 guests by lifetime revenue
+- `guest_segments_summary` (owner) — Breakdown of guest base by VIP/frequent/regular/one-off
+- `interest_paid_window` (owner) — Sum of interest charged across every account in the window. Combines credit-card…
+- `invoice_header` (shared) — One row of vendor_invoice_inbox detail for the drilldown page header. Includes X…
+- `invoice_lines` (shared) — Full line-item detail for a single vendor_invoice_inbox row. Joins to product_ca…
+- `kpi_dashboard` (work) — KPI dashboard (traffic-light + levers)
+- `labour_pct_spark_7d` (shared) — U185: 7-day labour % trend for the sparkline on the labour tile.
+- `labour_recent_14d` (owner) — Labour hours + cost per team for last 14 days
+- `last_7d_unit_economics` (work) — Daily NET sales, covers, total revenue, labour % and SPLH for the past 7 days (t…
+- `latest_caterbook_occupancy` (work) — Latest in-house, arrivals, stayovers, departures from the Caterbook daily snapsh…
+- `line_feedback_recent` (shared) — Most recent N corrections to line categorisation. Used by /admin/invoices/[id] s…
+- `manual_data_pending_uploads` (work) — Items that need manual upload (Dojo CSVs, bank statements, card statements, mort…
+- `menu_performance_7d` (shared) — Rolling 7d per-item sales across all sites.
+- `menu_performance_by_course_7d` (shared) — U209: ranked PLU sales last 7 days, classified into starter/main/dessert/sides/d…
+- `menu_performance_by_site_today` (shared) — Today top sellers grouped by site (pub vs cafe). Drives per-page tiles.
+- `menu_performance_today` (shared) — Today per-item sales from touchoffice_plu_sales. Drives Restaurant + Bar menu-pe…
+- `monthly_finance_costs` (owner) — Time-series: out-of-pocket cost of borrowing per month, broken out into interest…
+- `mortgage_coverage` (owner) — Quarters scanned vs quarters expected per mortgage account; flags missing statem…
+- `mortgages_all` (owner) — Every mortgage account: active first, then closed (greyed in UI).
+- `mortgages_summary` (work) — Active mortgages with lender, balance, properties secured, and document count.
+- `mortgage_statement_gaps` (shared) — Per loan: missing quarters of statements — drives doc-collection priorities
+- `net_worth_summary` (work) — Single-row summary: property + cash − secured/unsecured borrowing = net worth.
+- `noise_senders` (owner) — Domains we auto-mark as status=ignored on intake
+- `obligations_due_3d` (owner) — Anything due in the next 3 days — daily reminder feed
+- `obligations_upcoming` (shared) — All dated obligations in the next 30 days
+- `occupancy_heatmap_28d` (shared) — U189: per (room, day) for next 28 days. 0/1 occupied flag drives heatmap intensi…
+- `occupancy_spark_7d` (shared) — U185: rooms-occupied count per day for sparkline.
+- `owings_summary` (owner) — For every pair of entities that have moved money to each other, the gross flow e…
+- `pending_invoices` (shared) — Vendor invoices in the inbox that have not yet been linked to a Xero invoice.
+- `perf_audit_latest` (shared) — U203: p50/p95/max ms per endpoint, latest audit run.
+- `personal_bank_transactions` (work) — Last 50 personal-realm bank transactions, newest first
+- `personal_loans` (work) — Personal loan accounts with balances
+- `pipeline_audit_recent` (owner) — Recent pipeline audit log entries from the last 24 hours
+- `pipeline_completion_lag_5m` (shared) — U164: surfaces drift before flood. Count of events still processing >5m per even…
+- `pipeline_health_per_day` (shared) — U165: per-workflow runs + success rate + p50/p95 duration for last 7d.
+- `plu_top_sellers_30d` (shared) — U174: top-selling items by gross value. (True margin needs recipe-cost model; Ph…
+- `private_docs_kpis` (owner) — Mortgages active/closed, vehicles count, docs expiring 60d
+- `private_family_kpis` (owner) — Children count, child events 30d, calendar 7d, medical follow-ups
+- `private_vehicles` (owner) — Vehicles with MOT / insurance / road-tax / service dates
+- `purchase_exceptions` (work) — Invoices needing attention
+- `purchase_kpis` (work) — Invoice KPIs
+- `purchase_search` (work) — Purchase search (line items)
+- `purchase_spend_by_month` (work) — Spend by month/department
+- `purchase_spend_summary` (work) — Purchase spend summary
+- `quota_status_today` (shared) — Per-tier ceiling vs spent today. Drives the /admin spend tile. shadow_blocked_to…
+- `recent_alerts` (owner) — System alerts updated in the last :hours hours (default 24).
+- `recent_finance_events` (owner) — Last N rows from v_finance_recent_unified — bank txns, invoices and dojo settlem…
+- `recent_invoices` (owner) — Most recent 100 invoices with a real invoice date, excluding duplicate/ignored
+- `recon_bookings_vs_room_nights` (shared) — U166: accommodation_bookings whose stay dates have no caterbook_room_nights rows…
+- `recon_dojo_vs_touchoffice_7d` (shared) — U166: per-day per-site, Dojo card take vs TouchOffice department sales totals. F…
+- `recon_duplicate_attachments` (shared) — U166: same (gmail_message_id, filename) ingested >1 time.
+- `recon_invoices_unmatched_in_xero_21d` (shared) — U166: vendor_invoice_inbox rows >21d old with no xero_bills link.
+- `recon_uncategorised_documents` (shared) — U166: documents with category=paperless whose title hints invoice/receipt/bill.
+- `redaction_24h_summary` (shared) — Counts of redaction events by status (ok / hard_fail / degraded / bypass) over l…
+- `rental_income` (work) — Shows rental income by tenant grouped by mortgage, with payment status and headr…
+- `repeat_arrivals_3d` (owner) — Guests arriving in the next 3 days who have stayed before
+- `revenue_by_room_type_30d` (shared) — U174: per room_type, nights sold + revenue + avg rate. Drives which rooms earn m…
+- `revenue_forecast_28d` (shared) — U175: per-day forecast combining confirmed bookings + DoW history. P10/P50/P90 c…
+- `revenue_forecast_next_4_weeks` (shared) — U175: weekly roll-up of the 28d forecast.
+- `revenue_forecast_tomorrow` (owner) — Predicted tomorrow revenue per category based on forecast weather + DOW
+- `revenue_spark_7d` (shared) — U185: 7-element float array for sparkline rendering. Today excluded so spark is …
+- `revenue_today_vs_typical` (shared) — U186: drives the today-vs-typical band component. Today value + percentile again…
+- `reviews_average_30d` (work) — 30-day rolling average rating + review count, per source × location.
+- `reviews_filterable_table` (work) — All reviews with normalised /5 rating (booking.com /10 → /5). Used by the sortab…
+- `reviews_rating_spark_30d` (shared) — U211→U225: per-day avg rating + count arrays for sparkline. avg_rating_30d is no…
+- `reviews_recent` (work) — Most recent 50 reviews across all sources. Drives the /comms Recent reviews list…
+- `reviews_three_source_summary` (work) — 30d avg, 7d avg, 7-day-prior avg, delta, and review count per source (google, tr…
+- `rooms_guest_dinners` (shared) — Per-guest dinner booking status for in-house guests, with reminder tracking
+- `rooms_week_economics` (work) — Single-row summary: room-nights sold, unsold, % occupied, average stay (nights) …
+- `route_telemetry_7d` (owner) — Page-view hits per route in last 7 days. Drives decommissioning decisions.
+- `safe_movements_for_date` (work) — List of to_safe / from_safe movements for review/audit.
+- `safe_running_balance` (work) — Per-site running safe balance from start of current month. Positive = to-safe; n…
+- `sales_30d_income_vs_labour` (work) — Daily total income (pub bar+food + cafe everything; excludes touchoffice ACCOM s…
+- `sales_categorized_split_range` (work) — Per-site sales grouped into business-meaningful categories over an arbitrary dat…
+- `sales_daily_totals_30d` (work) — Last 30 days daily totals per site, with 7-day rolling average for target overla…
+- `sales_filterable_daily_table` (work) — 30-day daily table per site: revenue split, labour cost, labour% of sales. COGS …
+- `sales_last_poll_per_source` (work) — Most recent successful scrape/ingest per source. Feeds the poll-clock indicator.
+- `snag_inbox_pending` (work) — Pending snag/complaint/improvement items
+- `spend_by_category_window` (owner) — Every outgoing pound categorised — vendor_payment, payroll, tax_payment, direct_…
+- `staff_attribution_per_hour` (work) — Per-staff cost vs attributed revenue across a date window. Attribution = (staff …
+- `staff_birthdays_next_30d` (work) — Active employees whose birthday (from Tanda DOB) falls in the next 30 days.
+- `staff_dojo_tips_today` (work) — Sum of gratuity_amount across Dojo transactions for the date. Per-staff allocati…
+- `staff_on_rota_today` (work) — Rota for a given date (default = today). Returns one row per shift with team, ti…
+- `staff_tanda_sync_status` (work) — Last successful workforce + timesheets sync. Drives the staff-page Tanda health …
+- `staff_upcoming_holidays` (work) — Approved + pending holiday requests starting within the next 28 days.
+- `stay_dine_crosslink_today` (owner) — Today VIP cross-link: people in the inn AND at the restaurant tonight
+- `tides_next_7d` (shared) — High/low tide times for Boscastle (next 7 days)
+- `today_bookings` (owner) — Accommodation bookings checking in today
+- `today_bookings_by_source` (owner) — Today check-ins grouped by normalised source (Airbnb/Agoda/Direct/...)
+- `today_kpis_private` (owner) — U84 /private/today: family cash, action counts, doc expiries, 7d calendar
+- `today_kpis_work` (owner) — U84 /work/today: cash, action counts, bookings today, doc expiries
+- `today_pub_sales` (owner) — Today sales by department + site from TouchOffice
+- `today_restaurant` (owner) — Today restaurant reservations from Collins/DesignMyNight
+- `today_totals` (work) — NET, GROSS and covers for today, split by pub vs sandwich bar, plus combined tot…
+- `top_purchases_window` (owner) — Roll-up of vendor_invoice_lines joined to product_canonical. Use to ask "how muc…
+- `top_revenue_drivers_today` (shared) — U174: today top revenue items per site. Where is today money coming from.
+- `top_vendors_window` (owner) — Roll-up of vendor_invoice_inbox by vendor with totals + count + last seen.
+- `trail_reports_today` (work) — Latest Trail report state per (location, report_name) for a target date (default…
+- `trail_reports_trend_14d` (work) — 14-day score timeseries for a report_name (param) — drives sparkline.
+- `transfers_recent` (owner) — Most recent rows from account_transfers, showing source account, dest account, a…
+- `vat_owed_quarter` (shared) — U173: per-rate output VAT for the current quarter so Jo sees running total.
+- `vat_return_quarter` (shared) — U177: full output VAT + input VAT for any quarter (default = current). Param :fo…
+- `vat_unclassified_lines_30d` (shared) — U173: revenue lines where vat_rate is NULL — needs a rule.
+- `vault_status` (work) — Current homeai-vault seal state from vault-watchdog. Refreshed every 5 min; >10m…
+- `vendor_due_for_reorder` (shared) — U171: vendors with consistent past cadence whose latest invoice is >1.5x their a…
+- `vendor_price_creep_180d` (shared) — U171: per (vendor, item description), unit price trend. Flags >10% movement on i…
+- `vendor_site_rules` (owner) — Vendor-default site mapping table
+- `vendor_spend_90d` (shared) — U171: top vendors by spend over 90d with invoice count + average bill size.
+- `vendor_spend_trend_90v90` (shared) — U171: per-vendor delta between current 90d and prior 90d. Flags creep or shrink …
+- `vision_ocr_queue_status` (shared) — U161: image-only PDF re-OCR queue. Surfaces backlog + recent failures.
+- `wa_outbound_pending` (owner) — WhatsApp drafts queued for owner approval
+- `wa_recent_inbound` (owner) — Last 24h of inbound WhatsApp across personal + pub
+- `week_strip_anomalies_7d` (shared) — U192: per-day z-score vs 90d same-DoW history. Outliers get amber border in week…
+- `work_docs_kpis` (owner) — Counts: total, new, extracted, needs_review, ignored; site split; PDF coverage; …
+- `work_email_kpis` (shared) — Open email tasks, pending bot instructions, last instruction timestamp
+- `work_staff_kpis` (owner) — Ghost shifts, last Tanda sync, 7d labour hours/cost/people count
+- `xero_bills_recent` (shared) — Bills entered to Xero in the last 30 days
+- `xero_orphans_top_vendors` (shared) — Vendors with the most £ in unmatched invoice emails
+- `xero_vs_email_orphans` (shared) — Invoice emails received but not in Xero (last 100d). Shows £ exposure + forward …
+- `youleend_reconciliation` (work) — Daily YouLend repayments vs 10% Dojo gross reconciliation
+
+## Scripts (263)
+- `scripts/authelia-bootstrap.sh` — /home_ai/scripts/authelia-bootstrap.sh
+- `scripts/auto-classify.py` — Daily auto-classification — re-run rules on uncategorised vendors.
+- `scripts/backup-all.sh` — /home_ai/scripts/backup-all.sh — weekly comprehensive backup (SPEC §7.3).
+- `scripts/backup-nightly.sh` — /home_ai/scripts/backup-nightly.sh
+- `scripts/bg-lite-harvest.py`
+- `scripts/booking-scraper.py` — Booking.com review — disabled.
+- `scripts/bootstrap.sh` — /home_ai/scripts/bootstrap.sh — prepare fresh Ubuntu 26.04 for Home AI.
+- `scripts/build_gmail_ingest_workflow.py`
+- `scripts/check-vault-secrets.sh` — check-vault-secrets.sh — confirm every required Vault path resolves before
+- `scripts/commit-root-owned.sh` — commit-root-owned.sh — sudo-friendly commit for the 4 root-owned scripts
+- `scripts/dojo-import.py`
+- `scripts/fix-all-v2.py` — 300 days sunrise/sunset
+- `scripts/fix-cater-query.py` — Get the current workflow
+- `scripts/fix-metabase-pass.sh` — fix-metabase-pass.sh — re-inject metabase_app DB password and recreate ONLY
+- `scripts/fix-sun-sales.sh` — Run this on JolyBox to fix sunset/sunrise + sales data
+- `scripts/gen-capabilities.py` — gen-capabilities.py — derive a capability index from the live system.
+- `scripts/gmail-oauth-bootstrap.py`
+- `scripts/hermes-reply.sh` — hermes-reply.sh — drop a reply file into the Hermes-readable outbox.
+- `scripts/homeai-cron-guard.sh` — homeai-cron-guard.sh — reinstall joly's crontab from the committed snapshot if
+- `scripts/install-backup-cron.sh` — /home_ai/scripts/install-backup-cron.sh
+- `scripts/install-resilience-systemd.sh` — Run with sudo. Installs the self-healing supervisor + cron-guard as systemd
+- `scripts/list-roles-keys.sh` — Diagnostic: print the FIELD NAMES (not values) under secret/postgres-roles.
+- `scripts/log-build-activity.sh` — /home_ai/scripts/log-build-activity.sh
+- `scripts/metabase_step12_bootstrap.py`
+- `scripts/next-sprint-number.sh` — next-sprint-number.sh — print the next free U-number across:
+- `scripts/pair-local.sh` — pair-local.sh — launch a Playwright auth-pairing run on the JolyBox
+- `scripts/paperless-post-consume.sh` — paperless-post-consume.sh — POST_CONSUME_SCRIPT for Paperless-ngx.
+- `scripts/r1-dress-rehearsal.sh` — /home_ai/scripts/r1-dress-rehearsal.sh
+- `scripts/r1-migration-lint.sh` — /home_ai/scripts/r1-migration-lint.sh
+- `scripts/rbs-pdf-parser.py` — Re-parse the 9 failing RBS PDFs with cross-year date detection."""
+- `scripts/recon-master.py`
+- `scripts/recon-validate.py`
+- `scripts/repair-metabase-role.sh` — repair-metabase-role.sh
+- `scripts/restore.sh` — /home_ai/scripts/restore.sh — restore Home AI data on new hardware.
+- `scripts/schema-drift-check.sh` — /home_ai/scripts/schema-drift-check.sh
+- `scripts/searxng-bootstrap.sh` — /home_ai/scripts/searxng-bootstrap.sh
+- `scripts/selftest.sh` — /home_ai/scripts/selftest.sh
+- `scripts/snag-trigger.sh` — Snag trigger — pings Claude via bot_instructions when pending snags exist
+- `scripts/store-bg-lite-creds.sh` — Store British Gas Lite portal creds in Vault for bg-lite-harvest.py.
+- `scripts/touchoffice-to-epos.py` — Bridge: Playwright TouchOffice scraper -> epos_daily_reports."""
+- `scripts/trigger-touchoffice.sh` — /home_ai/scripts/trigger-touchoffice.sh
+- `scripts/u101-cron.sh`
+- `scripts/u101-harvest-collins-reservations.py` — u101-harvest-collins-reservations.py — Harvest Collins/DesignMyNight
+- `scripts/u104-send-table-reminders.py` — u104-send-table-reminders.py — Send the 3-day-ahead table booking
+- `scripts/u106-breakfast-email.py` — u106-breakfast-email.py — Compose + send the 5pm breakfast email.
+- `scripts/u106-cron.sh` — u106-cron.sh — daily 17:00. TEST=1 by default = test recipients only.
+- `scripts/u109-daily-reality.py` — u109-daily-reality.py — v4 HTML daily reality email.
+- `scripts/u112-poll-breakfast-replies.sh` — u112-poll-breakfast-replies.sh — U112
+- `scripts/u113-kitchen-specials.sh` — u113-kitchen-specials.sh — U113
+- `scripts/u119-staff-draft.py` — u119-staff-draft.py — drafters for staff WA messages.
+- `scripts/u119-staff-draft.sh` — u119-staff-draft.sh — draft staff WA messages from templates.
+- `scripts/u119-wa-approval-loop.sh` — u119-wa-approval-loop.sh — U119
+- `scripts/u120-extract-guest-contact.py` — u120-extract-guest-contact.py — Haiku-extract guest_phone + guest_email
+- `scripts/u120-visitor-draft.py` — u120-visitor-draft.py — draft welcome / checkout / review WA messages
+- `scripts/u121-obligations-reminder.sh` — u121-obligations-reminder.sh — daily Telegram nudge for obligations due ≤ 3 days
+- `scripts/u124d-backup-freshness-check.sh` — u124d-backup-freshness-check.sh — Telegrams if restic snapshot is stale.
+- `scripts/u125-pdf-attachment-fetch.sh` — u125-pdf-attachment-fetch.sh — fetch PDF attachments for invoice emails.
+- `scripts/u126-dext-diag.sh` — Diagnostic — open Dext archive headless, snapshot every 3 seconds.
+- `scripts/u126-dext-export-test.sh` — Focused test — click "Export all" → modal Export → screenshot 3s after.
+- `scripts/u126-dext-export.sh` — u126-dext-export.sh — headless daily CSV export from Dext (native host).
+- `scripts/u126-dext-filter-test.sh` — Focused test — just the filter step. Snapshot at each click.
+- `scripts/u126-dext-pair.sh` — u126-dext-pair.sh — interactive Dext browser pairing (native host).
+- `scripts/u126-dext-parse.sh` — u126-dext-parse.sh — parse a Dext CSV export into vendor_invoice_lines.
+- `scripts/u126-dext-recon-filter.sh` — Recon — click the filter funnel and screenshot what Dext shows.
+- `scripts/u126-dext-recon.sh` — u126-dext-recon.sh — open Dext, click Tools dropdown, screenshot menu options.
+- `scripts/u128-email-vs-xero-diff.sh` — u128-email-vs-xero-diff.sh — surface vendor_invoice_inbox rows that have NO
+- `scripts/u128-forward-orphans.sh` — u128-forward-orphans.sh — auto-forward aged orphan invoice emails to Dext.
+- `scripts/u128-xero-cron-install.sh` — u128-xero-cron-install.sh — idempotently add U128 cron entries.
+- `scripts/u128-xero-export.sh` — u128-xero-export.sh — daily Xero bills export.
+- `scripts/u128-xero-pair.sh` — u128-xero-pair.sh — interactive Xero login + 2FA via Playwright.
+- `scripts/u128-xero-parse.sh` — u128-xero-parse.sh — parse a Xero "Bills" CSV export into xero_bills + xero_bill_lines.
+- `scripts/u133-scrape-reviews.py` — u133-scrape-reviews.py — daily review harvest for guest_reviews.
+- `scripts/u133-scrape-tides.py` — u133-scrape-tides.py — weekly tide scrape for Boscastle.
+- `scripts/u134-trail-poll.py` — u134-trail-poll.py — hourly Trail report poller.
+- `scripts/u135-dojo-inbox-sweep.sh` — u135-dojo-inbox-sweep.sh — daily import of any Dojo CSVs dropped into
+- `scripts/u138-e-backfill-pilot.py`
+- `scripts/u138-promote-feedback-to-rules.py`
+- `scripts/u141-validate-presidio.py`
+- `scripts/u151b-reocr-vision.py`
+- `scripts/u156-trail-pair.sh` — u156-trail-pair.sh — interactive Trail (Access aCloud OAuth) login via Playwright.
+- `scripts/u156-trail-scrape.py`
+- `scripts/u159-revenue-email.sh` — /home_ai/scripts/u159-revenue-email.sh
+- `scripts/u160-breakfast-kitchen.py`
+- `scripts/u160-breakfast-send.py`
+- `scripts/u161-vision-ocr-worker.sh` — /home_ai/scripts/u161-vision-ocr-worker.sh
+- `scripts/u163-reviews-from-email.py`
+- `scripts/u163-reviews-scrape.py`
+- `scripts/u163-reviews-simple.sh` — Simple TripAdvisor review extractor — regex-based, no API keys.
+- `scripts/u165-freshness-watcher.sh` — /home_ai/scripts/u165-freshness-watcher.sh
+- `scripts/u166-data-quality-digest.sh` — /home_ai/scripts/u166-data-quality-digest.sh
+- `scripts/u167-restore-drill.sh` — /home_ai/scripts/u167-restore-drill.sh
+- `scripts/u168-cron-wrapper.sh` — /home_ai/scripts/u168-cron-wrapper.sh
+- `scripts/u168-retry-failed.sh` — /home_ai/scripts/u168-retry-failed.sh
+- `scripts/u169-gen-docs.sh` — /home_ai/scripts/u169-gen-docs.sh
+- `scripts/u196-oracles.sh` — /home_ai/scripts/u196-oracles.sh
+- `scripts/u198-vault-and-restart-watch.sh` — /home_ai/scripts/u198-vault-and-restart-watch.sh
+- `scripts/u201-image-pin-check.sh` — /home_ai/scripts/u201-image-pin-check.sh
+- `scripts/u202-backup-all-weekly.sh` — /home_ai/scripts/u202-backup-all-weekly.sh
+- `scripts/u203-perf-audit.sh` — /home_ai/scripts/u203-perf-audit.sh
+- `scripts/u215-trail-poll.py` — u215-trail-poll.py — Trail compliance score poller.
+- `scripts/u216-mortgage-reocr-wrapper.sh` — u216-mortgage-reocr-wrapper.sh
+- `scripts/u226-gpu-recover.sh` — u226-gpu-recover.sh — Recover GPU containers after host NVIDIA driver change.
+- `scripts/u227-u231-batch-install.sh` — u227-u231-batch-install.sh — installs the root-owned changes from the
+- `scripts/u228-wire-alert-sink-notify.py` — u228-wire-alert-sink-notify.py — insert a "Notify Bridge" HTTP node
+- `scripts/u235-alert-sink-resolved-dedup.py` — u235-alert-sink-resolved-dedup.py — U235 T3.
+- `scripts/u235-email-backfill.py` — U235 — historical Gmail backfill (metadata) for work + personal accounts.
+- `scripts/u235-embed-email-chunks.sh` — u235-embed-email-chunks.sh — Stage 1 of U235 cultural memory.
+- `scripts/u235b-embed-invoices-docs.sh` — u235b-embed-invoices-docs.sh — Stage 1b of U235 cultural memory.
+- `scripts/u236-hermes-outbox-setup.sh` — u236-hermes-outbox-setup.sh — one-shot to create the Hermes-readable outbox
+- `scripts/u236-marketing-sweep.sh` — u236-marketing-sweep.sh — mark obvious marketing/junk email as classification='ignored'
+- `scripts/u237-email-body-backfill.py` — U237 — backfill email BODIES for the historical metadata import (U235).
+- `scripts/u239-event-close-sweep.sh` — u239-event-close-sweep.sh — STOPGAP for the noOp-skip bug: gmail-ingest
+- `scripts/u241-supervisor.sh` — u241-supervisor.sh — self-healing supervisor (U240 P1).
+- `scripts/u27-caterbook-creds.sh` — /home_ai/scripts/u27-caterbook-creds.sh
+- `scripts/u27-codegen.sh` — /home_ai/scripts/u27-codegen.sh
+- `scripts/u27-restart-playwright.sh` — /home_ai/scripts/u27-restart-playwright.sh
+- `scripts/u27-touchoffice-backfill.sh` — /home_ai/scripts/u27-touchoffice-backfill.sh
+- `scripts/u27-touchoffice-creds.sh` — /home_ai/scripts/u27-touchoffice-creds.sh
+- `scripts/u27-touchoffice-daily.sh` — /home_ai/scripts/u27-touchoffice-daily.sh
+- `scripts/u28-caterbook-backfill.sh` — /home_ai/scripts/u28-caterbook-backfill.sh
+- `scripts/u28-caterbook-daily.sh` — /home_ai/scripts/u28-caterbook-daily.sh
+- `scripts/u29-daily-digest.sh` — /home_ai/scripts/u29-daily-digest.sh
+- `scripts/u29-heartbeat.sh` — /home_ai/scripts/u29-heartbeat.sh
+- `scripts/u29-instructions-poll.sh` — /home_ai/scripts/u29-instructions-poll.sh
+- `scripts/u29-schools-backfill.sh` — /home_ai/scripts/u29-schools-backfill.sh
+- `scripts/u29-sheets-creds.sh` — /home_ai/scripts/u29-sheets-creds.sh
+- `scripts/u29-smtp-creds.sh` — /home_ai/scripts/u29-smtp-creds.sh
+- `scripts/u29-telegram-creds.sh` — /home_ai/scripts/u29-telegram-creds.sh
+- `scripts/u29-vendor-invoices-backfill.sh` — /home_ai/scripts/u29-vendor-invoices-backfill.sh
+- `scripts/u29-workforce-creds.sh` — /home_ai/scripts/u29-workforce-creds.sh
+- `scripts/u29-workforce-sync.sh` — /home_ai/scripts/u29-workforce-sync.sh
+- `scripts/u29-xero-bootstrap.py`
+- `scripts/u29-xero-creds.sh` — /home_ai/scripts/u29-xero-creds.sh
+- `scripts/u32-cashing-up-parser.sh` — /home_ai/scripts/u32-cashing-up-parser.sh
+- `scripts/u32-invoice-pdf-extract.sh` — /home_ai/scripts/u32-invoice-pdf-extract.sh
+- `scripts/u32-workforce-pay-sync.sh` — /home_ai/scripts/u32-workforce-pay-sync.sh
+- `scripts/u33-bot-responder.sh` — /home_ai/scripts/u33-bot-responder.sh
+- `scripts/u33-data-lane-router.sh` — /home_ai/scripts/u33-data-lane-router.sh
+- `scripts/u33-rejection-digest.sh` — /home_ai/scripts/u33-rejection-digest.sh
+- `scripts/u33-touchoffice-realtime.sh` — /home_ai/scripts/u33-touchoffice-realtime.sh
+- `scripts/u34-invoice-backfill.sh` — /home_ai/scripts/u34-invoice-backfill.sh
+- `scripts/u34-tanda-departments-sync.sh` — /home_ai/scripts/u34-tanda-departments-sync.sh
+- `scripts/u35-authelia-creds.sh` — /home_ai/scripts/u35-authelia-creds.sh
+- `scripts/u35-image-drift-check.sh` — /home_ai/scripts/u35-image-drift-check.sh
+- `scripts/u35-invoice-pdf-extract.sh` — /home_ai/scripts/u35-invoice-pdf-extract.sh
+- `scripts/u35-manual-data-freshness-install.sh` — Install u35-manual-data-freshness.sh: tighten perms, add a root crontab
+- `scripts/u35-manual-data-freshness.sh` — (unreadable)
+- `scripts/u35-upload-tasks-email.py` — u35-upload-tasks-email.py — emails Jo a checklist of manual data items
+- `scripts/u35-vault-autounseal-bootstrap.sh` — /home_ai/scripts/u35-vault-autounseal-bootstrap.sh
+- `scripts/u35-vault-watchdog-install.sh` — u35-vault-watchdog-install.sh — one-shot installer for the vault watchdog.
+- `scripts/u36-dreaming-nightly.sh` — /home_ai/scripts/u36-dreaming-nightly.sh
+- `scripts/u36-invoice-haiku-fallback.sh` — /home_ai/scripts/u36-invoice-haiku-fallback.sh
+- `scripts/u36-jo-input-batch.sh` — /home_ai/scripts/u36-jo-input-batch.sh
+- `scripts/u36-model-inventory-scan.sh` — /home_ai/scripts/u36-model-inventory-scan.sh
+- `scripts/u36-reconciliation-explainer.sh` — /home_ai/scripts/u36-reconciliation-explainer.sh
+- `scripts/u39-insert-review.sh` — /home_ai/scripts/u39-insert-review.sh
+- `scripts/u39-review-drafter.sh` — /home_ai/scripts/u39-review-drafter.sh
+- `scripts/u40-companies-house-sync.sh` — /home_ai/scripts/u40-companies-house-sync.sh
+- `scripts/u41-land-registry-sync.sh` — /home_ai/scripts/u41-land-registry-sync.sh
+- `scripts/u42-vat-return-prep.sh` — /home_ai/scripts/u42-vat-return-prep.sh
+- `scripts/u44-feedback-applier.sh` — /home_ai/scripts/u44-feedback-applier.sh
+- `scripts/u46-email-task-extractor.sh` — /home_ai/scripts/u46-email-task-extractor.sh
+- `scripts/u46-weather-daily.sh` — /home_ai/scripts/u46-weather-daily.sh
+- `scripts/u47-tanda-timesheets-sync.sh` — /home_ai/scripts/u47-tanda-timesheets-sync.sh
+- `scripts/u47-weather-backfill.sh` — /home_ai/scripts/u47-weather-backfill.sh
+- `scripts/u47d-cafe-vendor-apply.sh` — /home_ai/scripts/u47d-cafe-vendor-apply.sh
+- `scripts/u47d-cafe-vendor-prompt.sh` — /home_ai/scripts/u47d-cafe-vendor-prompt.sh
+- `scripts/u47e-uncertain-resolve.sh` — /home_ai/scripts/u47e-uncertain-resolve.sh
+- `scripts/u49-bench-extractors.sh` — /home_ai/scripts/u49-bench-extractors.sh
+- `scripts/u49-extract-invoice-lines.sh` — /home_ai/scripts/u49-extract-invoice-lines.sh
+- `scripts/u49-fetch-invoice-pdfs.sh` — /home_ai/scripts/u49-fetch-invoice-pdfs.sh
+- `scripts/u50-apply-feedback.sh` — /home_ai/scripts/u50-apply-feedback.sh
+- `scripts/u50-due-date-haiku.sh` — /home_ai/scripts/u50-due-date-haiku.sh
+- `scripts/u50-stale-ack.sh` — /home_ai/scripts/u50-stale-ack.sh
+- `scripts/u51-companies-house-creds.sh` — /home_ai/scripts/u51-companies-house-creds.sh
+- `scripts/u51-vehicle-alerts.sh` — /home_ai/scripts/u51-vehicle-alerts.sh
+- `scripts/u51-vehicle-intake.sh` — /home_ai/scripts/u51-vehicle-intake.sh
+- `scripts/u52-realm-middleware-smoke.sh` — u52-realm-middleware-smoke.sh — verify the build-dashboard realm middleware.
+- `scripts/u52-realm-shadow-test.sh` — u52-realm-shadow-test.sh — parallel-read regression harness for the
+- `scripts/u53-r5-realm-backfill.sh` — /home_ai/scripts/u53-r5-realm-backfill.sh
+- `scripts/u54-card-recon-writer.sh` — u54-card-recon-writer.sh — flag Dojo↔TouchOffice card mismatches.
+- `scripts/u54-pipeline-watchdog.sh` — u54-pipeline-watchdog.sh — independent paging for ingest-pipeline outages.
+- `scripts/u56-realm-scoped-backup.sh` — u56-realm-scoped-backup.sh — realm-filtered logical export for selective
+- `scripts/u57-fix-portal-path.sh` — u57-fix-portal-path.sh — apply the Authelia /auth path fix.
+- `scripts/u57-flip-to-r3r4.sh` — u57-flip-to-r3r4.sh — In-person walkthrough for Realm R3 (Auth) + R4
+- `scripts/u57-reset-authelia-pw.sh` — u57-reset-authelia-pw.sh — reset the Authelia password for user `jo`.
+- `scripts/u58-bank-tx-categorise.sh` — u58-bank-tx-categorise.sh — apply bank_transaction_rules to uncategorised
+- `scripts/u58-natwest-statement-import.sh` — u58-natwest-statement-import.sh — import the May-2026 NatWest CSV batch
+- `scripts/u59-credit-card-csv-import.sh` — u59-credit-card-csv-import.sh — import RBS Mastercard CSV exports into
+- `scripts/u59b-credit-card-statement-pdf-import.sh` — u59b-credit-card-statement-pdf-import.sh — import RBS Mastercard
+- `scripts/u59c-account-transfer-link.sh` — u59c-account-transfer-link.sh — pair-match bank_transactions rows that
+- `scripts/u61-backfill-orchestrator.sh` — u61-backfill-orchestrator.sh — one-shot historical fill for the feeds with
+- `scripts/u61-coverage-audit.sh` — u61-coverage-audit.sh — walk every (feed, date) in the last 2 years and
+- `scripts/u61-line-item-bench.sh` — u61-line-item-bench.sh — A/B/C bench for invoice line-item extraction.
+- `scripts/u61-line-items-extract.sh` — u61-line-items-extract.sh — backfill vendor_invoice_lines for every
+- `scripts/u62-calendar-sync.sh` — u62-calendar-sync.sh — pull `primary` Google Calendar for every google identity
+- `scripts/u62-doc-alerts.sh` — u62-doc-alerts.sh — daily 09:00. Telegram alert if any document is expired,
+- `scripts/u62-paperless-bootstrap.sh` — u62-paperless-bootstrap.sh — one-shot: create paperless DB on the existing
+- `scripts/u62-paperless-sync.sh` — u62-paperless-sync.sh — pull new Paperless docs into the `documents`
+- `scripts/u63-authelia-users-prep.sh` — u63-authelia-users-prep.sh — prints a ready-to-apply patch for
+- `scripts/u65-build-research-embeddings.sh` — u65-build-research-embeddings.sh — populate search_vectors via Ollama.
+- `scripts/u66-telegram-bot.sh` — u66-telegram-bot.sh — Telegram bot: polls every minute, silently swallows
+- `scripts/u67-recon-l1.sh` — u67-recon-l1.sh — RECON-L1 (daily totals) per SPEC §4b.5 L1.
+- `scripts/u68-doc-classify.sh` — u68-doc-classify.sh — Layer 3 classifier. Runs every 5 min.
+- `scripts/u68-doc-review-nudge.sh` — u68-doc-review-nudge.sh — daily 09:30. If there are docs needing your eye,
+- `scripts/u68-recon-l2.sh` — u68-recon-l2.sh — RECON-L2-light (PART 4b Phase 8, first half).
+- `scripts/u68-recon-l3.sh` — u68-recon-l3.sh — RECON-L3 daily-aggregate settlement matching
+- `scripts/u68-recon-orchestrator.sh` — u68-recon-orchestrator.sh — runs L1, L2, L3 in sequence + sends a single
+- `scripts/u69-morning-digest.sh` — u69-morning-digest.sh — single 08:30 Telegram exception digest per
+- `scripts/u70-ocr-bench.sh` — u70-ocr-bench.sh — compare OCR adapters on the documents.ocr_text already
+- `scripts/u70-paperless-bootstrap-rules.sh` — u70-paperless-bootstrap-rules.sh — one-shot: create the canonical document
+- `scripts/u70-paperless-recreate.sh` — u70-paperless-recreate.sh — recreate homeai-paperless with the post-consume
+- `scripts/u71-pipeline-role-smoke.sh` — u71-pipeline-role-smoke.sh — log in as homeai_pipeline and run a
+- `scripts/u72-missing-data-hunters.sh` — u72-missing-data-hunters.sh — invoke the missing-data hunter suite + the
+- `scripts/u72-onboard-48885517.sh` — u72-onboard-48885517.sh — onboard a NatWest CSV for the ATR Trading
+- `scripts/u73-format-hd.sh` — u73-format-hd.sh — wipe + ext4 the 6TB Seagate (ATA serial Z4D3LA1X)
+- `scripts/u73-setup-samba.sh` — u73-setup-samba.sh — add the [scans] share to /etc/samba/smb.conf and
+- `scripts/u73b-smb1-for-brother.sh` — u73b-smb1-for-brother.sh — Path B from the diagnosis: allow SMB1/NTLMv1
+- `scripts/u73c-open-samba-lan.sh` — u73c-open-samba-lan.sh — open SMB ports for the LAN subnet only. Idempotent.
+- `scripts/u75-pipeline-smoke.sh` — u75-pipeline-smoke.sh — end-to-end check that scan→OCR→DB still works.
+- `scripts/u78-ingest-clover.py` — u78-ingest-clover.py — parse a Clover Merchant Card Processing Statement
+- `scripts/u78-ingest-utility.py` — u78-ingest-utility.py — parse a utility bill OCR-text into
+- `scripts/u78-route.py` — u78-route.py — auto-classify documents that arrived via Paperless and
+- `scripts/u78-run.sh` — u78-run.sh — apply V96 migration, seed account_property_map with the
+- `scripts/u84-bulk-reclassify-shared.sh` — u84-bulk-reclassify-shared.sh
+- `scripts/u84-refresh-vendor.sh` — Re-download pinned vendor assets and verify checksums against MANIFEST.txt.
+- `scripts/u84-route-smoke.sh` — U84 Phase 8 — Route smoke test for the new IA.
+- `scripts/u85-gen-desktop-pages.py` — u85-gen-desktop-pages.py — Generate every /desktop/* page from one config.
+- `scripts/u86-audit-bank-coverage.sh` — u86-audit-bank-coverage.sh — per-account monthly bank-tx coverage map.
+- `scripts/u86-audit-dead-letters.sh` — u86-audit-dead-letters.sh — bucket dead-letter / failed / rejected
+- `scripts/u86-audit-fk-orphans.sh` — u86-audit-fk-orphans.sh — find FK references pointing at non-existent rows.
+- `scripts/u86-audit-hunters-rerun.sh` — u86-audit-hunters-rerun.sh — re-run missing-data hunters + ghost shift
+- `scripts/u86-audit-idempotency.sh` — u86-audit-idempotency.sh — confirm idempotency_key columns are populated
+- `scripts/u86-audit-schema-drift.sh` — u86-audit-schema-drift.sh — diff live DB schema vs migration replay schema.
+- `scripts/u87-audit-rls.sh` — u87-audit-rls.sh — RLS policy coverage map.
+- `scripts/u87-audit-superuser-usage.sh` — u87-audit-superuser-usage.sh — find every script that connects as postgres
+- `scripts/u87-audit-vault-paths.sh` — u87-audit-vault-paths.sh — list every secret/* path with created/updated
+- `scripts/u87-install-hooks.sh` — u87-install-hooks.sh — install pre-commit hook that entropy-scans staged
+- `scripts/u88-audit-cron.sh` — u88-audit-cron.sh — for every cron-installed script, show last few exit
+- `scripts/u88-todo-sweep.sh` — u88-todo-sweep.sh — find every TODO/FIXME/XXX/HACK marker in code and
+- `scripts/u89-audit-agents-md.sh` — u89-audit-agents-md.sh — verify every path / script / table referenced
+- `scripts/u89-audit-memory.sh` — u89-audit-memory.sh — verify every memory file is indexed in MEMORY.md and
+- `scripts/u89-audit-untracked.sh` — u89-audit-untracked.sh — find files on disk under /home_ai that aren't
+- `scripts/u89-gen-cron-doc.sh` — u89-gen-cron-doc.sh — generate docs/cron.md from crontab + script docstrings.
+- `scripts/u89-gen-migration-index.sh` — u89-gen-migration-index.sh — generate docs/migrations.md from migrations/V*.sql.
+- `scripts/u89-gen-schema-doc.sh` — u89-gen-schema-doc.sh — generate docs/schema.md from pg_catalog.
+- `scripts/u89-gen-view-deps.sh` — u89-gen-view-deps.sh — generate docs/views.md with dependency tree per view.
+- `scripts/u89-regen-status.sh` — u89-regen-status.sh — regenerate STATUS.md from recent git activity,
+- `scripts/u90-gen-packet.sh` — u90-gen-packet.sh — assemble Jo's in-person checklist from prior sprint
+- `scripts/u90-verify.sh` — u90-verify.sh — post-session check that every U90 packet item landed.
+- `scripts/u92-nudge-natwest.sh` — u92-nudge-natwest.sh — one-shot Telegram nudge for Jo to pull NatWest CSVs.
+- `scripts/u94-harvest-hotel-email-bookings.py` — u94-harvest-hotel-email-bookings.py — backfill accommodation_bookings
+- `scripts/u95-harvest-all-invoices.py` — u95-harvest-all-invoices.py — broad invoice-email harvester.
+- `scripts/u95-harvest-cron.sh` — u95-harvest-cron.sh — incremental invoice-email harvest into vendor_invoice_inbox.
+- `scripts/u96-cron.sh` — u96-cron.sh — hourly wrapper that runs the Airbnb harvester against
+- `scripts/u96-harvest-airbnb-bookings.py` — u96-harvest-airbnb-bookings.py — Harvest Airbnb reservation confirmations
+- `scripts/u97-cron.sh` — u97-cron.sh — hourly wrapper that runs the Caterbook reservation
+- `scripts/u97-harvest-caterbook-reservations.py` — u97-harvest-caterbook-reservations.py — Harvest OTA reservations
+- `scripts/u99-cron.sh` — u99-cron.sh — daily 06:45 wrapper for the vehicle renewal hunter.
+- `scripts/u99-harvest-vehicle-renewals.py` — u99-harvest-vehicle-renewals.py — Find insurer / DVLA renewal emails
+- `scripts/update-master-status.sh` — update-master-status.sh — append the day's commits to MASTER.md §4.
+- `scripts/vault-watchdog.sh` — (unreadable)
+- `scripts/weather-sync.py` — Weather sync: 300 day backfill + 7 day forecast. Run daily via cron."""

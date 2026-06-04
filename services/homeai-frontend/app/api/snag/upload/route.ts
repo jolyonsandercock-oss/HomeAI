@@ -1,3 +1,4 @@
+import { realmFromRequest } from '@/lib/realm';
 import { NextRequest, NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { writeFile, mkdir } from "fs/promises";
@@ -7,6 +8,11 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
+  const realm = realmFromRequest(req);
+  if (realm !== 'owner' && realm !== 'work') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+ NextRequest) {
   let form: FormData;
   try { form = await req.formData(); }
   catch { return NextResponse.json({ error: "expected multipart form data" }, { status: 400 }); }

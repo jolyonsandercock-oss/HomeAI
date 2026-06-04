@@ -4,6 +4,19 @@ This file is auto-loaded at every Claude Code session start. It captures the
 JolyBox-specific patterns that aren't obvious from the codebase. Keep it tight —
 when something's well-named in code it doesn't belong here.
 
+## Capability registry — CHECK BEFORE YOU BUILD
+
+`/home_ai/CAPABILITIES.md` is a generated index of every HTTP route, `home_ai.*`
+SQL function, `v_*` view, whitelisted slug, and script (214 routes / 209 slugs /
+~263 scripts — far too much to keep in your head). **Before designing a feature,
+writing a sprint plan, or building anything, grep it** to see if the capability
+already exists — e.g. `grep -i rag /home_ai/CAPABILITIES.md`. Parallel
+implementations have been built by mistake (a whole RAG endpoint
+`/api/research/ask` was missed once). Treat "does this already exist?" with the
+same rigour as the 4-eyes "verify against the live system" rule. Regenerate with
+`python3 scripts/gen-capabilities.py` (runs on `/retro`). See
+`feedback-check-capabilities-before-building` memory.
+
 ## Trust model (4-eyes)
 
 A Hermes instance runs on Jo's laptop and writes UX/code reviews to

@@ -131,7 +131,7 @@ export default function CommsPage() {
       if (sortKey === 'posted_at') return (new Date(String(va)).getTime() - new Date(String(vb)).getTime()) * dir;
       return String(va).localeCompare(String(vb)) * dir;
     });
-    return rows;
+    return rows.slice(0, 10); // #58: restrict to 10 rows
   }, [reviewTbl.data, sourceFilter, ratingMin, searchText, sortKey, sortDir]);
 
   function setSort(k: typeof sortKey) {

@@ -171,8 +171,18 @@ export default function AccountsPage() {
   const [search, setSearch] = useState('');
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  // #64: column sorting
+  const [sortCol, setSortCol] = useState<string>('account_name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
-  // Filter and search
+  // Sort toggle
+  const toggleSort = (col: string) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+  const sortIcon = (col: string) => sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ' ↕';
+
+  // Filter, search, and sort
   const filtered = useMemo(() => {
     if (!accounts.data) return [];
     let list = accounts.data;
@@ -198,8 +208,20 @@ export default function AccountsPage() {
       );
     }
 
+    // Sort
+    list = [...list].sort((a, b) => {
+      const dir = sortDir === 'asc' ? 1 : -1;
+      let cmp = 0;
+      if (sortCol === 'account_name') cmp = a.account_name.localeCompare(b.account_name);
+      else if (sortCol === 'bank_name') cmp = a.bank_name.localeCompare(b.bank_name);
+      else if (sortCol === 'account_type') cmp = a.account_type.localeCompare(b.account_type);
+      else if (sortCol === 'current_balance') cmp = parseFloat(a.current_balance || '0') - parseFloat(b.current_balance || '0');
+      else if (sortCol === 'transaction_count') cmp = (a.transaction_count || 0) - (b.transaction_count || 0);
+      else if (sortCol === 'realm') cmp = a.realm.localeCompare(b.realm);
+      return cmp * dir;
+    });
     return list;
-  }, [accounts.data, filterTab, search]);
+  }, [accounts.data, filterTab, search, sortCol, sortDir]);
 
   // Totals
   const totalBalance = useMemo(() => {

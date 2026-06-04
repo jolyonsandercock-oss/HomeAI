@@ -1,3 +1,4 @@
+import { realmFromRequest } from '@/lib/realm';
 import { NextRequest, NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 
@@ -5,6 +6,11 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
+  const realm = realmFromRequest(req);
+  if (realm !== 'owner' && realm !== 'work') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+ NextRequest) {
   let body: any;
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
