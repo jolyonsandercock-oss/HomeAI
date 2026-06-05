@@ -57,6 +57,10 @@ docker run --rm -v home_ai_vault_data:/src:ro \
   tar czf /dst/vault_data.tar.gz -C /src .
 
 # 4. Config tree (idempotent — restic dedupes unchanged blobs)
+# NB: the 4 root-owned 0700 scripts below are excluded — this cron runs as joly
+# and can't read them, so restic would warn and exit 3 (= "some files
+# unreadable"), which monitoring treats as a failure. They are git-tracked via
+# scripts/commit-root-owned.sh and pushed off-host, so excluding loses nothing.
 echo "→ snapshotting config tree + staged blobs"
 restic backup \
   --tag homeai-nightly \
@@ -70,6 +74,10 @@ restic backup \
   --exclude 'node_modules' \
   --exclude '*.pyc' \
   --exclude '__pycache__' \
+  --exclude '/home_ai/scripts/vault-watchdog.sh' \
+  --exclude '/home_ai/scripts/vault-watchdog.sh.bak.*' \
+  --exclude '/home_ai/scripts/u35-manual-data-freshness.sh' \
+  --exclude '/home_ai/scripts/u35-manual-data-freshness.sh.bak.*' \
   /home_ai/postgres \
   /home_ai/monitoring \
   /home_ai/.claude \
