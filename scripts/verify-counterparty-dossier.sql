@@ -44,3 +44,35 @@ BEGIN
     RAISE EXCEPTION 'financials jsonb missing expected keys';
   END IF;
 END $$;
+-- A distilled dossier's stored financials must equal a fresh DB recompute
+-- (LLM never sets numbers).
+DO $$
+DECLARE bad int;
+BEGIN
+  SELECT count(*) INTO bad FROM counterparty_dossier d
+   WHERE (d.financials->>'total_invoiced') IS DISTINCT FROM
+         (home_ai.counterparty_financials(d.counterparty_id)->>'total_invoiced');
+  IF bad > 0 THEN RAISE EXCEPTION '% dossiers have financials != DB recompute', bad; END IF;
+END $$;
+
+-- Every citation must resolve to a real email id.
+DO $$
+DECLARE bad int;
+BEGIN
+  SELECT count(*) INTO bad FROM counterparty_dossier d
+   CROSS JOIN LATERAL unnest(d.citations) cid
+   LEFT JOIN emails e ON e.id = cid
+   WHERE e.id IS NULL;
+  IF bad > 0 THEN RAISE EXCEPTION '% dangling citations (no such email)', bad; END IF;
+END $$;
+
+-- Work realm cannot read personal-only dossiers.
+DO $$
+DECLARE leaked int;
+BEGIN
+  PERFORM set_config('app.current_realm', 'work', true);
+  SET LOCAL ROLE homeai_readonly;
+  SELECT count(*) INTO leaked FROM counterparty_dossier WHERE realms = ARRAY['personal'];
+  RESET ROLE;
+  IF leaked > 0 THEN RAISE EXCEPTION 'work realm leaked % personal-only dossiers', leaked; END IF;
+END $$;
