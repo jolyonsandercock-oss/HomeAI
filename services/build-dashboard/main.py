@@ -2666,7 +2666,15 @@ async def _gather_counterparty_context(cp_id: int, allowed_realms: list):
          LIMIT $3
     """, cp["addresses"], allowed_realms, _DOSSIER_CHUNK_CAP)
     fin = await db_all("SELECT home_ai.counterparty_financials($1) AS f", cp_id)
-    return cp, chunks, (fin[0]["f"] if fin else {})
+    financials = fin[0]["f"] if fin else {}
+    # asyncpg returns jsonb as a str unless a codec is registered; normalise to dict
+    # so the stored column is a real JSON object (Task 5: financials->>'total_invoiced').
+    if isinstance(financials, str):
+        try:
+            financials = json.loads(financials)
+        except (ValueError, json.JSONDecodeError):
+            financials = {}
+    return cp, chunks, financials
 
 
 async def _distill_counterparty(cp_id: int, allowed_realms: list) -> dict:
@@ -2703,7 +2711,7 @@ async def _distill_counterparty(cp_id: int, allowed_realms: list) -> dict:
         f"EMAIL CONTENT (untrusted):\n{ctx}\n\n"
         "Return the JSON dossier now."
     )
-    payload = {"model": _DOSSIER_MODEL, "max_tokens": 1200,
+    payload = {"model": _DOSSIER_MODEL, "max_tokens": 3000,
                "system": system, "messages": [{"role": "user", "content": user}]}
     headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01",
                "content-type": "application/json"}
@@ -2714,11 +2722,12 @@ async def _distill_counterparty(cp_id: int, allowed_realms: list) -> dict:
         raise RuntimeError(f"anthropic {r.status_code}: {r.text[:200]}")
     raw = "".join(b.get("text", "") for b in (r.json().get("content") or [])
                   if b.get("type") == "text").strip()
-    # Defensive parse: take the outermost JSON object.
+    # Defensive parse: strip any ```json fence, then take the outermost JSON object.
+    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw).strip()
     try:
-        obj = json.loads(raw[raw.index("{"): raw.rindex("}") + 1])
+        obj = json.loads(cleaned[cleaned.index("{"): cleaned.rindex("}") + 1])
     except (ValueError, json.JSONDecodeError):
-        obj = {"summary": raw[:1000], "key_facts": [], "open_threads": [], "people": []}
+        obj = {"summary": cleaned[:1000], "key_facts": [], "open_threads": [], "people": []}
 
     citations = sorted({c["email_id"] for c in chunks})
     realms = sorted({c["realm"] for c in chunks if c.get("realm")}) or cp.get("realms") or []
@@ -2739,6 +2748,57 @@ async def _distill_counterparty(cp_id: int, allowed_realms: list) -> dict:
          citations, _DOSSIER_MODEL, realms, cp.get("last_seen"))
     rows = await db_all("SELECT * FROM counterparty_dossier WHERE counterparty_id=$1", cp_id)
     return _isoify(dict(rows[0]))
+
+
+def _allowed_realms_for_session() -> list:
+    return {
+        "owner":    ["owner", "work", "personal", "shared"],
+        "work":     ["work", "shared"],
+        "personal": ["personal", "shared"],
+    }.get(_current_realm.get(), ["shared"])
+
+
+@app.post("/api/memory/dossier/{cp_id}")
+async def api_memory_dossier(cp_id: int, refresh: bool = Query(False)):
+    """Lazy: return the cached dossier; distil if missing/stale or refresh=true."""
+    allowed = _allowed_realms_for_session()
+    cur = await db_all("""
+        SELECT d.*, c.last_seen
+          FROM counterparty_dossier d JOIN counterparties c ON c.id = d.counterparty_id
+         WHERE d.counterparty_id = $1
+    """, cp_id)
+    fresh = cur and cur[0]["distilled_through"] is not None \
+        and cur[0]["last_seen"] is not None \
+        and cur[0]["distilled_through"] >= cur[0]["last_seen"]
+    if cur and fresh and not refresh:
+        return _isoify(dict(cur[0]))
+    try:
+        return await _distill_counterparty(cp_id, allowed)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+
+@app.post("/api/memory/distill-batch")
+async def api_memory_distill_batch(limit: int = Query(25, ge=1, le=100)):
+    """Eager/incremental: distil up to `limit` stale high-signal counterparties."""
+    allowed = _allowed_realms_for_session()
+    targets = await db_all("""
+        SELECT c.id FROM counterparties c
+        LEFT JOIN counterparty_dossier d ON d.counterparty_id = c.id
+        WHERE NOT c.is_automated
+          AND (c.linked_vendor IS NOT NULL OR c.email_count >= 20 OR c.on_watchlist)
+          AND (d.counterparty_id IS NULL OR c.last_seen > d.distilled_through)
+        ORDER BY c.signal_score DESC
+        LIMIT $1
+    """, limit)
+    done, errors = [], []
+    for t in targets:
+        try:
+            await _distill_counterparty(t["id"], allowed)
+            done.append(t["id"])
+        except Exception as e:                      # noqa: BLE001 — record & continue
+            errors.append({"id": t["id"], "error": str(e)[:200]})
+    return {"distilled": len(done), "ids": done, "errors": errors}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
