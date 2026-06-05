@@ -3,21 +3,14 @@
 ## ⚠️ FIRST THING AFTER REBOOT — in this order
 1. **`bash /home_ai/start.sh`** — unseal Vault + inject secrets + bring containers up.
    NEVER `docker compose up` directly.
-2. **Verify the superuser→service-role migration survived the recreate.** This is
-   the #1 risk this reboot: commits `f84edcc` + `eac779b` removed the `postgres`
-   superuser from compose and moved services to dedicated roles
-   (`homeai_pipeline`/`homeai_readonly`). The reboot is the **first full
-   force-recreate against those roles** — if grants are incomplete, services fail
-   to read/write. Check:
-   ```bash
-   docker ps --format '{{.Names}}\t{{.Status}}' | grep homeai- | grep -iv 'up '   # any not-Up?
-   bash /home_ai/scripts/selftest.sh; echo "rc=$?"                                  # expect 0 / green
-   docker logs --since 5m homeai-build-dashboard 2>&1 | grep -i 'permission denied' # RLS/grant breakage
-   docker logs --since 5m homeai-google-fetch  2>&1 | grep -i 'permission denied'
-   ```
-   If something's broken on a role grant, the fix is a targeted `GRANT` via
-   `docker exec -i homeai-postgres psql -U postgres -d homeai` — not reverting to
-   superuser.
+2. **Superuser→service-role migration was REVERTED — reboot is safe.** Commit
+   `eac779b` was non-functional: it pointed 7 service DSNs at `homeai_dashboard:***`
+   but that role was never created, had no Vault password, and used a literal `***`
+   placeholder (not a `${VAR}`). A reboot would have failed ~6 services. Reverted in
+   `3ad638d` — all DSNs are back on `postgres:${POSTGRES_PASSWORD}` (the known-good
+   runtime state). **Nothing to verify here; services run as superuser as before.**
+   The migration is real future work (see Carry-forward) but needs doing properly,
+   not as committed.
 3. **Confirm the resilience watchdogs came back in cron** (crontab *should* survive
    reboot, but the recurring wipe is exactly why U240 exists):
    ```bash
@@ -63,11 +56,21 @@
   per check + last auto-repair) so health is visible, not just paged.
 
 ## Carry-forward (from the 2026-06-04 overnight session)
-1. **Superuser→service-role migration** — committed (`f84edcc`/`eac779b`); the
-   overnight NEXT-SESSION listed it as the #1 *todo* but it was actioned after.
-   **Treat as "applied, needs battle-testing"** — see post-reboot step 2.
-   Audit helper: `scripts/u87-audit-superuser-usage.sh`. Security review:
-   `.claude/decisions/2026-06-04-security-review.md`.
+1. **Superuser→service-role migration — STILL THE #1 SECURITY TODO (reverted, not done).**
+   The committed attempt (`eac779b`) was reverted (`3ad638d`) because it was non-functional
+   (undefined `homeai_dashboard` role, no Vault password, literal `***`, and one-role-for-all
+   services). Do it PROPERLY next time, in one coordinated session:
+   - Per-service least privilege, not one shared role: exporter→`homeai_readonly`;
+     read+write services (build-dashboard, bot-responder, google-fetch, playwright, wa-bridge)
+     → a writer role with SELECT + INSERT/UPDATE only on the tables they touch + EXECUTE on the
+     `home_ai.*` fns + `home_ai.set_realm`.
+   - Create role(s) in a migration (mirror `postgres/rls-policies.sql`), store passwords in
+     Vault `secret/postgres-roles`, reference via `${VAR}` in compose (NOT `***`), and ensure
+     `start.sh` injects them.
+   - Grant the new RAG tables (`email_rag_chunks`, `search_vectors`) to the writer role too,
+     else `/api/research/ask` breaks under RLS.
+   - Test by recreating ONE service first (`docker logs … | grep 'permission denied'`), not all.
+   Audit helper: `scripts/u87-audit-superuser-usage.sh`. Review: `.claude/decisions/2026-06-04-security-review.md`.
 2. **Tune email RAG retrieval quality** (build-dashboard `/api/research/ask`):
    expand stopwords (account/statement/invoice/ltd…), prefer rarer terms, raise
    FTS candidate limit, rebuild. Invoice queries already excellent. (V225–227 applied.)
@@ -86,5 +89,6 @@
 - Auto-load `CAPABILITIES.md` every session (852 lines) vs grep-on-demand (current).
 
 ## State at checkpoint
-- Working tree **clean**, all committed. HEAD = `23a7cf0`. Latest migration V227.
+- Working tree **clean**, all committed. HEAD = `3ad638d` (compose revert). Latest migration V227.
+- Compose DSNs on `postgres:${POSTGRES_PASSWORD}` (superuser) — reboot-safe. The broken `homeai_dashboard` migration was reverted.
 - Resilience watchdogs in cron: supervisor + u54 + u165 (3). systemd layer pending Jo's sudo.
