@@ -19,8 +19,15 @@ repair_count_1h(){ q "SELECT count(*) FROM audit_log WHERE action='self_repair' 
 
 repaired=(); skipped=()
 
+# External dead-man's switch (healthchecks.io) — vault-independent file cred.
+# Healthy ping each clean/recovered run; /fail on unrecovered; SILENCE (box or
+# supervisor death) trips it after the grace period — the failure mode nothing
+# else can catch.
+HC=$(cat /home_ai/security/.hc-ping-url 2>/dev/null || true)
+hc(){ [ -n "$HC" ] && curl -fsS -m 10 "${HC}${1:-}" >/dev/null 2>&1 || true; }
+
 OUT=$(bash /home_ai/scripts/selftest.sh 2>&1); RC=$?
-if [ "$RC" -eq 0 ]; then echo "$(ts) selftest OK" >> "$LOG"; exit 0; fi
+if [ "$RC" -eq 0 ]; then echo "$(ts) selftest OK" >> "$LOG"; hc; exit 0; fi
 FAILS=$(printf '%s\n' "$OUT" | sed -n '/^FAILURES:/,$p' | grep -E '^\s*- ' || true)
 
 # ── SAFE auto-repairs (conservative, idempotent, circuit-broken) ──
@@ -50,17 +57,25 @@ if printf '%s' "$FAILS" | grep -qiE 'pending|backlog'; then
 fi
 
 # ── re-check after repairs ──
-bash /home_ai/scripts/selftest.sh >/dev/null 2>&1; RC2=$?
+OUT2=$(bash /home_ai/scripts/selftest.sh 2>&1); RC2=$?
+FAILS2=$(printf '%s\n' "$OUT2" | sed -n '/^FAILURES:/,$p' | grep -E '^\s*- ' || true)
+# Known non-critical (won't page or trip the external DMS): stale nightly backup
+# (tracked separately — restic exits 3 on root-owned files). Everything else is
+# treated as a real failure.
+CRIT=$(printf '%s\n' "$FAILS2" | grep -viE 'backup' | grep -E '\S' || true)
 
-# ── page (notify-telegram dedupes flapping by source) ──
-state=$([ "$RC2" -eq 0 ] && echo "RECOVERED ✅" || echo "STILL FAILING ❗ — needs you")
-msg="🩺 SUPERVISOR · selftest FAILED
-Failures:
-${FAILS:-  (see log)}
+if [ -z "$CRIT" ]; then
+  hc   # functionally healthy (clean, or only known-non-critical left) → DMS healthy
+  echo "$(ts) ok/non-critical rc=$RC repaired=[${repaired[*]:-}] after=$RC2 noncrit=[${FAILS2:-none}]" >> "$LOG"
+  exit 0
+fi
+# Real failure → page (notify-telegram dedupes flapping) + trip the external DMS.
+msg="🩺 SUPERVISOR · critical selftest failure
+$CRIT
 Auto-repaired: ${repaired[*]:-none}${skipped:+
-Held: ${skipped[*]}}
-After repair: $state"
+Held: ${skipped[*]}}"
 bash /home_ai/.claude/scripts/notify-telegram.sh "$msg" "supervisor" >/dev/null 2>&1 || true
-# (P1 follow-up: also send via the email channel + ping the hosted dead-man's switch)
-echo "$(ts) FAIL rc=$RC repaired=[${repaired[*]:-}] held=[${skipped[*]:-}] after=$RC2" >> "$LOG"
-[ "$RC2" -eq 0 ] && exit 0 || exit 1
+hc /fail
+# (P1 follow-up: also send via the self-hosted email channel)
+echo "$(ts) CRIT rc=$RC repaired=[${repaired[*]:-}] held=[${skipped[*]:-}] crit=[$CRIT]" >> "$LOG"
+exit 1

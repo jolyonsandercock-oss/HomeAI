@@ -47,7 +47,7 @@ Each: **detector · safe auto-repair · escalate-if · current gap**
 | A | Global auto-pause never resumed | selftest `system.state` | resume IF flood contained (no new DL 30m) | else page | selftest unscheduled; no auto-resume; delivery dark |
 | B | Broken pipeline poisons event batch | pending-by-type growth | V224 skip broken type | page to fix pipeline | no detector on per-type backlog |
 | C | noOp-skip (events reprocess, never marked) | processed-rate≈0 while pending↑ | u239 close-sweep | page if backlog↑ | stopgap only; root unfixed |
-| D | Alert delivery dead (Telegram/Vault down) | **dead-man's switch** (no heartbeat seen) | — | out-of-band 2nd channel | single channel, no DMS |
+| D | Alert delivery dead (Telegram/Vault down) | **dead-man's switch** (no heartbeat seen) | — | out-of-band 2nd channel | ✅ DMS wired (healthchecks.io, 2026-06-05) — supervisor pings healthy/`/fail`; silence pages out-of-band. Email 2nd channel still TODO |
 | E | Crontab wiped | cron-job-count < baseline | reinstall from committed snapshot | page | nothing watches the crontab |
 | F | n8n restart de-registers webhook/trigger | workflow active + 0 execs in N min | reactivate + restart n8n | page | no detector |
 | G | Scraper auth/CAPTCHA (Dojo/Trail/TO) | freshness stale | — (needs human re-pair) | page | u165 unscheduled |

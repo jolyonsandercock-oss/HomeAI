@@ -111,3 +111,4 @@ data/trail-cache/
 
 # Cron-written heartbeat — re-modified every 15 min, no value in tracking
 data/u165-last-alert.json
+security/.hc-ping-url
