@@ -2731,11 +2731,14 @@ async def _distill_counterparty(cp_id: int, allowed_realms: list) -> dict:
 
     citations = sorted({c["email_id"] for c in chunks})
     realms = sorted({c["realm"] for c in chunks if c.get("realm")}) or cp.get("realms") or []
+    # Financials are stored straight from the SQL function (not the Python dict) so
+    # the stored jsonb is byte-identical to a fresh recompute — Python float
+    # reformatting (4080.0 vs DB 4080.00) would otherwise break the Task 5 assertion.
     await db_all("""
         INSERT INTO counterparty_dossier
             (counterparty_id, summary, key_facts, financials, open_threads, people,
              citations, model, realms, distilled_through, generated_at)
-        VALUES ($1,$2,$3::jsonb,$4::jsonb,$5::jsonb,$6::jsonb,$7,$8,$9,$10, now())
+        VALUES ($1,$2,$3::jsonb,home_ai.counterparty_financials($1),$4::jsonb,$5::jsonb,$6,$7,$8,$9, now())
         ON CONFLICT (counterparty_id) DO UPDATE SET
             summary=EXCLUDED.summary, key_facts=EXCLUDED.key_facts,
             financials=EXCLUDED.financials, open_threads=EXCLUDED.open_threads,
@@ -2743,7 +2746,7 @@ async def _distill_counterparty(cp_id: int, allowed_realms: list) -> dict:
             model=EXCLUDED.model, realms=EXCLUDED.realms,
             distilled_through=EXCLUDED.distilled_through, generated_at=now()
     """, cp_id, obj.get("summary", ""),
-         json.dumps(obj.get("key_facts", [])), json.dumps(financials),
+         json.dumps(obj.get("key_facts", [])),
          json.dumps(obj.get("open_threads", [])), json.dumps(obj.get("people", [])),
          citations, _DOSSIER_MODEL, realms, cp.get("last_seen"))
     rows = await db_all("SELECT * FROM counterparty_dossier WHERE counterparty_id=$1", cp_id)
