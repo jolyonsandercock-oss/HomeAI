@@ -66,13 +66,13 @@ BEGIN
   IF bad > 0 THEN RAISE EXCEPTION '% dangling citations (no such email)', bad; END IF;
 END $$;
 
--- Work realm cannot read personal-only dossiers.
+-- Cultural memory is owner-only: a work-realm reader sees ZERO dossiers.
 DO $$
-DECLARE leaked int;
+DECLARE seen int;
 BEGIN
-  PERFORM set_config('app.current_realm', 'work', true);
+  PERFORM set_config('app.current_realm','work',true);
   SET LOCAL ROLE homeai_readonly;
-  SELECT count(*) INTO leaked FROM counterparty_dossier WHERE realms = ARRAY['personal'];
+  SELECT count(*) INTO seen FROM counterparty_dossier;
   RESET ROLE;
-  IF leaked > 0 THEN RAISE EXCEPTION 'work realm leaked % personal-only dossiers', leaked; END IF;
+  IF seen <> 0 THEN RAISE EXCEPTION 'work realm sees % dossiers (owner-only expected)', seen; END IF;
 END $$;

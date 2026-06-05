@@ -2649,6 +2649,18 @@ async def api_research_ask(body: dict = Body(...)):
 _DOSSIER_CHUNK_CAP = 40            # newest chunks fed to Sonnet (~6k tokens)
 _DOSSIER_MODEL     = "claude-sonnet-4-6"
 
+
+def _decode_dossier(row: dict) -> dict:
+    """Parse the four jsonb fields to objects so AI clients get dicts/lists,
+    not strings (asyncpg returns jsonb as str without a codec)."""
+    for k in ("key_facts", "financials", "open_threads", "people"):
+        if isinstance(row.get(k), str):
+            try:
+                row[k] = json.loads(row[k])
+            except (ValueError, json.JSONDecodeError):
+                pass
+    return row
+
 async def _gather_counterparty_context(cp_id: int, allowed_realms: list):
     """Return (counterparty_row, chunks, financials_jsonb). Realm-scoped chunks."""
     cp = await db_all("SELECT * FROM counterparties WHERE id=$1", cp_id)
@@ -2690,7 +2702,7 @@ async def _distill_counterparty(cp_id: int, allowed_realms: list) -> dict:
     # Untrusted email content is delimited; financials are trusted context.
     ctx = "\n".join(
         f"[email {c['email_id']}] {c['received_at'] or ''} {c['subject'] or ''}\n"
-        f"    {(c['chunk_text'] or '')[:600]}"
+        f"    {(c['chunk_text'] or '')[:600]}"  # per-chunk cap
         for c in chunks
     ) or "(no email content on file)"
 
@@ -2724,10 +2736,13 @@ async def _distill_counterparty(cp_id: int, allowed_realms: list) -> dict:
                   if b.get("type") == "text").strip()
     # Defensive parse: strip any ```json fence, then take the outermost JSON object.
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw).strip()
+    stored_model = _DOSSIER_MODEL
     try:
         obj = json.loads(cleaned[cleaned.index("{"): cleaned.rindex("}") + 1])
     except (ValueError, json.JSONDecodeError):
+        print(f"[dossier] parse fallback for cp {cp_id}", flush=True)
         obj = {"summary": cleaned[:1000], "key_facts": [], "open_threads": [], "people": []}
+        stored_model = _DOSSIER_MODEL + "/parse-fallback"
 
     citations = sorted({c["email_id"] for c in chunks})
     realms = sorted({c["realm"] for c in chunks if c.get("realm")}) or cp.get("realms") or []
@@ -2748,9 +2763,9 @@ async def _distill_counterparty(cp_id: int, allowed_realms: list) -> dict:
     """, cp_id, obj.get("summary", ""),
          json.dumps(obj.get("key_facts", [])),
          json.dumps(obj.get("open_threads", [])), json.dumps(obj.get("people", [])),
-         citations, _DOSSIER_MODEL, realms, cp.get("last_seen"))
+         citations, stored_model, realms, cp.get("last_seen"))
     rows = await db_all("SELECT * FROM counterparty_dossier WHERE counterparty_id=$1", cp_id)
-    return _isoify(dict(rows[0]))
+    return _decode_dossier(_isoify(dict(rows[0])))
 
 
 def _allowed_realms_for_session() -> list:
@@ -2764,17 +2779,19 @@ def _allowed_realms_for_session() -> list:
 @app.post("/api/memory/dossier/{cp_id}")
 async def api_memory_dossier(cp_id: int, refresh: bool = Query(False)):
     """Lazy: return the cached dossier; distil if missing/stale or refresh=true."""
+    if _current_realm.get() != "owner":
+        return JSONResponse({"error": "cultural memory is owner-only"}, status_code=403)
     allowed = _allowed_realms_for_session()
     cur = await db_all("""
         SELECT d.*, c.last_seen
           FROM counterparty_dossier d JOIN counterparties c ON c.id = d.counterparty_id
          WHERE d.counterparty_id = $1
     """, cp_id)
-    fresh = cur and cur[0]["distilled_through"] is not None \
-        and cur[0]["last_seen"] is not None \
-        and cur[0]["distilled_through"] >= cur[0]["last_seen"]
+    fresh = bool(cur) and (cur[0]["last_seen"] is None or (
+        cur[0]["distilled_through"] is not None
+        and cur[0]["distilled_through"] >= cur[0]["last_seen"]))
     if cur and fresh and not refresh:
-        return _isoify(dict(cur[0]))
+        return _decode_dossier(_isoify(dict(cur[0])))
     try:
         return await _distill_counterparty(cp_id, allowed)
     except Exception as e:
@@ -2784,6 +2801,8 @@ async def api_memory_dossier(cp_id: int, refresh: bool = Query(False)):
 @app.post("/api/memory/distill-batch")
 async def api_memory_distill_batch(limit: int = Query(25, ge=1, le=100)):
     """Eager/incremental: distil up to `limit` stale high-signal counterparties."""
+    if _current_realm.get() != "owner":
+        return JSONResponse({"error": "cultural memory is owner-only"}, status_code=403)
     allowed = _allowed_realms_for_session()
     targets = await db_all("""
         SELECT c.id FROM counterparties c

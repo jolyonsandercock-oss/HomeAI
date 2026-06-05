@@ -28,16 +28,14 @@ CREATE INDEX IF NOT EXISTS counterparty_dossier_cp ON counterparty_dossier (coun
 ALTER TABLE counterparty_dossier ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS base_access ON counterparty_dossier;
 CREATE POLICY base_access ON counterparty_dossier FOR SELECT USING (true);
+-- Cultural memory is owner-only (spec D2: never rely on RLS alone, but this is the
+-- backstop for any future non-superuser reader). Owner — or unset/empty, i.e.
+-- superuser/migration context — sees all; work/personal see none.
 DROP POLICY IF EXISTS realm_isolation ON counterparty_dossier;
 CREATE POLICY realm_isolation ON counterparty_dossier AS RESTRICTIVE USING (
-  CASE
-    WHEN current_setting('app.current_realm', true) = 'owner'    THEN true
-    WHEN current_setting('app.current_realm', true) = 'work'     THEN realms && ARRAY['work','shared']
-    WHEN current_setting('app.current_realm', true) = 'personal' THEN realms && ARRAY['personal','shared']
-    WHEN current_setting('app.current_realm', true) IS NULL
-      OR current_setting('app.current_realm', true) = ''         THEN true
-    ELSE false
-  END);
+  current_setting('app.current_realm', true) = 'owner'
+  OR COALESCE(current_setting('app.current_realm', true), '') = ''
+);
 GRANT SELECT ON counterparty_dossier TO homeai_readonly;
 
 -- DB-derived financials for a counterparty, matched via the cleaned vendor name.
