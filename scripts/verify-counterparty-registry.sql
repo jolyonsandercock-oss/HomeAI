@@ -91,3 +91,17 @@ DO $$ BEGIN
     RAISE EXCEPTION 'linked_confidence out of [0,1] or null on a linked row';
   END IF;
 END $$;
+
+-- signal_score populated for real orgs; eager-selection set is non-trivial.
+DO $$ BEGIN
+  IF (SELECT count(*) FROM counterparties WHERE signal_score > 0) = 0 THEN
+    RAISE EXCEPTION 'signal_score never computed';
+  END IF;
+  -- The eager subset (T2 default: financial link OR >=20 emails OR watchlist, not automated)
+  -- should be in a sane range for this corpus (~150-300).
+  IF (SELECT count(*) FROM counterparties
+      WHERE NOT is_automated
+        AND (linked_vendor IS NOT NULL OR email_count >= 20 OR on_watchlist)) < 50 THEN
+    RAISE EXCEPTION 'eager subset implausibly small';
+  END IF;
+END $$;

@@ -151,6 +151,16 @@ BEGIN
          updated_at = now()
   FROM best b
   WHERE b.rn = 1 AND b.id = c.id;
+
+  -- 5. signal_score: volume (log) + financial link bonus + recency bonus.
+  UPDATE counterparties c SET signal_score = (
+      ln(c.email_count + 1)
+      + CASE WHEN c.linked_vendor IS NOT NULL THEN 2.0 ELSE 0 END
+      + CASE WHEN c.last_seen > now() - interval '180 days' THEN 1.0 ELSE 0 END
+      + CASE WHEN c.on_watchlist THEN 3.0 ELSE 0 END
+    )::real,
+    updated_at = now()
+  WHERE NOT c.is_automated;
 END;
 $fn$;
 
