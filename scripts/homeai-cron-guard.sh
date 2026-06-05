@@ -9,6 +9,6 @@ live=$(crontab -u joly -l 2>/dev/null | grep -vcE '^\s*#|^\s*$' || echo 0)
 if [ "${live:-0}" -lt "$BASELINE" ] && [ -f "$SNAP" ]; then
   crontab -u joly "$SNAP"
   docker exec -i homeai-postgres psql -U postgres -d homeai \
-    -c "INSERT INTO audit_log(action,source,payload) VALUES('self_repair','cron-guard',jsonb_build_object('repair','reinstall_crontab','live_was',$live));" >/dev/null 2>&1 || true
+    -c "INSERT INTO audit_log(pipeline,action,ai_parsed) VALUES('cron-guard','self_repair',jsonb_build_object('repair','reinstall_crontab','live_was',$live));" >/dev/null 2>&1 || true
   bash /home_ai/.claude/scripts/notify-telegram.sh "🛠 cron-guard: crontab had $live jobs (<$BASELINE) — reinstalled from snapshot" "cron-guard" >/dev/null 2>&1 || true
 fi

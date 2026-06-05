@@ -13,9 +13,9 @@ LOG=/home_ai/logs/u241-supervisor.log
 ts(){ date -u +%FT%TZ; }
 q(){ docker exec -i homeai-postgres psql -U postgres -d homeai -tAc "$1" 2>/dev/null; }
 audit(){ docker exec -i homeai-postgres psql -U postgres -d homeai \
-  -c "INSERT INTO audit_log(action,source,payload) VALUES('self_repair','u241-supervisor',jsonb_build_object('repair','$1','detail','$2'));" >/dev/null 2>&1; }
+  -c "INSERT INTO audit_log(pipeline,action,ai_parsed) VALUES('u241-supervisor','self_repair',jsonb_build_object('repair','$1','detail','$2'));" >/dev/null 2>&1; }
 # circuit breaker: how many times this repair fired in the last hour
-repair_count_1h(){ q "SELECT count(*) FROM audit_log WHERE action='self_repair' AND source='u241-supervisor' AND payload->>'repair'='$1' AND created_at>now()-interval '1 hour'"; }
+repair_count_1h(){ q "SELECT count(*) FROM audit_log WHERE action='self_repair' AND pipeline='u241-supervisor' AND ai_parsed->>'repair'='$1' AND created_at>now()-interval '1 hour'"; }
 
 repaired=(); skipped=()
 
