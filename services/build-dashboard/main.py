@@ -2451,17 +2451,37 @@ async def api_research_ask(body: dict = Body(...)):
         return JSONResponse({"error": "anthropic key not available"}, status_code=503)
 
     # ── Lexical (FTS) pass ──────────────────────────────────────────────
+    # Stopwords: generic English + business-email boilerplate + money-question
+    # verbs. The email corpus is dominated by high-frequency, low-signal words
+    # ("account", "statement", "regards"…) and finance questions add filler verbs
+    # ("how much did we *spend* with X"). OR-ing every term let those swamp the
+    # specific ones — e.g. "Bidfresh statement of account" surfaced Principality
+    # mortgage docs because "account" matched thousands of rows. Dropping the
+    # boilerplate lets the discriminating term (the vendor) drive retrieval.
     stopwords = {"a","an","and","are","as","at","be","by","for","from","how",
                  "in","is","it","of","on","or","that","the","this","to","was",
                  "were","what","when","where","which","who","why","with","i",
-                 "me","my","much","did","do","does","done","have","has","had",
-                 "you","your","we","our","tell","show","find","list"}
-    terms = [t.strip(".,?!\"'") for t in re.split(r"\s+", question.lower())]
+                 "me","my","much","many","did","do","does","done","have","has",
+                 "had","you","your","we","our","tell","show","find","list",
+                 # business-email boilerplate (high doc-frequency, low signal)
+                 "account","statement","invoice","invoices","ltd","limited",
+                 "please","dear","hi","hello","regards","thanks","thank","email",
+                 "order","orders","payment","payments","attached","attachment",
+                 "re","fwd","sincerely","number","ref",
+                 # money-question filler verbs (not present in the documents)
+                 "spend","spent","spending","pay","paid","paying","cost","costs",
+                 "total","totals","owe","owed","due"}
+    # Keep tokens largely intact — a vendor code like "j&r" is *valid* tsquery
+    # (j & r) and is how "J&R Food Services" is found, so DON'T strip operator
+    # chars out of it. Only drop surrounding punctuation and the ':' weight-label
+    # char (unsafe mid-term). A genuinely malformed tsquery is caught below.
+    terms = [t.strip(".,?!\"'()[]").replace(":", "") for t in re.split(r"\s+", question.lower())]
     terms = [t for t in terms if t and len(t) > 2 and t not in stopwords]
-    or_query = " | ".join(t.replace(":", "") for t in terms) or question
+    or_query = " | ".join(terms)
 
-    fts_rows = await db_all("""
-        WITH q AS (SELECT to_tsquery('english', $1) AS tsq)
+    FTS_LIMIT = 200          # was 50 — deeper candidate pool for the cosine rerank
+    FTS_SQL = """
+        WITH q AS (SELECT {fn}('english', $1) AS tsq)
         SELECT source_table, source_id, title, account, entity_id, realm,
                event_at,
                ts_rank_cd(ts, q.tsq) AS rank,
@@ -2475,8 +2495,22 @@ async def api_research_ask(body: dict = Body(...)):
            AND source_table = ANY($2::text[])
            AND realm = ANY($3::text[])
          ORDER BY rank DESC, event_at DESC NULLS LAST
-         LIMIT 50
-    """, or_query, sources, allowed_realms)
+         LIMIT """ + str(FTS_LIMIT) + "\n    "
+    # OR the specific terms (the cosine pass reranks within this pool). Fall back
+    # to plainto_tsquery — which never errors — when every term was stopworded
+    # away or the user typed a malformed tsquery (unbalanced operators).
+    fts_rows = []
+    if or_query:
+        try:
+            fts_rows = await db_all(FTS_SQL.format(fn="to_tsquery"),
+                                    or_query, sources, allowed_realms)
+        except Exception as e:
+            print(f"[research] to_tsquery failed ({e!r}); falling back to plainto",
+                  flush=True)
+            fts_rows = []
+    if not fts_rows:
+        fts_rows = await db_all(FTS_SQL.format(fn="plainto_tsquery"),
+                                question, sources, allowed_realms)
     fts_by_id  = {(r["source_table"], r["source_id"]): r for r in fts_rows}
     fts_scores = {(r["source_table"], r["source_id"]): float(r["rank"]) for r in fts_rows}
 
