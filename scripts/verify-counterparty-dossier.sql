@@ -23,3 +23,24 @@ DO $$ BEGIN
     RAISE EXCEPTION 'clean_vendor_name did not strip the address/quotes';
   END IF;
 END $$;
+-- Financials: for a linked counterparty, the function's total must equal an
+-- independent recompute over the SAME cleaned-name join (no double counting).
+DO $$
+DECLARE cp_id bigint; fin jsonb; indep numeric;
+BEGIN
+  SELECT id INTO cp_id FROM counterparties
+   WHERE linked_vendor IS NOT NULL ORDER BY signal_score DESC LIMIT 1;
+  IF cp_id IS NULL THEN RAISE EXCEPTION 'no linked counterparty to test financials'; END IF;
+  fin := home_ai.counterparty_financials(cp_id);
+  SELECT COALESCE(sum(vil.line_gross),0) INTO indep
+    FROM counterparties c
+    JOIN vendor_invoice_inbox vii ON home_ai.clean_vendor_name(vii.vendor_name) = c.linked_vendor
+    JOIN vendor_invoice_lines vil ON vil.invoice_id = vii.id
+   WHERE c.id = cp_id;
+  IF (fin->>'total_invoiced')::numeric <> indep THEN
+    RAISE EXCEPTION 'financials total % <> independent recompute %', fin->>'total_invoiced', indep;
+  END IF;
+  IF NOT (fin ? 'n_invoices' AND fin ? 'last_invoice_date' AND fin->>'currency' = 'GBP') THEN
+    RAISE EXCEPTION 'financials jsonb missing expected keys';
+  END IF;
+END $$;

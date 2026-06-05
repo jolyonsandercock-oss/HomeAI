@@ -40,4 +40,23 @@ CREATE POLICY realm_isolation ON counterparty_dossier AS RESTRICTIVE USING (
   END);
 GRANT SELECT ON counterparty_dossier TO homeai_readonly;
 
+-- DB-derived financials for a counterparty, matched via the cleaned vendor name.
+-- DISTINCT invoice ids so multi-line invoices don't inflate n_invoices; gross sum
+-- over lines. Returns {} when the counterparty has no vendor link.
+CREATE OR REPLACE FUNCTION home_ai.counterparty_financials(cp_id bigint)
+RETURNS jsonb LANGUAGE sql STABLE AS $fn$
+  SELECT COALESCE(
+    (SELECT jsonb_build_object(
+        'total_invoiced', COALESCE(sum(vil.line_gross), 0),
+        'n_invoices',     count(DISTINCT vii.id),
+        'last_invoice_date', max(vii.invoice_date),
+        'currency', 'GBP')
+       FROM counterparties c
+       JOIN vendor_invoice_inbox vii
+         ON home_ai.clean_vendor_name(vii.vendor_name) = c.linked_vendor
+       JOIN vendor_invoice_lines vil ON vil.invoice_id = vii.id
+      WHERE c.id = cp_id AND c.linked_vendor IS NOT NULL),
+    '{}'::jsonb);
+$fn$;
+
 COMMIT;
