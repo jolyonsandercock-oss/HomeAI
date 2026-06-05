@@ -50,4 +50,71 @@ CREATE POLICY realm_isolation ON counterparties AS RESTRICTIVE USING (
   END);
 GRANT SELECT ON counterparties TO homeai_readonly;
 
+-- Idempotent registry builder. Re-runnable; upserts orgs then people.
+-- Own/internal domains to exclude live in the EXCLUDED_DOMAINS array.
+CREATE OR REPLACE FUNCTION home_ai.build_counterparty_registry()
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE
+  excluded_domains text[] := ARRAY['malthousetintagel.com'];
+BEGIN
+  -- 1. Orgs (one row per sender domain).
+  INSERT INTO counterparties (kind, display_name, domain, addresses, realms,
+                              email_count, first_seen, last_seen)
+  SELECT 'org',
+         COALESCE((array_agg(from_name ORDER BY received_at DESC)
+                   FILTER (WHERE COALESCE(from_name,'') <> ''))[1], domain),
+         domain,
+         array_agg(DISTINCT addr),
+         COALESCE(array_agg(DISTINCT realm) FILTER (WHERE realm IS NOT NULL), '{}'),
+         count(*), min(received_at), max(received_at)
+  FROM (
+    SELECT lower(split_part(from_address,'@',2)) AS domain,
+           lower(from_address)                   AS addr,
+           from_name, realm, received_at
+    FROM emails
+    WHERE from_address LIKE '%@%'
+      AND split_part(from_address,'@',2) <> ''
+      AND lower(split_part(from_address,'@',2)) <> ALL (excluded_domains)
+  ) s
+  GROUP BY domain
+  ON CONFLICT (domain) WHERE kind='org' DO UPDATE SET
+    addresses    = EXCLUDED.addresses,
+    realms       = EXCLUDED.realms,
+    email_count  = EXCLUDED.email_count,
+    first_seen   = EXCLUDED.first_seen,
+    last_seen    = EXCLUDED.last_seen,
+    display_name = EXCLUDED.display_name,
+    updated_at   = now();
+
+  -- 2. People (one row per sender address), linked to their domain's org.
+  INSERT INTO counterparties (kind, display_name, domain, primary_email, addresses,
+                              parent_org_id, realms, email_count, first_seen, last_seen)
+  SELECT 'person',
+         COALESCE(p.name, p.addr), p.domain, p.addr, ARRAY[p.addr],
+         o.id, p.realms, p.n, p.fs, p.ls
+  FROM (
+    SELECT lower(from_address) AS addr,
+           lower(split_part(from_address,'@',2)) AS domain,
+           (array_agg(from_name ORDER BY received_at DESC)
+            FILTER (WHERE COALESCE(from_name,'') <> ''))[1] AS name,
+           COALESCE(array_agg(DISTINCT realm) FILTER (WHERE realm IS NOT NULL), '{}') AS realms,
+           count(*) AS n, min(received_at) AS fs, max(received_at) AS ls
+    FROM emails
+    WHERE from_address LIKE '%@%'
+      AND split_part(from_address,'@',2) <> ''
+      AND lower(split_part(from_address,'@',2)) <> ALL (excluded_domains)
+    GROUP BY addr, domain
+  ) p
+  LEFT JOIN counterparties o ON o.kind='org' AND o.domain = p.domain
+  ON CONFLICT (primary_email) WHERE kind='person' DO UPDATE SET
+    parent_org_id = EXCLUDED.parent_org_id,
+    realms        = EXCLUDED.realms,
+    email_count   = EXCLUDED.email_count,
+    first_seen    = EXCLUDED.first_seen,
+    last_seen     = EXCLUDED.last_seen,
+    display_name  = EXCLUDED.display_name,
+    updated_at    = now();
+END;
+$fn$;
+
 COMMIT;

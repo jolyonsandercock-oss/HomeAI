@@ -25,3 +25,37 @@ DO $$ BEGIN
     RAISE EXCEPTION 'RLS not enabled on counterparties';
   END IF;
 END $$;
+
+-- Population assertions (require home_ai.build_counterparty_registry() to have run).
+DO $$ BEGIN
+  IF (SELECT count(*) FROM counterparties WHERE kind='org') < 100 THEN
+    RAISE EXCEPTION 'expected >=100 org counterparties, got %',
+      (SELECT count(*) FROM counterparties WHERE kind='org');
+  END IF;
+END $$;
+
+-- Own domain must be excluded.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM counterparties WHERE domain = 'malthousetintagel.com') THEN
+    RAISE EXCEPTION 'own domain malthousetintagel.com must not be a counterparty';
+  END IF;
+END $$;
+
+-- A known real vendor domain must be present as an org with a realm.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM counterparties
+                 WHERE kind='org' AND domain='jrf.lls.com'
+                   AND array_length(realms,1) >= 1 AND email_count > 0) THEN
+    RAISE EXCEPTION 'expected jrf.lls.com org with realm + email_count';
+  END IF;
+END $$;
+
+-- People link to their org by domain.
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM counterparties p
+    JOIN counterparties o ON o.kind='org' AND o.domain=p.domain
+    WHERE p.kind='person' AND p.parent_org_id IS DISTINCT FROM o.id) THEN
+    RAISE EXCEPTION 'person rows exist whose parent_org_id does not match their domain org';
+  END IF;
+END $$;
