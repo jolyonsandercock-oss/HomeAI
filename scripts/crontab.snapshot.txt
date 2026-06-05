@@ -27,3 +27,4 @@
 */15 * * * * bash /home_ai/scripts/u54-pipeline-watchdog.sh >> /home_ai/logs/u54-pipeline-watchdog.log 2>&1
 */15 * * * * bash /home_ai/scripts/u165-freshness-watcher.sh >> /home_ai/logs/u165-freshness-watcher.log 2>&1
 0 */12 * * * bash /home_ai/scripts/renew-n8n-vault-token.sh >> /home_ai/logs/renew-n8n-vault-token.log 2>&1
+0 3 * * * /home_ai/scripts/backup-nightly.sh >> /home_ai/backups/cron.log 2>&1
