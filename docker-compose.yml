@@ -57,7 +57,7 @@ services:
       - ./monitoring/postgres-exporter-queries.yaml:/etc/postgres_exporter/queries.yaml:ro
     command: ["--extend.query-path=/etc/postgres_exporter/queries.yaml"]
     environment:
-      DATA_SOURCE_NAME: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://homeai_dashboard:***@homeai-postgres:5432/homeai?sslmode=disable"
     depends_on:
       postgres: {condition: service_healthy}
     restart: unless-stopped
@@ -305,7 +305,7 @@ services:
       # Read-write because docker exec needs to attach a session.
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
+      PG_DSN: "postgresql://homeai_dashboard:***@homeai-postgres:5432/homeai"
       PROM_URL: "http://homeai-prometheus:9090"
       VAULT_URL: "http://homeai-vault:8200"
       # VAULT_TOKEN lets /api/finance/ask fetch the anthropic key. Read-only
@@ -400,7 +400,7 @@ services:
     # NOT on ai-monitoring/ai-proxy — internal-only consumer (n8n hits it).
     networks: [ai-internal, ai-egress]
     environment:
-      PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
+      PG_DSN: "postgresql://homeai_dashboard:***@homeai-postgres:5432/homeai"
       VAULT_ADDR: "http://vault:8200"
       VAULT_TOKEN: "${VAULT_TOKEN}"
     depends_on:
@@ -531,7 +531,7 @@ services:
     environment:
       VAULT_ADDR: "http://vault:8200"
       VAULT_TOKEN: "${VAULT_TOKEN}"
-      PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
+      PG_DSN: "postgresql://homeai_dashboard:***@homeai-postgres:5432/homeai"
       # When running pair on the local console, the user passes
       # `-e DISPLAY=:0` to docker exec to skip xvfb and render on the host's
       # X server. Empty default means the in-container xvfb path is used.
@@ -590,7 +590,7 @@ services:
     volumes:
       - /home_ai/data/wa-profiles:/wa-profiles
     environment:
-      PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
+      PG_DSN: "postgresql://homeai_dashboard:***@homeai-postgres:5432/homeai"
       WA_PROFILE_DIR: "/wa-profiles"
       WA_SEND_GAP_S: "6"
       WA_HOURLY_CAP: "30"
@@ -616,7 +616,7 @@ services:
       VAULT_ADDR: "http://vault:8200"
       VAULT_TOKEN: "${VAULT_TOKEN}"
       BOT_RESPONDER_MODEL: "${BOT_RESPONDER_MODEL:-claude-haiku-4-5-20251001}"
-      PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
+      PG_DSN: "postgresql://homeai_dashboard:***@homeai-postgres:5432/homeai"
       # R2 realm gate (U52). Present for parity with build-dashboard. Bot is
       # realm-aware regardless because sender_realm is fetched from the
       # server-trusted bot_sender_whitelist, not an HTTP header.
@@ -637,7 +637,7 @@ services:
     environment:
       VAULT_ADDR:   "http://vault:8200"
       VAULT_TOKEN:  "${VAULT_TOKEN}"
-      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
+      DATABASE_URL: "postgresql://homeai_dashboard:***@homeai-postgres:5432/homeai"
     restart: unless-stopped
 
   # ── U62 T3 — Paperless-ngx ─────────────────────────────────────────────
