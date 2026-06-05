@@ -16,12 +16,12 @@
 #          vault token create -policy=n8n-policy -period=168h -renewable=true -field=token
 #   2. n8n UI -> Credentials -> vault-token-header -> paste it as the X-Vault-Token
 #      header value -> Save.  (This also fixes the current outage immediately.)
-#   3. Save the SAME token to the root-owned file this script reads:
-#        printf '%s' '<token>' | sudo tee /home_ai/security/.n8n-vault-token >/dev/null
-#        sudo chmod 600 /home_ai/security/.n8n-vault-token
+#   3. Save the SAME token to the file this script reads (joly-owned 600, like
+#      .env — the renewer runs from joly's crontab, no root needed):
+#        ( umask 077; printf '%s' '<token>' > /home_ai/security/.n8n-vault-token )
 #
-# CRON (root, comfortably inside the 168h period):
-#   0 */12 * * * /home_ai/scripts/renew-n8n-vault-token.sh
+# CRON (joly crontab + scripts/crontab.snapshot.txt, inside the 168h period):
+#   0 */12 * * * bash /home_ai/scripts/renew-n8n-vault-token.sh >> /home_ai/logs/renew-n8n-vault-token.log 2>&1
 set -euo pipefail
 umask 077
 
