@@ -105,3 +105,18 @@ DO $$ BEGIN
     RAISE EXCEPTION 'eager subset implausibly small';
   END IF;
 END $$;
+
+-- A work-realm reader (homeai_readonly) must not see personal-only counterparties.
+-- Simulate the readonly role under work realm and assert no personal-only rows leak.
+DO $$
+DECLARE leaked int;
+BEGIN
+  PERFORM set_config('app.current_realm', 'work', true);
+  SET LOCAL ROLE homeai_readonly;
+  SELECT count(*) INTO leaked FROM counterparties
+   WHERE realms = ARRAY['personal'];        -- personal-only rows
+  RESET ROLE;
+  IF leaked > 0 THEN
+    RAISE EXCEPTION 'work realm leaked % personal-only counterparties (RLS gap)', leaked;
+  END IF;
+END $$;
