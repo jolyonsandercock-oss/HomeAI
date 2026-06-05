@@ -78,3 +78,16 @@ DO $$ BEGIN
     RAISE EXCEPTION 'no-reply person not flagged automated';
   END IF;
 END $$;
+
+-- Financial linking: at least some orgs should match a vendor; confidence in [0,1];
+-- links are reviewable (low-confidence allowed) but never fabricated.
+DO $$ BEGIN
+  IF (SELECT count(*) FROM counterparties WHERE linked_vendor IS NOT NULL) = 0 THEN
+    RAISE EXCEPTION 'no counterparties linked to any vendor — linking did not run';
+  END IF;
+  IF EXISTS (SELECT 1 FROM counterparties
+             WHERE linked_vendor IS NOT NULL
+               AND (linked_confidence IS NULL OR linked_confidence < 0 OR linked_confidence > 1)) THEN
+    RAISE EXCEPTION 'linked_confidence out of [0,1] or null on a linked row';
+  END IF;
+END $$;

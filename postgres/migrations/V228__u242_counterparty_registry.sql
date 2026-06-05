@@ -127,6 +127,30 @@ BEGIN
      OR c.domain = ANY (ARRAY['sendgrid.net','mailchimp.com','mailgun.org','sparkpostmail.com',
                               'amazonses.com','sendgrid.com'])
   );
+
+  -- 4. Best-effort fuzzy link orgs -> vendor_invoice_inbox.vendor_name (pg_trgm).
+  --    Reviewable, not authoritative: store best match + similarity as confidence.
+  WITH vendors AS (
+    SELECT DISTINCT vendor_name FROM vendor_invoice_inbox
+    WHERE COALESCE(vendor_name,'') <> ''
+  ),
+  best AS (
+    SELECT c.id,
+           v.vendor_name,
+           similarity(lower(c.display_name), lower(v.vendor_name)) AS sim,
+           row_number() OVER (PARTITION BY c.id
+             ORDER BY similarity(lower(c.display_name), lower(v.vendor_name)) DESC) AS rn
+    FROM counterparties c
+    CROSS JOIN vendors v
+    WHERE c.kind='org'
+      AND similarity(lower(c.display_name), lower(v.vendor_name)) >= 0.35
+  )
+  UPDATE counterparties c
+     SET linked_vendor = b.vendor_name,
+         linked_confidence = b.sim,
+         updated_at = now()
+  FROM best b
+  WHERE b.rn = 1 AND b.id = c.id;
 END;
 $fn$;
 
