@@ -114,6 +114,19 @@ BEGIN
     last_seen     = EXCLUDED.last_seen,
     display_name  = EXCLUDED.display_name,
     updated_at    = now();
+
+  -- 3. Flag automated senders (heuristic; flagged, never deleted).
+  UPDATE counterparties c SET is_automated = true, updated_at = now()
+  WHERE NOT c.is_automated AND (
+        -- noisy local-parts
+        split_part(COALESCE(c.primary_email, ''), '@', 1) ~*
+          '^(no-?reply|do-?not-?reply|notifications?|mailer|bounce|updates?|news|newsletter|marketing|alerts?|postmaster|mailer-daemon)$'
+        -- single-address org pumping volume
+     OR (c.kind='org' AND array_length(c.addresses,1) = 1 AND c.email_count > 50)
+        -- known bulk ESP domains
+     OR c.domain = ANY (ARRAY['sendgrid.net','mailchimp.com','mailgun.org','sparkpostmail.com',
+                              'amazonses.com','sendgrid.com'])
+  );
 END;
 $fn$;
 

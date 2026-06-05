@@ -59,3 +59,22 @@ DO $$ BEGIN
     RAISE EXCEPTION 'person rows exist whose parent_org_id does not match their domain org';
   END IF;
 END $$;
+
+-- Automated flagging: no-reply local-parts and single-address high-volume senders.
+DO $$ BEGIN
+  -- A single-address domain with huge volume (e.g. partners.collinsbookings.com) is automated.
+  IF EXISTS (SELECT 1 FROM counterparties
+             WHERE kind='org' AND domain='partners.collinsbookings.com' AND NOT is_automated) THEN
+    RAISE EXCEPTION 'high-volume single-address sender not flagged automated';
+  END IF;
+  -- A real multi-human-address vendor must NOT be flagged automated.
+  IF EXISTS (SELECT 1 FROM counterparties
+             WHERE kind='org' AND domain='jrf.lls.com' AND is_automated) THEN
+    RAISE EXCEPTION 'real vendor jrf.lls.com wrongly flagged automated';
+  END IF;
+  -- A no-reply person address is automated.
+  IF EXISTS (SELECT 1 FROM counterparties
+             WHERE kind='person' AND primary_email LIKE 'no-reply@%' AND NOT is_automated) THEN
+    RAISE EXCEPTION 'no-reply person not flagged automated';
+  END IF;
+END $$;
