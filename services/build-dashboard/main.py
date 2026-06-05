@@ -2823,6 +2823,33 @@ async def api_memory_distill_batch(limit: int = Query(25, ge=1, le=100)):
     return {"distilled": len(done), "ids": done, "errors": errors}
 
 
+@app.get("/api/memory/counterparties")
+async def api_memory_counterparties(
+        q: str = Query(""),
+        include_automated: bool = Query(False),
+        has_spend: bool = Query(False),
+        watchlist: bool = Query(False),
+        limit: int = Query(500, ge=1, le=2000)):
+    """Owner-only counterparty directory, ranked by signal_score."""
+    if _current_realm.get() != "owner":
+        return JSONResponse({"error": "cultural memory is owner-only"}, status_code=403)
+    rows = await db_all("""
+        SELECT c.id, c.kind, c.display_name, c.domain, c.email_count,
+               c.last_seen, c.linked_vendor, c.signal_score, c.is_automated,
+               c.on_watchlist,
+               (d.counterparty_id IS NOT NULL) AS has_dossier
+          FROM counterparties c
+          LEFT JOIN counterparty_dossier d ON d.counterparty_id = c.id
+         WHERE ($1 = '' OR c.display_name ILIKE '%'||$1||'%' OR c.domain ILIKE '%'||$1||'%')
+           AND ($2 OR NOT c.is_automated)
+           AND (NOT $3 OR c.linked_vendor IS NOT NULL)
+           AND (NOT $4 OR c.on_watchlist)
+         ORDER BY c.signal_score DESC NULLS LAST
+         LIMIT $5
+    """, q, include_automated, has_spend, watchlist, limit)
+    return {"n": len(rows), "rows": [_isoify(dict(r)) for r in rows]}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # U62 T1 — calendar
 # ─────────────────────────────────────────────────────────────────────────────
