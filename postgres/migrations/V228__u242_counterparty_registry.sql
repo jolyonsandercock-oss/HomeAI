@@ -115,49 +115,67 @@ BEGIN
     display_name  = EXCLUDED.display_name,
     updated_at    = now();
 
-  -- 3. Flag automated senders (heuristic; flagged, never deleted).
+  -- 3. Reset derived fields so a rebuild is idempotent in VALUE, not just row
+  --    count: stale links/scores from a prior run must not survive. on_watchlist
+  --    is deliberately NOT reset — it's manual curation and must persist.
+  UPDATE counterparties SET
+    is_automated      = false,
+    linked_vendor     = NULL,
+    linked_confidence = NULL,
+    signal_score      = 0;
+
+  -- 4. Flag automated senders (heuristic; flagged, never deleted).
   UPDATE counterparties c SET is_automated = true, updated_at = now()
   WHERE NOT c.is_automated AND (
         -- noisy local-parts
         split_part(COALESCE(c.primary_email, ''), '@', 1) ~*
           '^(no-?reply|do-?not-?reply|notifications?|mailer|bounce|updates?|news|newsletter|marketing|alerts?|postmaster|mailer-daemon)$'
-        -- single-address org pumping volume
+        -- single-address org pumping volume: >50 emails from one address with no
+        -- human variation reads as a bulk/transactional sender, not a real org
      OR (c.kind='org' AND array_length(c.addresses,1) = 1 AND c.email_count > 50)
         -- known bulk ESP domains
      OR c.domain = ANY (ARRAY['sendgrid.net','mailchimp.com','mailgun.org','sparkpostmail.com',
                               'amazonses.com','sendgrid.com'])
   );
 
-  -- 4. Best-effort fuzzy link orgs -> vendor_invoice_inbox.vendor_name (pg_trgm).
+  -- 5. Best-effort fuzzy link orgs -> vendor_invoice_inbox.vendor_name (pg_trgm).
   --    Reviewable, not authoritative: store best match + similarity as confidence.
   WITH vendors AS (
-    SELECT DISTINCT vendor_name FROM vendor_invoice_inbox
-    WHERE COALESCE(vendor_name,'') <> ''
+    -- vendor_name is a raw From header (e.g. '"HostPresto!" <noreply@hostpresto.com>');
+    -- strip the angle-bracket address + surrounding quotes/space so we match on the
+    -- human name only, not the embedded address (which caused false-positive links).
+    SELECT DISTINCT
+      btrim(regexp_replace(vendor_name, '\s*<[^>]*>', '', 'g'), ' "''') AS cleaned
+    FROM vendor_invoice_inbox
+    WHERE btrim(regexp_replace(COALESCE(vendor_name,''), '\s*<[^>]*>', '', 'g'), ' "''') <> ''
   ),
   best AS (
     SELECT c.id,
-           v.vendor_name,
-           similarity(lower(c.display_name), lower(v.vendor_name)) AS sim,
+           v.cleaned,
+           similarity(lower(c.display_name), lower(v.cleaned)) AS sim,
            row_number() OVER (PARTITION BY c.id
-             ORDER BY similarity(lower(c.display_name), lower(v.vendor_name)) DESC) AS rn
+             ORDER BY similarity(lower(c.display_name), lower(v.cleaned)) DESC) AS rn
+    -- O(orgs x vendors) CROSS JOIN (~1.27M pairs today, ~6s). No trigram index, so a
+    -- future scale-up should switch to a GIN trgm index + the % operator.
     FROM counterparties c
     CROSS JOIN vendors v
     WHERE c.kind='org'
-      AND similarity(lower(c.display_name), lower(v.vendor_name)) >= 0.35
+      -- 0.35 trigram floor: below this the match is noise, not a real name overlap
+      AND similarity(lower(c.display_name), lower(v.cleaned)) >= 0.35
   )
   UPDATE counterparties c
-     SET linked_vendor = b.vendor_name,
+     SET linked_vendor = b.cleaned,
          linked_confidence = b.sim,
          updated_at = now()
   FROM best b
   WHERE b.rn = 1 AND b.id = c.id;
 
-  -- 5. signal_score: volume (log) + financial link bonus + recency bonus.
+  -- 6. signal_score: volume (log) + financial link bonus + recency bonus.
   UPDATE counterparties c SET signal_score = (
       ln(c.email_count + 1)
-      + CASE WHEN c.linked_vendor IS NOT NULL THEN 2.0 ELSE 0 END
-      + CASE WHEN c.last_seen > now() - interval '180 days' THEN 1.0 ELSE 0 END
-      + CASE WHEN c.on_watchlist THEN 3.0 ELSE 0 END
+      + CASE WHEN c.linked_vendor IS NOT NULL THEN 2.0 ELSE 0 END  -- has a financial link
+      + CASE WHEN c.last_seen > now() - interval '180 days' THEN 1.0 ELSE 0 END  -- active within 180d recency window
+      + CASE WHEN c.on_watchlist THEN 3.0 ELSE 0 END  -- manually watchlisted: dominant weight
     )::real,
     updated_at = now()
   WHERE NOT c.is_automated;
