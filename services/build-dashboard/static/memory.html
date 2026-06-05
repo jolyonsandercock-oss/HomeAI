@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cultural memory — Home AI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link href="https://unpkg.com/tabulator-tables@5.5.4/dist/css/tabulator.min.css" rel="stylesheet">
+<link href="/static/css/tables.css" rel="stylesheet">
+<script src="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: radial-gradient(ellipse at top, #0f172a, #020617 60%); min-height: 100vh; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
+  .muted { color: #94a3b8; }
+  .chip { background: rgba(148,163,184,0.15); border-radius: 9999px; padding: 1px 8px; font-size: 11px; }
+</style>
+</head>
+<body class="text-slate-100">
+<div x-data="memoryPage()" x-init="boot()" class="max-w-7xl mx-auto p-4 md:p-6 space-y-5">
+
+  <header class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">Cultural memory</h1>
+      <p class="text-sm muted">Everyone you correspond with — searchable directory with distilled dossiers.</p>
+    </div>
+    <a href="/" class="text-xs muted hover:text-slate-200">← Mission Control</a>
+  </header>
+
+  <section class="glass rounded-xl p-3 md:p-4 space-y-3">
+    <div class="flex flex-wrap items-center gap-3">
+      <input type="text" x-model="q" @input.debounce.300ms="load()" placeholder="Search name or domain…"
+             class="bg-slate-900/60 border border-slate-700 rounded px-3 py-1.5 text-sm w-64">
+      <label class="text-xs muted flex items-center gap-1"><input type="checkbox" x-model="hasSpend" @change="load()"> has spend</label>
+      <label class="text-xs muted flex items-center gap-1"><input type="checkbox" x-model="watchlist" @change="load()"> watchlist</label>
+      <label class="text-xs muted flex items-center gap-1"><input type="checkbox" x-model="includeAutomated" @change="load()"> show automated</label>
+      <span class="text-xs muted" x-text="`${n} shown`"></span>
+    </div>
+    <div id="cp-table"></div>
+  </section>
+
+  <!-- Dossier drawer -->
+  <section x-show="selected" class="glass rounded-xl p-4 md:p-5 space-y-4">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <h2 class="text-xl font-semibold" x-text="selected?.counterparty?.display_name"></h2>
+        <p class="text-xs muted" x-text="`${selected?.counterparty?.kind} · ${selected?.counterparty?.domain || ''} · ${selected?.counterparty?.email_count} emails`"></p>
+      </div>
+      <div class="flex gap-2">
+        <button @click="distil()" :disabled="distilling"
+                class="text-xs bg-indigo-600/80 hover:bg-indigo-500 rounded px-3 py-1.5 disabled:opacity-50"
+                x-text="distilling ? 'Distilling…' : (selected?.dossier ? 'Refresh' : 'Distil now')"></button>
+        <button @click="selected=null" class="text-xs muted hover:text-slate-200">✕</button>
+      </div>
+    </div>
+
+    <template x-if="selected?.dossier">
+      <div class="space-y-4">
+        <div>
+          <h3 class="text-sm font-medium muted mb-1">Summary</h3>
+          <p class="text-sm whitespace-pre-wrap" x-text="selected.dossier.summary"></p>
+        </div>
+        <div class="grid md:grid-cols-2 gap-4">
+          <div>
+            <h3 class="text-sm font-medium muted mb-1">Financials</h3>
+            <p class="text-sm" x-text="fmtFin(selected.dossier.financials)"></p>
+          </div>
+          <div x-show="(selected.dossier.people||[]).length">
+            <h3 class="text-sm font-medium muted mb-1">People</h3>
+            <ul class="text-sm space-y-0.5">
+              <template x-for="p in (selected.dossier.people||[])" :key="p.email||p.name">
+                <li><span x-text="p.name"></span> <span class="muted" x-text="p.role ? '· '+p.role : ''"></span></li>
+              </template>
+            </ul>
+          </div>
+        </div>
+        <div x-show="(selected.dossier.open_threads||[]).length">
+          <h3 class="text-sm font-medium muted mb-1">Open threads</h3>
+          <ul class="text-sm space-y-0.5">
+            <template x-for="t in (selected.dossier.open_threads||[])" :key="t.email_id">
+              <li><span x-text="t.subject"></span> <span class="chip" x-text="t.status"></span></li>
+            </template>
+          </ul>
+        </div>
+        <div x-show="(selected.dossier.citations||[]).length">
+          <h3 class="text-sm font-medium muted mb-1" x-text="`Citations (${selected.dossier.citations.length} emails)`"></h3>
+          <div class="flex flex-wrap gap-1">
+            <template x-for="cid in selected.dossier.citations" :key="cid">
+              <span class="chip" x-text="'email #'+cid"></span>
+            </template>
+          </div>
+        </div>
+      </div>
+    </template>
+    <p x-show="selected && !selected.dossier" class="text-sm muted">No dossier yet — click “Distil now”.</p>
+  </section>
+</div>
+
+<script>
+function memoryPage() {
+  return {
+    q: '', hasSpend: false, watchlist: false, includeAutomated: false,
+    n: 0, table: null, selected: null, distilling: false,
+    async boot() {
+      this.table = new Tabulator('#cp-table', {
+        layout: 'fitColumns', height: '55vh', pagination: true, paginationSize: 25,
+        placeholder: 'No counterparties match.',
+        columns: [
+          { title:'Name', field:'display_name', widthGrow:3 },
+          { title:'Domain', field:'domain', widthGrow:2,
+            formatter: c => `<span class="muted">${c.getValue()||''}</span>` },
+          { title:'Emails', field:'email_count', width:90, hozAlign:'right' },
+          { title:'Spend', field:'linked_vendor', width:90, hozAlign:'center',
+            formatter: c => c.getValue() ? '£' : '' },
+          { title:'Dossier', field:'has_dossier', width:90, hozAlign:'center',
+            formatter: c => c.getValue() ? '<span class="pct-good">✓</span>' : '' },
+          { title:'Signal', field:'signal_score', width:90, hozAlign:'right',
+            formatter: c => Number(c.getValue()||0).toFixed(1) },
+        ],
+      });
+      this.table.on('rowClick', (e, row) => this.open(row.getData().id));
+      this.load();
+    },
+    async load() {
+      const p = new URLSearchParams({
+        q: this.q, has_spend: this.hasSpend, watchlist: this.watchlist,
+        include_automated: this.includeAutomated, limit: 500,
+      });
+      const r = await fetch('/api/memory/counterparties?' + p, { headers: { 'X-Realm': 'owner' } }).then(r => r.json());
+      this.n = r.n || 0;
+      this.table.setData(r.rows || []);
+    },
+    async open(id) {
+      this.selected = await fetch('/api/memory/counterparty/' + id, { headers: { 'X-Realm': 'owner' } }).then(r => r.json());
+    },
+    async distil() {
+      if (!this.selected) return;
+      this.distilling = true;
+      try {
+        await fetch('/api/memory/dossier/' + this.selected.counterparty.id + '?refresh=true',
+                    { method: 'POST', headers: { 'X-Realm': 'owner' } });
+        await this.open(this.selected.counterparty.id);
+        this.load();
+      } finally { this.distilling = false; }
+    },
+    fmtFin(f) {
+      if (!f || f.total_invoiced == null) return 'No invoices on file.';
+      const n = Number(f.total_invoiced).toLocaleString('en-GB', { minimumFractionDigits: 2 });
+      return `£${n} across ${f.n_invoices} invoices` + (f.last_invoice_date ? ` · last ${String(f.last_invoice_date).slice(0,10)}` : '');
+    },
+  };
+}
+</script>
+</body>
+</html>

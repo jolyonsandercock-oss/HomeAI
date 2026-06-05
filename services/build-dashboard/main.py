@@ -3797,6 +3797,11 @@ async def documents_page():
     return FileResponse(str(STATIC / "documents.html"))
 
 
+@app.get("/app/memory")
+async def memory_page():
+    return FileResponse(str(STATIC / "memory.html"))
+
+
 @app.post("/api/documents/ingest-from-paperless")
 async def api_documents_ingest_from_paperless(payload: dict = Body(...)):
     """U70 T1: Paperless post-consume webhook.
