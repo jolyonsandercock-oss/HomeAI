@@ -17,6 +17,7 @@ readonly N8N_TOKEN_TTL="24h"
 # Secrets are unset on any exit path, including SIGINT/SIGTERM.
 cleanup_secrets() {
   unset POSTGRES_PASSWORD N8N_DB_PASSWORD METABASE_APP_PASSWORD \
+        PAPERLESS_DB_PASSWORD \
         REDIS_PASSWORD GRAFANA_ADMIN_PASSWORD OPEN_WEBUI_SECRET \
         PAYLOAD_HMAC_KEY ANTHROPIC_API_KEY \
         VAULT_N8N_TOKEN VAULT_TOKEN ROLES_JSON
@@ -84,8 +85,12 @@ unseal_vault() {
 # 3. Authenticate
 # -------------------------------------------------------------------
 prompt_token() {
-  read -rs -p "  vault token: " VAULT_TOKEN
-  printf '\n'
+  # Reuse a token already supplied in the environment (e.g. when chained from
+  # a helper script) so it is only typed once; otherwise prompt interactively.
+  if [[ -z "${VAULT_TOKEN:-}" ]]; then
+    read -rs -p "  vault token: " VAULT_TOKEN
+    printf '\n'
+  fi
   export VAULT_TOKEN
   if ! docker exec -e VAULT_TOKEN="$VAULT_TOKEN" "$VAULT_CONTAINER" \
        vault token lookup >/dev/null 2>&1; then
@@ -123,14 +128,21 @@ fetch_secrets() {
                vault kv get -format=json secret/postgres-roles)
   N8N_DB_PASSWORD=$(printf '%s' "$ROLES_JSON" | jq -er '.data.data.homeai_pipeline') \
     || { err "secret/postgres-roles missing 'homeai_pipeline'"; exit 1; }
+  # Per-service role passwords are NON-CRITICAL: a missing one must only degrade
+  # its own service, never abort startup. (Hard-failing on metabase_app is what
+  # downed the whole box on 2026-06-05.) Warn, leave empty, carry on — the owning
+  # container will crash-loop in isolation and the fix script re-mints it.
   METABASE_APP_PASSWORD=$(printf '%s' "$ROLES_JSON" | jq -er '.data.data.metabase_app') \
-    || { err "secret/postgres-roles missing 'metabase_app'"; exit 1; }
+    || { err "secret/postgres-roles missing 'metabase_app' — metabase will not start (run scripts/fix-metabase-role-pw.sh)"; METABASE_APP_PASSWORD=""; }
+  PAPERLESS_DB_PASSWORD=$(printf '%s' "$ROLES_JSON" | jq -er '.data.data.paperless') \
+    || { err "secret/postgres-roles missing 'paperless' — paperless will not start (run scripts/fix-paperless-role-pw.sh)"; PAPERLESS_DB_PASSWORD=""; }
   ROLES_JSON=""
 
   export POSTGRES_PASSWORD N8N_DB_PASSWORD METABASE_APP_PASSWORD \
+         PAPERLESS_DB_PASSWORD \
          REDIS_PASSWORD GRAFANA_ADMIN_PASSWORD OPEN_WEBUI_SECRET \
          PAYLOAD_HMAC_KEY ANTHROPIC_API_KEY
-  ok "8 infrastructure secrets fetched"
+  ok "9 infrastructure secrets fetched"
 }
 
 # -------------------------------------------------------------------
