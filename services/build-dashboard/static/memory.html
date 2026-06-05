@@ -15,6 +15,7 @@
   .glass { background: rgba(15,23,42,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
   .muted { color: #94a3b8; }
   .chip { background: rgba(148,163,184,0.15); border-radius: 9999px; padding: 1px 8px; font-size: 11px; }
+  .pct-good { color: #86efac; }
 </style>
 </head>
 <body class="text-slate-100">
@@ -127,19 +128,19 @@ function memoryPage() {
         q: this.q, has_spend: this.hasSpend, watchlist: this.watchlist,
         include_automated: this.includeAutomated, limit: 500,
       });
-      const r = await fetch('/api/memory/counterparties?' + p, { headers: { 'X-Realm': 'owner' } }).then(r => r.json());
+      const r = await fetch('/api/memory/counterparties?' + p).then(r => r.json());
       this.n = r.n || 0;
       this.table.setData(r.rows || []);
     },
     async open(id) {
-      this.selected = await fetch('/api/memory/counterparty/' + id, { headers: { 'X-Realm': 'owner' } }).then(r => r.json());
+      this.selected = await fetch('/api/memory/counterparty/' + id).then(r => r.json());
     },
     async distil() {
       if (!this.selected) return;
       this.distilling = true;
       try {
         await fetch('/api/memory/dossier/' + this.selected.counterparty.id + '?refresh=true',
-                    { method: 'POST', headers: { 'X-Realm': 'owner' } });
+                    { method: 'POST' });
         await this.open(this.selected.counterparty.id);
         this.load();
       } finally { this.distilling = false; }
