@@ -21,7 +21,7 @@ readonly ROLE="paperless"
 readonly KV_PATH="secret/postgres-roles"
 readonly COMPOSE="/home_ai/docker-compose.yml"
 
-cleanup() { unset VAULT_TOKEN NEWPW; }
+cleanup() { unset VAULT_TOKEN NEWPW REDIS_PASSWORD; }
 trap cleanup EXIT INT TERM
 
 err()  { printf '\033[31m✗\033[0m %s\n' "$*" >&2; }
@@ -67,11 +67,19 @@ docker exec -e PGPASSWORD="$NEWPW" "$PG_CONTAINER" \
   && ok "verified: $ROLE authenticates with the new password" \
   || { err "role did not authenticate over TCP — aborting before recreate"; exit 1; }
 
-# 7. Recreate paperless with the password injected from this shell
-export PAPERLESS_DB_PASSWORD="$NEWPW"
+# 7. Recreate paperless with ALL the runtime secrets it needs injected from this
+#    shell. A targeted --no-deps recreate does NOT inherit start.sh's exported
+#    secrets, so besides the DB password paperless also needs REDIS_PASSWORD
+#    (its broker URL is redis://:${REDIS_PASSWORD}@redis:6379/2 and redis requires
+#    auth) — without it paperless starts but every task dies "Authentication
+#    required". .env supplies PAPERLESS_SECRET_KEY / PAPERLESS_ADMIN_PASSWORD.
+REDIS_PASSWORD=$(docker exec -e VAULT_TOKEN="$VAULT_TOKEN" "$VAULT_CONTAINER" \
+  vault kv get -field=password secret/redis 2>/dev/null) \
+  || { err "could not fetch secret/redis password from Vault"; exit 1; }
+export PAPERLESS_DB_PASSWORD="$NEWPW" REDIS_PASSWORD
 docker compose -f "$COMPOSE" up -d --force-recreate --no-deps paperless
 ok "paperless recreated"
-unset PAPERLESS_DB_PASSWORD
+unset PAPERLESS_DB_PASSWORD REDIS_PASSWORD
 
 # 8. Confirm it stops crash-looping
 info "waiting for paperless to settle (up to 90s)..."
