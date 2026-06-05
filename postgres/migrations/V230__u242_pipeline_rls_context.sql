@@ -1,0 +1,31 @@
+-- V230 — U242: restore Master Router (homeai_pipeline) ingestion under RLS (proper fix).
+--
+-- Root cause (diagnosed 2026-06-05): the superuser->service-role migration enabled
+-- RLS on emails (and many other tables) and pointed n8n at the non-superuser
+-- `homeai_pipeline` role, but never gave that role the entity/realm SESSION CONTEXT
+-- the policies' WITH CHECK requires. So every pipeline INSERT (notably the emails
+-- ingest) was RLS-rejected with SQLSTATE 42501 "new row violates row-level security
+-- policy", failing silently (n8n continue-on-fail) -> events left failed/stuck ->
+-- recover_stale_leases_v3 dead-lettered them -> DeadLetterFlood auto-pause. Email
+-- ingestion was dead from ~2026-06-04 07:00. The 2026-06-05 compose revert restored
+-- the postgres superuser for other services but missed n8n (its credential lives in
+-- n8n's own encrypted store), so the router stayed on the crippled role.
+--
+-- Proper fix (RLS-NATIVE, not BYPASSRLS): homeai_pipeline is a TRUSTED multi-entity
+-- ingestion writer. entity_isolation's `app.current_entity='all'` branch and
+-- realm_isolation's `app.current_realm='owner'` branch exist for exactly this kind of
+-- trusted operator. Set them as ROLE DEFAULTS so every pipeline connection writes
+-- THROUGH the RLS policies via their designed escapes (a table with a stricter,
+-- escape-less policy would still constrain the role — unlike BYPASSRLS). This covers
+-- every pipeline write in one place, with no fragile per-node n8n surgery.
+--
+-- Reversible: ALTER ROLE homeai_pipeline RESET app.current_entity;  (and app.current_realm)
+-- Note: ALTER ROLE ... SET applies on the next connection, so n8n must reconnect
+-- (restart) to pick it up.
+--
+-- This is the interim, correct restoration. The full least-privilege per-service-role
+-- migration (scoped grants, per-write home_ai.set_realm context) remains the separate
+-- #1 security TODO — see .claude/decisions/2026-06-05-revert-broken-superuser-migration.md.
+
+ALTER ROLE homeai_pipeline SET app.current_entity = 'all';
+ALTER ROLE homeai_pipeline SET app.current_realm  = 'owner';
