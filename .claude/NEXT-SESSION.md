@@ -71,9 +71,10 @@
      else `/api/research/ask` breaks under RLS.
    - Test by recreating ONE service first (`docker logs … | grep 'permission denied'`), not all.
    Audit helper: `scripts/u87-audit-superuser-usage.sh`. Review: `.claude/decisions/2026-06-04-security-review.md`.
-2. **Tune email RAG retrieval quality** (build-dashboard `/api/research/ask`):
-   expand stopwords (account/statement/invoice/ltd…), prefer rarer terms, raise
-   FTS candidate limit, rebuild. Invoice queries already excellent. (V225–227 applied.)
+2. **Cultural-memory follow-ups → see `.claude/sprints/U242-cultural-memory-followups.md`**
+   (the resume sprint). T1 = email RAG retrieval tuning (stopwords / rarer terms / bigger
+   FTS candidate set, one build-dashboard rebuild) — start there. T2 = distilled memory
+   (Stage 4). T3 = backup exit-3. Invoice queries already excellent; V225–227 applied.
 
 ## U240 P3 — root causes the stopgaps still mask
 - **noOp-skip mark-processed bug**: gmail-ingest doesn't mark its `email.received`
