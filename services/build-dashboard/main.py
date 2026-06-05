@@ -2850,6 +2850,19 @@ async def api_memory_counterparties(
     return {"n": len(rows), "rows": [_isoify(dict(r)) for r in rows]}
 
 
+@app.get("/api/memory/counterparty/{cp_id}")
+async def api_memory_counterparty(cp_id: int):
+    """Owner-only: counterparty + its cached dossier (dossier null if not distilled)."""
+    if _current_realm.get() != "owner":
+        return JSONResponse({"error": "cultural memory is owner-only"}, status_code=403)
+    cp = await db_all("SELECT * FROM counterparties WHERE id=$1", cp_id)
+    if not cp:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    dos = await db_all("SELECT * FROM counterparty_dossier WHERE counterparty_id=$1", cp_id)
+    dossier = _decode_dossier(_isoify(dict(dos[0]))) if dos else None
+    return {"counterparty": _isoify(dict(cp[0])), "dossier": dossier}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # U62 T1 — calendar
 # ─────────────────────────────────────────────────────────────────────────────
