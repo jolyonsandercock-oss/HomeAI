@@ -1397,6 +1397,17 @@ async def breakfast_submit(request: Request):
         return JSONResponse({"error": "invalid token"}, status_code=400)
     booking_id, service_date = verified
 
+    # H4 (review A1): the HMAC token carries no expiry, so a leaked link could be
+    # replayed indefinitely. Reject a token whose service_date is already stale
+    # (more than 2 days past) — a genuine guest orders the day before / morning of.
+    from datetime import date as _date
+    try:
+        _svc = _date.fromisoformat(service_date)
+    except ValueError:
+        return JSONResponse({"error": "invalid token"}, status_code=400)
+    if (_date.today() - _svc).days > 2:
+        return JSONResponse({"error": "token expired"}, status_code=400)
+
     # Form may carry per-guest fields g1_dish / g1_drink / g1_notes,
     # g2_dish / g2_drink / g2_notes, etc.
     rows = []
