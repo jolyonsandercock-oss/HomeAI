@@ -55,7 +55,7 @@ Write 2-3 sentences calling out: (a) the headline number, (b) the WoW comparison
 
 # Get Sonnet narrative
 NARRATIVE=$(docker exec -e ANTHROPIC_API_KEY="$ANTHROPIC_KEY" homeai-playwright python3 -c "
-import urllib.request, json, os
+import urllib.request, json, os, time
 prompt = '''$PROMPT'''
 req = urllib.request.Request('https://api.anthropic.com/v1/messages',
     data=json.dumps({
@@ -68,8 +68,14 @@ req = urllib.request.Request('https://api.anthropic.com/v1/messages',
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json'
     })
-r = urllib.request.urlopen(req, timeout=30)
-o = json.loads(r.read())
+o = None
+for _a in range(6):
+    try:
+        o = json.loads(urllib.request.urlopen(req, timeout=30).read()); break
+    except Exception as e:
+        if _a < 5:
+            time.sleep(min(60, 2 * (2 ** _a))); continue
+        raise
 print(o['content'][0]['text'])
 ")
 

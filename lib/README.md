@@ -45,9 +45,21 @@ text = resp["content"][0]["text"]          # returns a plain dict (model_dump)
 ```
 Async: `resp = await claude_messages_async({...})`.
 
-## Raw-HTTP call sites still to retrofit (incremental)
+## Raw-HTTP call sites — retrofit status (U245, 2026-06-06)
 
-These hit `api.anthropic.com` directly with no retry (counts = 529s logged):
-`u61-line-items` (33, httpx async), `u47e-uncertain-resolve` (22), `u120`, `u159`,
-`u66-telegram-bot` (separate container), `u113`, `u151b`, `u161`, `u163`, `u216`.
-Retrofit each to `claude_messages[_async]` (or SDK `max_retries=8`) per above.
+All retrofitted (syntax-verified; behaviour verified on next cron run):
+- `u61-line-items` (33×529, bot-responder) → `claude_call.claude_messages_async`.
+- `u47e-uncertain-resolve` (22, playwright) → inline stdlib retry.
+- `u120-extract-guest-contact` (host) → inline retry.
+- `u113-kitchen-specials` (bot-responder) → inline retry.
+- `u159-revenue-email` (playwright `-c`) → inline retry.
+- `u163-reviews-from-email` (host) → inline retry (was catch-and-drop).
+- `u216-mortgage-reocr-wrapper` (playwright `-c` probe) → probe retries before skip.
+- `u151b-reocr-vision` — already hardened (U216 retry loop); no change.
+- `u161-vision-ocr-worker` — delegates to u151b; no own Anthropic call.
+
+`u66-telegram-bot` errors are transient long-poll network blips (ConnectError to
+Telegram), not 529s — log-noise, not data loss; left as-is.
+
+Pattern: bot-responder scripts → `import claude_call`; playwright/host scripts →
+inline stdlib retry on 408/409/429/5xx/529 + transient network, exp backoff.

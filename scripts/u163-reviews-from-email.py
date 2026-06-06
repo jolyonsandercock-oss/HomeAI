@@ -22,8 +22,10 @@ import html
 import json
 import os
 import re
+import time
 import urllib.parse
 import urllib.request
+import urllib.error
 
 
 PG_DSN            = os.environ["PG_DSN"]
@@ -106,9 +108,23 @@ Return ONLY the JSON, no preamble.
             "content-type":      "application/json",
         }
     )
+    # U245: retry/cooldown on 529/overloaded + transient network before giving up.
+    resp = None
+    for _att in range(6):
+        try:
+            resp = json.loads(urllib.request.urlopen(req, timeout=30).read())
+            break
+        except urllib.error.HTTPError as e:
+            if e.code in (408, 409, 429, 500, 502, 503, 529) and _att < 5:
+                time.sleep(min(60, 2 * (2 ** _att))); continue
+            print(f"    haiku err: {e}")
+            return None
+        except Exception as e:
+            if _att < 5:
+                time.sleep(min(60, 2 * (2 ** _att))); continue
+            print(f"    haiku err: {e}")
+            return None
     try:
-        r = urllib.request.urlopen(req, timeout=30)
-        resp = json.loads(r.read())
         text = resp.get("content", [{}])[0].get("text", "")
         m = re.search(r"\{[\s\S]*\}", text)
         if not m:

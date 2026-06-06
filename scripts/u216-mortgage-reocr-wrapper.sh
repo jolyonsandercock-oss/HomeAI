@@ -24,15 +24,18 @@ fi
 
 # Quick API liveness check — bail without burning the long script if 529-storm
 HTTP_PROBE=$(docker exec -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" homeai-playwright python3 -c "
-import urllib.request, json, os
+import urllib.request, json, os, time
 req = urllib.request.Request('https://api.anthropic.com/v1/messages',
     headers={'x-api-key': os.environ['ANTHROPIC_API_KEY'], 'anthropic-version': '2023-06-01', 'content-type':'application/json'},
     data=json.dumps({'model':'claude-haiku-4-5-20251001','max_tokens':10,'messages':[{'role':'user','content':'hi'}]}).encode())
-try:
-    r = urllib.request.urlopen(req, timeout=15)
-    print(r.status)
-except Exception as e:
-    print('ERR', e)
+st = 'ERR'
+for a in range(4):
+    try:
+        st = str(urllib.request.urlopen(req, timeout=15).status); break
+    except Exception as e:
+        st = 'ERR %s' % e
+        time.sleep(5 * (a + 1))
+print(st)
 " 2>&1 | tail -1)
 
 if [[ "$HTTP_PROBE" != "200" ]]; then

@@ -16,7 +16,7 @@ MODE="${1:-prompt}"  # 'prompt' = send 10am prompt; 'poll' = check for reply
 LIVE="${KITCHEN_LIVE:-0}"
 
 docker exec -i -e VAULT_TOKEN="$VAULT_TOKEN" -e LIVE="$LIVE" -e MODE="$MODE" homeai-bot-responder python3 -u <<'PYEOF'
-import os, json, urllib.request, asyncio, asyncpg
+import os, json, time, urllib.request, urllib.error, asyncio, asyncpg
 from datetime import date
 
 VAULT_TOKEN = os.environ["VAULT_TOKEN"]
@@ -96,7 +96,18 @@ def haiku_parse(reply_text, anth_key):
         data=json.dumps(payload).encode(),
         headers={"x-api-key":anth_key,"anthropic-version":"2023-06-01",
                  "content-type":"application/json"}, method="POST")
-    j = json.loads(urllib.request.urlopen(r, timeout=60).read())
+    j = None  # U245: retry/cooldown on 529/overloaded + transient network
+    for _att in range(6):
+        try:
+            j = json.loads(urllib.request.urlopen(r, timeout=60).read()); break
+        except urllib.error.HTTPError as e:
+            if e.code in (408, 409, 429, 500, 502, 503, 529) and _att < 5:
+                time.sleep(min(60, 2 * (2 ** _att))); continue
+            raise
+        except (urllib.error.URLError, TimeoutError):
+            if _att < 5:
+                time.sleep(min(60, 2 * (2 ** _att))); continue
+            raise
     for b in j.get("content") or []:
         if b.get("type") == "tool_use":
             return b["input"], j.get("usage")
