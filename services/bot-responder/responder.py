@@ -304,7 +304,7 @@ async def main():
 
         # Anthropic call loop with tool use
         api_key = vault_get("anthropic")["api_key"]
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, max_retries=8, timeout=120)
 
         # System prompt + tool list are the same every call → mark them as
         # ephemeral cache so Anthropic re-uses the prefix across queries.

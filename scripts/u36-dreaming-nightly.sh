@@ -80,7 +80,7 @@ SCHEMA_VERSION = "dreaming-proposals.schema.json@U38"
 
 async def main():
     api_key = vault_get("anthropic")["api_key"]
-    client  = anthropic.Anthropic(api_key=api_key)
+    client  = anthropic.Anthropic(api_key=api_key, max_retries=8, timeout=120)
     conn = await asyncpg.connect(PG_DSN)
     # R6: Dreaming mines cross-realm patterns in audit_log → OWNER scope.
     await conn.execute("SET app.current_realm = 'owner'")

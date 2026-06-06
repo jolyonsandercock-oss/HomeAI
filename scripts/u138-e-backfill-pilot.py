@@ -126,7 +126,7 @@ async def amain():
     if not key:
         print("FAIL: no anthropic key", file=sys.stderr)
         return 1
-    client = anthropic.Anthropic(api_key=key)
+    client = anthropic.Anthropic(api_key=key, max_retries=8, timeout=120)
     http = httpx.AsyncClient()
 
     conn = await asyncpg.connect(dsn)

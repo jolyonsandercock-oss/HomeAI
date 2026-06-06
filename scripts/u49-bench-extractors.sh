@@ -102,7 +102,7 @@ async def run_qwen(text):
         return {"error": str(e), "raw": out[:300], "duration_s": dur}
 
 def run_anthropic(model, text):
-    client = anthropic.Anthropic(api_key=vault_get("anthropic")["api_key"])
+    client = anthropic.Anthropic(api_key=vault_get("anthropic")["api_key"], max_retries=8, timeout=120)
     t0 = time.time()
     tool = {
       "name": "extract_lines",

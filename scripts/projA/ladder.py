@@ -309,7 +309,7 @@ async def main():
         req = urllib.request.Request(f"http://vault:8200/v1/secret/data/{p}",
                                       headers={"X-Vault-Token": os.environ["VAULT_TOKEN"]})
         return json.loads(urllib.request.urlopen(req, timeout=5).read())["data"]["data"]
-    client = anthropic.Anthropic(api_key=vault("anthropic")["api_key"])
+    client = anthropic.Anthropic(api_key=vault("anthropic")["api_key"], max_retries=8, timeout=120)
     conn = await asyncpg.connect(PG_DSN)
     lim = "" if args.limit == 0 else f"LIMIT {args.limit}"
     rows = await conn.fetch(f"""

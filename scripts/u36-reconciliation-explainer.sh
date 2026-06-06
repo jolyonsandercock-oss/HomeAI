@@ -68,7 +68,7 @@ SCHEMA_VERSION = "reconciliation-explainer.schema.json@U38"
 
 async def main():
     api_key = vault_get("anthropic")["api_key"]
-    client  = anthropic.Anthropic(api_key=api_key)
+    client  = anthropic.Anthropic(api_key=api_key, max_retries=8, timeout=120)
     conn = await asyncpg.connect(PG_DSN)
     await conn.execute("SET app.current_entity='all'")
     # R6: reconciliation flags can be cross-realm — explainer runs as OWNER.

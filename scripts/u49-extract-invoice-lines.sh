@@ -35,7 +35,7 @@ def vault_get(p):
                                 headers={"X-Vault-Token": VAULT_TOKEN})
     return json.loads(urllib.request.urlopen(r, timeout=5).read())["data"]["data"]
 
-CLIENT = anthropic.Anthropic(api_key=vault_get("anthropic")["api_key"])
+CLIENT = anthropic.Anthropic(api_key=vault_get("anthropic")["api_key"], max_retries=8, timeout=120)
 
 SYSTEM = [{
   "type": "text",

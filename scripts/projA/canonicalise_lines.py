@@ -79,7 +79,7 @@ async def main():
     ap.add_argument("--max-cloud-usd", type=float, default=5.0)
     args = ap.parse_args()
     import asyncpg, anthropic
-    client = anthropic.Anthropic(api_key=vault("anthropic")["api_key"])
+    client = anthropic.Anthropic(api_key=vault("anthropic")["api_key"], max_retries=8, timeout=120)
     conn = await asyncpg.connect(PG_DSN)
     await conn.execute("SET app.current_realm='owner'")
 

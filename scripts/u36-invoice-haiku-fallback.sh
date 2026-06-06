@@ -108,7 +108,7 @@ def parse_date(s):
 
 async def main():
     api_key = vault_get("anthropic")["api_key"]
-    client  = anthropic.Anthropic(api_key=api_key)
+    client  = anthropic.Anthropic(api_key=api_key, max_retries=8, timeout=120)
     conn = await asyncpg.connect(PG_DSN)
     await conn.execute("SET app.current_entity='1'")
     # R6: invoice rows are entity_id=1 — WORK realm only.
