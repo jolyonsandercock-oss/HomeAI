@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-06-05T20:32:03.446344Z",
+  "sprints": [
+    "all"
+  ],
+  "backfill_budget_usd": 50.0,
+  "backfill_batch": 20,
+  "category_map": {
+    "wet_purchase": "Beverage",
+    "dry_purchase": "Food",
+    "software": "Software",
+    "repairs_maintenance": "Maintenance",
+    "utilities": "Utilities",
+    "other": "Other"
+  },
+  "token_rotated": false,
+  "cron_activated": false,
+  "guardrails": {
+    "no_pipeline_activation": true,
+    "no_n8n_workflow_surgery": true,
+    "stop_on_unrecovered_error": true,
+    "owner_realm_only": true
+  }
+}
