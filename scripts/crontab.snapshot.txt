@@ -1,5 +1,4 @@
-# joly crontab snapshot — regenerated 2026-06-06T17:35Z (cron rot fix + watchdog)
-# 32 jobs incl. restored u62/u68 + cron-health-check watchdog
+# joly crontab snapshot — 2026-06-06T20:45Z
 30 7 * * * docker exec homeai-bot-responder python3 /app/weather-sync.py >> /home_ai/logs/weather-sync.log 2>&1
 20 * * * * cd /home_ai && bash scripts/u35-invoice-pdf-extract.sh 200 >> /home_ai/logs/u35-extract.log 2>&1
 # TouchOffice realtime scrape — every 15 min (overlap guard prevents concurrent runs)
@@ -34,3 +33,4 @@
 */15 * * * * cd /home_ai && bash scripts/u62-paperless-sync.sh >> /home_ai/logs/u62-paperless-sync.log 2>&1
 */5 * * * * cd /home_ai && bash scripts/u68-doc-classify.sh >> /home_ai/logs/u68-doc-classify.log 2>&1
 */30 * * * * cd /home_ai && python3 scripts/cron-health-check.py >> /home_ai/logs/cron-health-check.log 2>&1
+0 7 3 * * cd /home_ai && bash scripts/u268-britishgas-portal.sh >> /home_ai/logs/u268-britishgas.log 2>&1
