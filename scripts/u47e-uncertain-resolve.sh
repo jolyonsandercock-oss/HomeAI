@@ -70,8 +70,21 @@ def haiku(api_key, user_msg):
         data=json.dumps(body).encode(),
         headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
                  "Content-Type": "application/json"})
-    r = urllib.request.urlopen(req, timeout=30)
-    out = json.loads(r.read())
+    # U245: retry/cooldown on 529/overloaded + transient network (runs in
+    # homeai-playwright where the claude_call helper isn't available; inline).
+    out = None
+    for _att in range(6):
+        try:
+            out = json.loads(urllib.request.urlopen(req, timeout=30).read())
+            break
+        except urllib.error.HTTPError as e:
+            if e.code in (408, 409, 429, 500, 502, 503, 529) and _att < 5:
+                time.sleep(min(60, 2 * (2 ** _att))); continue
+            raise
+        except (urllib.error.URLError, TimeoutError):
+            if _att < 5:
+                time.sleep(min(60, 2 * (2 ** _att))); continue
+            raise
     text = out["content"][0]["text"].strip()
     # strip markdown fences if Haiku wrapped it
     if text.startswith("```"):

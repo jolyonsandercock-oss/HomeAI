@@ -31,7 +31,7 @@ docker exec -i -e PG_DSN="$PG_DSN" -e ANTHROPIC_API_KEY="$ANTH_KEY" \
     homeai-bot-responder python -u <<'PYEOF'
 import os, json, asyncio, hashlib, re
 from pathlib import Path
-import asyncpg, httpx
+import asyncpg, httpx, claude_call
 
 PG_DSN     = os.environ["PG_DSN"]
 ANTH_KEY   = os.environ["ANTHROPIC_API_KEY"]
@@ -118,16 +118,13 @@ async def call_model(client, model, text):
         "tool_choice": {"type": "tool", "name": "record_line_items"},
         "messages": [{"role": "user", "content": f"Invoice text:\n\n{text}"}],
     }
-    r = await client.post("https://api.anthropic.com/v1/messages",
-                          headers={
-                              "x-api-key": ANTH_KEY,
-                              "anthropic-version": "2023-06-01",
-                              "content-type": "application/json",
-                          },
-                          json=payload)
-    if r.status_code != 200:
-        return None, f"HTTP {r.status_code}: {r.text[:200]}", None
-    j = r.json()
+    # U245: retry/cooldown on 529/overloaded via shared helper (baked into
+    # bot-responder image as /app/claude_call.py). client is still used for the
+    # pdfplumber call in extract_pdf_text; the Anthropic call goes via the helper.
+    try:
+        j = await claude_call.claude_messages_async(payload, api_key=ANTH_KEY)
+    except Exception as e:
+        return None, f"claude error: {str(e)[:200]}", None
     for b in j.get("content") or []:
         if b.get("type") == "tool_use":
             return b["input"], None, j.get("usage")
