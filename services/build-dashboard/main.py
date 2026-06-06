@@ -109,18 +109,47 @@ from contextvars import ContextVar
 _current_realm: ContextVar[str] = ContextVar("current_realm", default="owner")
 REALM_ENFORCE = os.environ.get("REALM_ENFORCE", "0") == "1"
 
+# H5 (Path B — RLS service-role enforcement). The service connects as the
+# `postgres` superuser, which BYPASSES RLS. When RLS_ENFORCE_SET_ROLE=1 the
+# shared helpers drop to a non-superuser role for the transaction via
+# `SET LOCAL ROLE` (transaction-scoped, so a pooled connection never leaks the
+# de-privileged role), making the realm_isolation / entity_isolation policies
+# actually apply. CRITICAL: `SET ROLE` does NOT inherit the role's
+# `ALTER ROLE ... SET` defaults, and entity_isolation is PERMISSIVE — so without
+# an explicit `app.current_entity` it fails closed and silently returns ZERO
+# rows. The helper therefore always sets both GUCs (entity defaults to 'all').
+# Flag default OFF = byte-for-byte the pre-H5 behaviour. Reversible: flag off.
+import re as _re
+RLS_ENFORCE_SET_ROLE = os.environ.get("RLS_ENFORCE_SET_ROLE", "0") == "1"
+RLS_SET_ROLE_NAME = os.environ.get("RLS_SET_ROLE_NAME", "homeai_pipeline")
+if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", RLS_SET_ROLE_NAME):
+    raise RuntimeError(f"unsafe RLS_SET_ROLE_NAME: {RLS_SET_ROLE_NAME!r}")
+
+async def _apply_db_context(c, entity: str | None):
+    """Set realm (+ entity) on the transaction; under RLS_ENFORCE_SET_ROLE also
+    drop superuser for the txn. Must run inside an open transaction."""
+    if RLS_ENFORCE_SET_ROLE:
+        await c.execute(f"SET LOCAL ROLE {RLS_SET_ROLE_NAME}")
+        # Without an explicit entity the permissive entity_isolation policy
+        # denies everything — default to 'all' so non-entity helpers still read.
+        await c.execute("SELECT set_config('app.current_entity', $1, true)",
+                        str(entity) if entity is not None else "all")
+    elif entity is not None:
+        await c.execute("SELECT set_config('app.current_entity', $1, true)", str(entity))
+    await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+
 async def db_one(sql: str, *args):
     p = await pool()
     async with p.acquire() as c:
         async with c.transaction():
-            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+            await _apply_db_context(c, None)
             return await c.fetchrow(sql, *args)
 
 async def db_all(sql: str, *args):
     p = await pool()
     async with p.acquire() as c:
         async with c.transaction():
-            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+            await _apply_db_context(c, None)
             return await c.fetch(sql, *args)
 
 # U84 — for endpoints that need multiple statements in one transaction
@@ -137,10 +166,7 @@ async def db_session(entity: str | None = None):
     p = await pool()
     async with p.acquire() as c:
         async with c.transaction():
-            await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
-            if entity is not None:
-                # SET LOCAL takes a literal — use set_config() so parameters work
-                await c.execute("SELECT set_config('app.current_entity', $1, true)", str(entity))
+            await _apply_db_context(c, entity)
             yield c
 
 # ─── Helpers ────────────────────────────────────────────────────
@@ -714,6 +740,51 @@ async def healthz_deep():
 
     out["status"] = overall
     return out
+
+
+@app.get("/api/healthz-rls")
+async def healthz_rls():
+    """H5 canary — proves the Path B RLS-enforcement mechanism end-to-end through
+    the live pool. Reports the effective DB role + per-realm visible row counts on
+    a realm-partitioned table, and a write (rolled back via savepoint, nothing
+    persists). When RLS_ENFORCE_SET_ROLE=1 the role must be non-super and the
+    counts must differ by realm; when 0 it runs as the superuser (counts equal =
+    RLS bypassed). Exempt from realm middleware (under /api/healthz)."""
+    out: dict[str, Any] = {
+        "rls_enforce_set_role": RLS_ENFORCE_SET_ROLE,
+        "role_name": RLS_SET_ROLE_NAME,
+    }
+    p = await pool()
+    async with p.acquire() as c:
+        async with c.transaction():
+            await _apply_db_context(c, "all")
+            out["running_as"] = await c.fetchval("SELECT current_user")
+            out["bypasses_rls"] = await c.fetchval(
+                "SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user")
+            counts: dict[str, int] = {}
+            for r in ("owner", "work", "personal"):
+                await c.execute("SELECT home_ai.set_realm($1)", r)
+                counts[r] = await c.fetchval("SELECT count(*) FROM bank_transactions")
+            out["bank_txn_visible_by_realm"] = counts
+            # Write test — savepoint so it never persists.
+            await c.execute("SELECT home_ai.set_realm('owner')")
+            try:
+                async with c.transaction():
+                    await c.execute(
+                        "INSERT INTO audit_log (pipeline, action, result, realm, created_at)"
+                        " VALUES ('h5_canary','healthz_rls_probe','probe','owner', now())")
+                    raise _RlsProbeRollback()
+            except _RlsProbeRollback:
+                out["write_ok"] = True
+    out["filters_correctly"] = (
+        out["bank_txn_visible_by_realm"]["work"] < out["bank_txn_visible_by_realm"]["owner"]
+        and out["bank_txn_visible_by_realm"]["personal"] < out["bank_txn_visible_by_realm"]["owner"]
+    ) if RLS_ENFORCE_SET_ROLE else None
+    return out
+
+
+class _RlsProbeRollback(Exception):
+    """Internal sentinel to roll back the healthz-rls write probe savepoint."""
 
 
 @app.get("/api/phases")
