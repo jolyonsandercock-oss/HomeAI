@@ -38,7 +38,7 @@ TOK=$(tr -d '[:space:]' < "$TOKEN_FILE")
 
 # Self-renew (always permitted for a renewable token; no extra privilege needed).
 if out=$(docker exec -e VAULT_TOKEN="$TOK" "$VAULT_CONTAINER" \
-           vault token renew -self -format=json 2>&1); then
+           vault token renew -format=json 2>&1); then
   ttl=$(printf '%s' "$out" | jq -r '.auth.lease_duration // empty' 2>/dev/null)
   echo "$(ts) OK renewed n8n vault token (ttl=${ttl:-?}s)" >>"$LOG"
 else
