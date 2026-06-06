@@ -10,7 +10,6 @@ export async function POST(req: NextRequest) {
   if (realm !== 'owner' && realm !== 'work') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
- NextRequest) {
   const body = await req.json();
   if (!body?.site || !body?.cashup_date || !body?.till_id) {
     return NextResponse.json({ error: 'site + cashup_date + till_id required' }, { status: 400 });

@@ -12,7 +12,6 @@ export async function POST(req: NextRequest) {
   if (realm !== 'owner' && realm !== 'work') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
- NextRequest) {
   let form: FormData;
   try { form = await req.formData(); }
   catch { return NextResponse.json({ error: "expected multipart form data" }, { status: 400 }); }

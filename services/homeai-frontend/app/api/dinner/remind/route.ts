@@ -21,7 +21,6 @@ export async function POST(req: NextRequest) {
   if (realm !== 'owner' && realm !== 'work') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
- NextRequest) {
   try {
     const body: RemindBody = await req.json();
     const { booking_id, guest_email } = body;

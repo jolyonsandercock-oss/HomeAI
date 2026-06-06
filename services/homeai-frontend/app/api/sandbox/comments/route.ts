@@ -17,7 +17,6 @@ export async function POST(req: NextRequest) {
   if (realm !== 'owner' && realm !== 'work') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
- NextRequest) {
   const body = await req.json();
   if (!body?.component_id || !body?.comment_text) {
     return NextResponse.json({ error: 'component_id + comment_text required' }, { status: 400 });

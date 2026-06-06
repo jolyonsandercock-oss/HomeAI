@@ -10,7 +10,6 @@ export async function POST(req: NextRequest) {
   if (realm !== 'owner' && realm !== 'work') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
- NextRequest) {
   let body: { purchase_id?: number; action?: string; category?: string };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: 'invalid JSON' }, { status: 400 }); }
