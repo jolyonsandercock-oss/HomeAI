@@ -209,9 +209,9 @@ async def main():
 
     jobs = [
         # (account, query, tag_overdue)
-        ('jo',    'invoice OR receipt OR bill',             False),
-        ('info',  'invoice OR receipt OR bill',             False),
-        ('admin', 'invoice OR receipt OR bill',             False),
+        ('jo',    'invoice OR receipt OR bill OR statement', False),
+        ('info',  'invoice OR receipt OR bill OR statement', False),
+        ('admin', 'invoice OR receipt OR bill OR statement', False),
         ('jo',    'overdue',                                True),
         ('info',  'overdue',                                True),
         ('admin', 'overdue',                                True),
