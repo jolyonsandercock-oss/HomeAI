@@ -52,8 +52,8 @@ async def insert_doc(conn, **kw):
             VALUES ($1, $2, $3, $4, 'active',
                     $5, $6, $7, $8,
                     $9, $10, $11, 'paperless',
-                    'family')
-            ON CONFLICT (paperless_id) DO NOTHING
+                    'personal')
+            ON CONFLICT (paperless_id) WHERE paperless_id IS NOT NULL DO NOTHING
         """, kw["pl_id"], kw["eid"], kw["category"], kw["title"],
              kw["path"], kw["mime"], kw["sha"], kw["ocr"],
              kw["ltbl"], kw["lid"], kw["lby"])

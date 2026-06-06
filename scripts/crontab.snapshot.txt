@@ -1,5 +1,5 @@
-# joly crontab snapshot — regenerated 2026-06-06T17:07Z (U246 cron audit)
-# canonical baseline for cron-health audits
+# joly crontab snapshot — regenerated 2026-06-06T17:35Z (cron rot fix + watchdog)
+# 32 jobs incl. restored u62/u68 + cron-health-check watchdog
 30 7 * * * docker exec homeai-bot-responder python3 /app/weather-sync.py >> /home_ai/logs/weather-sync.log 2>&1
 20 * * * * cd /home_ai && bash scripts/u35-invoice-pdf-extract.sh 200 >> /home_ai/logs/u35-extract.log 2>&1
 # TouchOffice realtime scrape — every 15 min (overlap guard prevents concurrent runs)
@@ -31,3 +31,6 @@
 0 3 * * * /home_ai/scripts/backup-nightly.sh >> /home_ai/backups/cron.log 2>&1
 25 6,18 * * * cd /home_ai && bash scripts/u50-stale-ack.sh >> /home_ai/logs/u50-stale-ack.log 2>&1
 0 */12 * * * cd /home_ai && bash scripts/renew-n8n-vault-token.sh >> /home_ai/logs/renew-n8n-vault-token.log 2>&1
+*/15 * * * * cd /home_ai && bash scripts/u62-paperless-sync.sh >> /home_ai/logs/u62-paperless-sync.log 2>&1
+*/5 * * * * cd /home_ai && bash scripts/u68-doc-classify.sh >> /home_ai/logs/u68-doc-classify.log 2>&1
+*/30 * * * * cd /home_ai && python3 scripts/cron-health-check.py >> /home_ai/logs/cron-health-check.log 2>&1
