@@ -123,6 +123,24 @@ async def query_postgres_readonly(sql: str) -> str:
     return js
 
 
+@mcp.tool()
+async def sql_lineage(object_name: str, direction: str = "dependents") -> str:
+    """Return the dependency subgraph for a database object (view/table).
+
+    direction='dependents' (default): everything that depends ON object_name
+      (impact analysis — what breaks if you change it).
+    direction='dependencies': everything object_name reads (downstream).
+    Returns JSON: [{"depth","src_name","edge_kind","dst_name","dst_kind"}].
+    """
+    if direction not in ("dependents", "dependencies"):
+        return json.dumps({"error": "direction must be 'dependents' or 'dependencies'"})
+    fn = "home_ai.object_dependents" if direction == "dependents" else "home_ai.object_dependencies"
+    pool = await get_pool()
+    async with pool.acquire() as c:
+        rows = await c.fetch(f"SELECT depth, src_name, edge_kind, dst_name, dst_kind FROM {fn}($1) ORDER BY depth", object_name)
+    return json.dumps([dict(r) for r in rows])
+
+
 @mcp.resource("homeai://today")
 async def resource_today() -> str:
     """Today's KPI snapshot — the headline numbers from v_today_kpis_work."""
