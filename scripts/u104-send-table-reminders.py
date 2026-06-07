@@ -38,11 +38,11 @@ def send_email(to_addr: str, subject: str, body_text: str, body_html: str | None
         'reply_to': 'info@malthousetintagel.com',
     }
     if body_html: payload['body_html'] = body_html
-    req = urllib.request.Request(
-        f'{GF}/send/info',
     # BCC owner on replies to bookkeeper
     bcc_addr = 'jolyon.sandercock@gmail.com' if to_addr == 'jo.wood103@gmail.com' else None
     if bcc_addr: payload['bcc'] = bcc_addr
+    req = urllib.request.Request(
+        f'{GF}/send/info',
         data=json.dumps(payload).encode(),
         headers={'Content-Type': 'application/json'}, method='POST')
     r = urllib.request.urlopen(req, timeout=20)
