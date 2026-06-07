@@ -141,6 +141,31 @@ async def sql_lineage(object_name: str, direction: str = "dependents") -> str:
     return json.dumps([dict(r) for r in rows])
 
 
+@mcp.tool()
+async def n8n_workflow(name: str) -> str:
+    """Summarise one n8n workflow: the services its httpRequest nodes call, the
+    DB tables its postgres nodes read/write, its triggers, and the workflows it
+    calls (event chain). `name` matches workflow_entity.name (exact).
+    Returns JSON {services, tables, triggers, calls}."""
+    pool = await get_pool()
+    async with pool.acquire() as c:
+        services = await c.fetch(
+            "SELECT node_name, url, is_dynamic, host FROM home_ai.v_n8n_http_calls WHERE workflow = $1 ORDER BY node_name", name)
+        tables = await c.fetch(
+            "SELECT DISTINCT referenced_table FROM home_ai.v_n8n_sql_refs WHERE workflow = $1 ORDER BY 1", name)
+        triggers = await c.fetch(
+            "SELECT trigger_type, detail FROM home_ai.v_n8n_triggers WHERE workflow = $1", name)
+        calls = await c.fetch(
+            "SELECT target_path, target FROM home_ai.v_n8n_workflow_calls WHERE caller = $1 ORDER BY target_path", name)
+    return json.dumps({
+        "workflow": name,
+        "services": [dict(r) for r in services],
+        "tables": [r["referenced_table"] for r in tables],
+        "triggers": [dict(r) for r in triggers],
+        "calls": [dict(r) for r in calls],
+    })
+
+
 @mcp.resource("homeai://today")
 async def resource_today() -> str:
     """Today's KPI snapshot — the headline numbers from v_today_kpis_work."""
