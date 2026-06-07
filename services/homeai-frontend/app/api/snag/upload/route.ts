@@ -1,6 +1,6 @@
 import { realmFromRequest } from '@/lib/realm';
 import { NextRequest, NextResponse } from "next/server";
-import { pool } from "@/lib/db";
+import { withRealm } from "@/lib/db";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 
@@ -42,18 +42,16 @@ export async function POST(req: NextRequest) {
     imagePath = `/snags/${filename}`;
   }
 
-  // Insert into snag_inbox
-  const p = pool();
-  const client = await p.connect();
   try {
-    const result = await client.query(
-      "SELECT home_ai.insert_snag($1, $2, $3, $4, $5, $6, $7)",
-      [title, description, imagePath, category, priority, submitted_by, source]
-    );
-    return NextResponse.json({ ok: true, id: result.rows[0]?.insert_snag, image_path: imagePath });
+    // Wrap the SECURITY DEFINER insert so its body runs with realm/entity set.
+    return await withRealm(realm, async (client) => {
+      const result = await client.query(
+        "SELECT home_ai.insert_snag($1, $2, $3, $4, $5, $6, $7)",
+        [title, description, imagePath, category, priority, submitted_by, source]
+      );
+      return NextResponse.json({ ok: true, id: result.rows[0]?.insert_snag, image_path: imagePath });
+    }, { entity: '1' });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
-  } finally {
-    client.release();
   }
 }

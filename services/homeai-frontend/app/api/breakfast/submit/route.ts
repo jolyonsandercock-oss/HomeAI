@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { pool } from '@/lib/db';
-import { realmFromRequest } from '@/lib/realm';
+import { pool, withRealm } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -15,9 +14,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ valid: false, error: 'Missing token' }, { status: 400 });
     }
 
-    const p = pool();
-    const client = await p.connect();
-    try {
+    // Guest-facing token endpoint — accommodation data is the 'work' realm.
+    return await withRealm('work', async (client) => {
       // Check token exists and service_date hasn't passed
       const sendResult = await client.query(
         `SELECT bes.accommodation_booking_id, bes.service_date, bes.guest_count,
@@ -56,9 +54,7 @@ export async function GET(req: NextRequest) {
         already_ordered,
         existing_order: existing_order || undefined,
       });
-    } finally {
-      client.release();
-    }
+    }, { entity: '1' });
   } catch (e) {
     return NextResponse.json({ valid: false, error: (e as Error).message }, { status: 500 });
   }
@@ -80,6 +76,10 @@ export async function POST(req: NextRequest) {
     const client = await p.connect();
     try {
       await client.query('BEGIN');
+      // Realm/entity must be set inside this transaction so the writes below
+      // run with realm context (accommodation = 'work' realm, entity 1).
+      await client.query("SELECT home_ai.set_realm('work')");
+      await client.query("SELECT set_config('app.current_entity', '1', true)");
 
       // Validate token and get booking details
       const sendResult = await client.query(

@@ -1,6 +1,6 @@
 import { realmFromRequest } from '@/lib/realm';
 import { NextRequest, NextResponse } from "next/server";
-import { pool } from "@/lib/db";
+import { withRealm } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -26,26 +26,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "domain_pattern required" }, { status: 400 });
   }
 
-  const p = pool();
-  const client = await p.connect();
   try {
-    await client.query("SELECT home_ai.set_realm('owner')");
-
-    const result = await client.query(
-      `SELECT rule_id FROM home_ai.upsert_vendor_rule($1, $2, $3, $4, $5)`,
-      [
-        body.domain_pattern.toLowerCase().trim(),
-        body.category || null,
-        body.vendor_display || body.domain_pattern,
-        body.site || "shared",
-        body.realm || "work",
-      ]
-    );
-
-    return NextResponse.json({ ok: true, rule_id: result.rows[0]?.rule_id });
+    return await withRealm('owner', async (client) => {
+      const result = await client.query(
+        `SELECT rule_id FROM home_ai.upsert_vendor_rule($1, $2, $3, $4, $5)`,
+        [
+          body.domain_pattern.toLowerCase().trim(),
+          body.category || null,
+          body.vendor_display || body.domain_pattern,
+          body.site || "shared",
+          body.realm || "work",
+        ]
+      );
+      return NextResponse.json({ ok: true, rule_id: result.rows[0]?.rule_id });
+    }, { entity: '1' });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
-  } finally {
-    client.release();
   }
 }

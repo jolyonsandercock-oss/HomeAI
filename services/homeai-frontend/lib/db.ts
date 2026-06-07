@@ -88,11 +88,22 @@ const DEFAULT_REQUEST_REALM = 'work';
 // realm_isolation policy falls back to its NULL/'' -> all-realms branch (U147
 // Bug A — the cause of cross-realm leakage on the read path). Wrapping here is
 // pool-safe: COMMIT/ROLLBACK clears the LOCAL setting for the next borrower.
-async function withRealm<T>(realm: string, fn: (client: PoolClient) => Promise<T>): Promise<T> {
+// `opts.entity` additionally pins app.current_entity transaction-locally for
+// write paths (AGENTS: every PostgreSQL write sets the entity GUC). It is only
+// set when supplied, so realm-only read paths keep their existing behaviour and
+// are not accidentally entity-scoped.
+export async function withRealm<T>(
+  realm: string,
+  fn: (client: PoolClient) => Promise<T>,
+  opts: { entity?: string } = {},
+): Promise<T> {
   const client = await pool().connect();
   try {
     await client.query('BEGIN');
     await client.query('SELECT home_ai.set_realm($1)', [realm]);
+    if (opts.entity) {
+      await client.query("SELECT set_config('app.current_entity', $1, true)", [opts.entity]);
+    }
     const out = await fn(client);
     await client.query('COMMIT');
     return out;
@@ -139,7 +150,7 @@ export async function verifyPurchase(body: { purchase_id: number; action: 'confi
       [body.purchase_id, body.action, body.category ?? null]
     );
     return { ok: true, affected: r.rows[0]?.affected ?? 0 };
-  });
+  }, { entity: '1' });
 }
 
 export interface SandboxCommentPost {
@@ -159,13 +170,14 @@ export async function postSandboxComment(body: SandboxCommentPost) {
     if (!r.ok) throw new Error(`proxy sandbox POST ${r.status}`);
     return r.json();
   }
-  const p = pool();
-  const r = await p.query(
-    `INSERT INTO sandbox_comments (component_id, comment_text, author, page_path)
-     VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
-    [body.component_id, body.comment_text, body.author ?? null, body.page_path ?? null]
-  );
-  return r.rows[0];
+  return withRealm('work', async (client) => {
+    const r = await client.query(
+      `INSERT INTO sandbox_comments (component_id, comment_text, author, page_path)
+       VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+      [body.component_id, body.comment_text, body.author ?? null, body.page_path ?? null]
+    );
+    return r.rows[0];
+  }, { entity: '1' });
 }
 
 // Cash-up write endpoints (U135 T6)
@@ -201,7 +213,7 @@ export async function upsertCashupInput(body: CashupInput) {
        body.entered_by ?? null]
     );
     return r.rows[0];
-  });
+  }, { entity: '1' });
 }
 
 export interface SafeMovement {
@@ -223,7 +235,7 @@ export async function insertSafeMovement(body: SafeMovement) {
        body.notes ?? null, body.entered_by ?? null]
     );
     return r.rows[0];
-  });
+  }, { entity: '1' });
 }
 
 export async function getSandboxComments(componentId?: string, pagePath?: string) {

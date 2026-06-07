@@ -581,7 +581,10 @@ services:
         NEXT_PUBLIC_BASE_PATH: "/app"
     container_name: homeai-frontend
     networks: [ai-internal, ai-egress]
-    ports: ["3003:3000"]
+    # No host port: Caddy reaches this over ai-internal (reverse_proxy
+    # homeai-frontend:3000) behind Authelia forward_auth. Publishing :3003 was
+    # the "IP backdoor" that bypassed forward_auth and let Remote-Groups be
+    # spoofed for owner-realm access (Codex 2026-06-07 HIGH). Removed.
     environment:
       POSTGRES_READONLY_URL: "postgresql://homeai_readonly:${HOMEAI_READONLY_PASSWORD}@homeai-postgres:5432/homeai"
       NEXT_TELEMETRY_DISABLED: "1"

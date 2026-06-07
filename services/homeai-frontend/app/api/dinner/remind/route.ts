@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { pool } from "@/lib/db";
+import { withRealm } from "@/lib/db";
 import { realmFromRequest } from "@/lib/realm";
 
 export const dynamic = "force-dynamic";
@@ -32,11 +32,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const p = pool();
-    const client = await p.connect();
-    try {
-      await client.query("SELECT home_ai.set_realm('owner')");
-
+    return await withRealm('owner', async (client) => {
       // Look up the guest booking details
       const bookingResult = await client.query(
         `SELECT id, guest_name, checkin_date, checkout_date, room
@@ -154,9 +150,7 @@ info@malthousetintagel.com`;
           : `Dinner invitation sent to ${guest_email}`,
         gmail_message_id: gmailMessageId,
       });
-    } finally {
-      client.release();
-    }
+    }, { entity: '1' });
   } catch (e) {
     console.error("dinner/remind error:", e);
     return NextResponse.json(

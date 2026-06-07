@@ -1,6 +1,6 @@
 import { realmFromRequest } from '@/lib/realm';
 import { NextRequest, NextResponse } from "next/server";
-import { pool } from "@/lib/db";
+import { withRealm } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,17 +18,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "id and status required" }, { status: 400 });
   }
 
-  const p = pool();
-  const client = await p.connect();
   try {
-    const result = await client.query(
-      "SELECT home_ai.update_snag_status($1, $2, $3, $4)",
-      [body.id, body.status, body.notes || null, body.assigned_to || null]
-    );
-    return NextResponse.json({ ok: true, id: result.rows[0]?.update_snag_status });
+    // Wrap the SECURITY DEFINER update so its body runs with realm/entity set.
+    return await withRealm(realm, async (client) => {
+      const result = await client.query(
+        "SELECT home_ai.update_snag_status($1, $2, $3, $4)",
+        [body.id, body.status, body.notes || null, body.assigned_to || null]
+      );
+      return NextResponse.json({ ok: true, id: result.rows[0]?.update_snag_status });
+    }, { entity: '1' });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
-  } finally {
-    client.release();
   }
 }
