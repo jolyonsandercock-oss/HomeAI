@@ -173,10 +173,12 @@ def check_n8n() -> None:
                     add("WARN", "INV-ENTITY-LOCAL", loc,
                         "bare SET app.current_entity (no LOCAL) — session leak.")
 
-            # body_text in an AI prompt (fallback defeats redaction)
-            if "body_text_safe" in low and re.search(r"body_text_safe\s*\|\|", body):
+            # body_text in an AI prompt: only flag a fallback that actually
+            # reaches raw body_text (e.g. `body_text_safe || x.body_text`).
+            # `body_text_safe || ''` is safe and must not warn.
+            if re.search(r"body_text_safe\s*\|\|[^;\n]*\bbody_text\b(?!_safe)", body):
                 add("WARN", "INV-BODY-TEXT", loc,
-                    "body_text_safe with a fallback (|| body_text) — fallback "
+                    "body_text_safe falls back to raw body_text — fallback "
                     "defeats redaction; drop the raw fallback.")
             elif (re.search(r"\bbody_text\b", body)
                   and "body_text_safe" not in low
@@ -319,28 +321,58 @@ def check_frontend() -> None:
 
 
 # ── report ────────────────────────────────────────────────────────────
-def main() -> int:
+BASELINE = ROOT / "scripts" / ".audit-baseline.txt"
+
+
+def _ident(f) -> str:
+    # Stable identity of a finding (severity may change; rule+location is the key)
+    return f"{f[1]}|{f[2]}"
+
+
+def _collect():
     check_n8n()
     check_compose()
     check_python()
     check_frontend()
-
     order = {"FAIL": 0, "WARN": 1}
     findings.sort(key=lambda f: (order.get(f[0], 9), f[1], f[2]))
 
-    fails = sum(1 for f in findings if f[0] == "FAIL")
-    warns = sum(1 for f in findings if f[0] == "WARN")
 
+def main() -> int:
+    args = sys.argv[1:]
+    _collect()
     use_color = sys.stdout.isatty()
     def c(code, s):
         return f"\033[{code}m{s}\033[0m" if use_color else s
 
+    # --write-baseline: snapshot current findings as the accepted backlog.
+    if "--write-baseline" in args:
+        BASELINE.write_text("".join(f"{_ident(f)}\n" for f in findings))
+        print(f"baseline written: {len(findings)} findings → {BASELINE.name}")
+        return 0
+
+    # --check: regression gate — fail ONLY on findings not in the baseline
+    # (so the known/tracked backlog doesn't block every push). Used by pre-push.
+    if "--check" in args:
+        base = set(BASELINE.read_text().splitlines()) if BASELINE.exists() else set()
+        new = [f for f in findings if _ident(f) not in base]
+        new_fail = [f for f in new if f[0] == "FAIL"]
+        if not new:
+            print(c("32", f"invariant gate: no new findings ({len(findings)} known)"))
+            return 0
+        print(c("31" if new_fail else "33", f"invariant gate: {len(new)} NEW finding(s):"))
+        for sev, rule, loc, msg in new:
+            print(f"  [{sev}] [{rule}] {loc}\n      {msg}")
+        return 1 if new_fail else 0
+
+    # default: full report
+    fails = sum(1 for f in findings if f[0] == "FAIL")
+    warns = sum(1 for f in findings if f[0] == "WARN")
     print(c("1", "Home AI — invariant audit"))
     print("=" * 60)
     if not findings:
         print(c("32", "No invariant violations found."))
         return 0
-
     cur = None
     for sev, rule, loc, msg in findings:
         if sev != cur:
@@ -349,10 +381,8 @@ def main() -> int:
             print("\n" + c(colour, f"── {sev} ──"))
         tag = c("31" if sev == "FAIL" else "33", f"[{rule}]")
         print(f"  {tag} {loc}\n      {msg}")
-
     print("\n" + "=" * 60)
-    summary = f"{fails} FAIL, {warns} WARN"
-    print(c("31" if fails else "33", summary))
+    print(c("31" if fails else "33", f"{fails} FAIL, {warns} WARN"))
     return 1 if fails else 0
 
 

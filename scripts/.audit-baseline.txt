@@ -1,0 +1,48 @@
+INV-DOCKER-SOCK|docker-compose.yml:303
+INV-PG-SUPERUSER|docker-compose.yml:305
+INV-PG-SUPERUSER|docker-compose.yml:407
+INV-PG-SUPERUSER|docker-compose.yml:541
+INV-PG-SUPERUSER|docker-compose.yml:60
+INV-PG-SUPERUSER|docker-compose.yml:603
+INV-PG-SUPERUSER|docker-compose.yml:629
+INV-PG-SUPERUSER|docker-compose.yml:650
+INV-BODY-TEXT|nanny.json » node 'Validate Event' (~L27)
+INV-BODY-TEXT|services/build-dashboard/main.py
+INV-DIRECT-LLM|services/bot-responder/responder.py
+INV-DIRECT-LLM|services/build-dashboard/main.py
+INV-ENTITY-GUC|services/bot-responder/auto-classify.py
+INV-ENTITY-GUC|services/critical-listener/listener.py
+INV-ENTITY-GUC|services/homeai-data-proxy/main.py
+INV-ENTITY-GUC|services/homeai-litellm/proxy_config.py
+INV-ENTITY-GUC|services/homeai-presidio/main.py
+INV-ENTITY-GUC|services/llm-router/main.py
+INV-ENTITY-GUC|services/wa-bridge/main.py
+INV-ENTITY-LOCAL|caterbook-bookings-v1.json » node 'Find unprocessed reservations' (~L18)
+INV-ENTITY-LOCAL|caterbook-bookings-v1.json » node 'Insert booking' (~L65)
+INV-ENTITY-LOCAL|caterbook-pipeline-v1.json » node 'Find unprocessed Caterbook emails' (~L18)
+INV-ENTITY-LOCAL|caterbook-pipeline-v1.json » node 'Insert accommodation_daily' (~L65)
+INV-ENTITY-LOCAL|epos-pipeline-v1.json » node 'Find unprocessed EPOS emails' (~L18)
+INV-ENTITY-LOCAL|epos-pipeline-v1.json » node 'Insert epos_daily' (~L65)
+INV-ENTITY-LOCAL|gmail-ingest.json » node 'INSERT child.event.detected' (~L474)
+INV-ENTITY-LOCAL|gmail-ingest.json » node 'INSERT email.classified' (~L362)
+INV-ENTITY-LOCAL|gmail-ingest.json » node 'INSERT email.received' (~L341)
+INV-ENTITY-LOCAL|gmail-ingest.json » node 'INSERT emails' (~L292)
+INV-ENTITY-LOCAL|gmail-ingest.json » node 'INSERT invoice.detected' (~L419)
+INV-ENTITY-LOCAL|gmail-ingest.json » node 'Write Audit Log' (~L440)
+INV-ENTITY-LOCAL|pub-anomaly-alerter-v1.json » node 'Compare to trailing window' (~L18)
+INV-ENTITY-LOCAL|pub-anomaly-alerter-v1.json » node 'Log anomaly' (~L64)
+INV-ENTITY-LOCAL|telegram-bot-v1.json » node 'Fetch stats' (~L69)
+INV-PORTS|docker-compose.yml:157
+INV-PORTS|docker-compose.yml:185
+INV-PORTS|docker-compose.yml:243
+INV-PORTS|docker-compose.yml:376
+INV-PORTS|docker-compose.yml:383
+INV-PORTS|docker-compose.yml:397
+INV-PORTS|docker-compose.yml:441
+INV-PORTS|docker-compose.yml:503
+INV-PORTS|docker-compose.yml:511
+INV-PORTS|docker-compose.yml:523
+INV-PORTS|docker-compose.yml:571
+INV-PORTS|docker-compose.yml:599
+INV-PORTS|docker-compose.yml:613
+INV-PORTS|docker-compose.yml:99
