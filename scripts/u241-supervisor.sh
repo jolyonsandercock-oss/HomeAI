@@ -17,7 +17,7 @@ audit(){ docker exec -i homeai-postgres psql -U postgres -d homeai \
 # circuit breaker: how many times this repair fired in the last hour
 repair_count_1h(){ q "SELECT count(*) FROM audit_log WHERE action='self_repair' AND pipeline='u241-supervisor' AND ai_parsed->>'repair'='$1' AND created_at>now()-interval '1 hour'"; }
 
-repaired=(); skipped=()
+repaired=(); skipped=(); EXCL='backup'
 
 # External dead-man's switch (healthchecks.io) — vault-independent file cred.
 # Healthy ping each clean/recovered run; /fail on unrecovered; SILENCE (box or
@@ -31,15 +31,24 @@ if [ "$RC" -eq 0 ]; then echo "$(ts) selftest OK" >> "$LOG"; hc; exit 0; fi
 FAILS=$(printf '%s\n' "$OUT" | sed -n '/^FAILURES:/,$p' | grep -E '^\s*- ' || true)
 
 # ── SAFE auto-repairs (conservative, idempotent, circuit-broken) ──
-# A) paused + flood contained (no new dead-letters 30m) -> resume. Cap 2/hr.
+# A) auto_pause + flood contained (no new dead-letters 30m) -> resume. Cap 2/hr.
+#    NEVER auto-resume a deliberate MANUAL pause — only the auto_pause:* floods
+#    this supervisor / alert-sink created. A human who paused wants it held
+#    (maintenance, incident). Manual pause is an EXPECTED state → don't page.
 if printf '%s' "$FAILS" | grep -q 'system.state'; then
-  newdl=$(q "SELECT count(*) FROM dead_letter WHERE resolved=false AND created_at>now()-interval '30 min'")
-  n=$(repair_count_1h resume_contained_pause); n=${n:-0}
-  if [ "${newdl:-1}" -eq 0 ] && [ "$n" -lt 2 ]; then
-    q "UPDATE static_context SET value=jsonb_set(value,'{state}','\"running\"'), updated_at=now() WHERE key='system.state'" >/dev/null
-    audit resume_contained_pause "no_new_dl_30m"; repaired+=("resumed paused system (flood contained)")
+  preason=$(q "SELECT value->>'paused_reason' FROM static_context WHERE key='system.state'")
+  if [[ "${preason:-}" != auto_pause:* ]]; then
+    skipped+=("manual pause ('${preason:-unknown}') — held; supervisor will NOT auto-resume (use /resume-all)")
+    EXCL='backup|system.state'   # deliberate pause is expected, not a pageable failure
   else
-    skipped+=("PAUSE not auto-resumed (new DL=${newdl:-?} / fired ${n:-?}x/hr) — needs eyes")
+    newdl=$(q "SELECT count(*) FROM dead_letter WHERE resolved=false AND created_at>now()-interval '30 min'")
+    n=$(repair_count_1h resume_contained_pause); n=${n:-0}
+    if [ "${newdl:-1}" -eq 0 ] && [ "$n" -lt 2 ]; then
+      q "UPDATE static_context SET value=jsonb_build_object('state','running','resumed_at',now()::text,'resumed_by','u241-supervisor:auto'), updated_at=now() WHERE key='system.state'" >/dev/null
+      audit resume_contained_pause "no_new_dl_30m"; repaired+=("resumed auto_pause (flood contained)")
+    else
+      skipped+=("auto_pause not resumed (new DL=${newdl:-?} / fired ${n:-?}x/hr) — needs eyes")
+    fi
   fi
 fi
 # B) stuck processing leases -> recover_stale_leases_v3()
@@ -62,7 +71,7 @@ FAILS2=$(printf '%s\n' "$OUT2" | sed -n '/^FAILURES:/,$p' | grep -E '^\s*- ' || 
 # Known non-critical (won't page or trip the external DMS): stale nightly backup
 # (tracked separately — restic exits 3 on root-owned files). Everything else is
 # treated as a real failure.
-CRIT=$(printf '%s\n' "$FAILS2" | grep -viE 'backup' | grep -E '\S' || true)
+CRIT=$(printf '%s\n' "$FAILS2" | grep -viE "$EXCL" | grep -E '\S' || true)
 
 if [ -z "$CRIT" ]; then
   hc   # functionally healthy (clean, or only known-non-critical left) → DMS healthy
