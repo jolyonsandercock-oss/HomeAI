@@ -127,6 +127,9 @@ echo
 echo "[8] Test fixtures"
 check "sanitiser fixture passes" "node /home_ai/postgres/tests/sanitiser-fixture.js 2>&1 | tail -1 | command grep -q '0 fail' && echo ok"
 check "P2 invoice fixture passes" "docker exec -i homeai-postgres psql -U homeai_pipeline -d homeai -v ON_ERROR_STOP=1 < /home_ai/postgres/tests/p2-invoice-fixture.sql 2>&1 | command grep -q 'P2 invoice fixture passed' && echo ok"
+# Catches the /api/vehicles + audit_log class: dashboard SQL referencing columns/
+# tables that were renamed/dropped (PREPARE every static query vs the live schema).
+check "dashboard SQL plans vs live schema" "bash /home_ai/scripts/check-dashboard-sql.sh"
 echo
 
 # ── Summary ────────────────────────────────────────────────────

@@ -3280,12 +3280,12 @@ VEHICLES / PROPERTIES / FAMILY
 
 SYSTEM / SUPPORT
   entities (id, name)
-  system_alerts (id, name, severity, status, fired_at, acknowledged)
-  audit_log (id, action, source, payload, created_at)
-  feed_coverage (feed_name, expected_date, row_count, status)
-  events / events_2026_NN (id, event_type, status, payload, created_at)
-  dead_letter (id, pipeline, resolved, last_attempt_at)
-  ai_usage (provider, model, input_tokens, output_tokens, cost_pence, created_at)
+  system_alerts (id, alertname, severity, status, first_seen_at, acknowledged, realm)
+  audit_log (id, pipeline, action, result, ai_parsed jsonb, created_at, realm)
+  feed_coverage (feed_name, expected_date, row_count, status, last_scraped, realm)
+  events / events_2026_NN (id, event_type, status, payload, created_at, realm)
+  dead_letter (id, pipeline, error_message, retry_count, resolved, resolved_at, realm)
+  ai_usage (provider, model_used, prompt_tokens, completion_tokens, cost_gbp, timestamp, business_priority)
 
 CONVENTIONS
   - Most tables have a `realm` column (owner/work/family/shared). RLS is on.
