@@ -62,12 +62,9 @@ services:
       postgres: {condition: service_healthy}
     restart: unless-stopped
 
-  qdrant:
-    image: qdrant/qdrant:v1.17.1
-    container_name: homeai-qdrant
-    networks: [ai-internal]
-    volumes: [qdrant_data:/qdrant/storage]
-    restart: unless-stopped
+  # Qdrant (vector store) removed 2026-06-07 (Hermes #11): 357B of data, zero code
+  # references — dead weight. Postgres tsvector+GIN covers the actual query
+  # patterns. Re-add from git history if a real RAG use case appears.
 
   # SearXNG — self-hosted meta-search, exposed via Caddy at /search.
   # Tailscale-only (no public binding). Used as a private search engine + as a
@@ -705,7 +702,6 @@ services:
 
 volumes:
   postgres_data:
-  qdrant_data:
   # U140 — tmpfs-backed volume for Vault Agent-rendered secrets.
   homeai_secrets:
     driver: local
