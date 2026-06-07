@@ -50,6 +50,15 @@
 - [ ] **0.2** Record the union per service into `docs/u249-grant-matrix.md` (service → {tables: r/w, functions: execute}). This is the spec for Phase 4 grants.
 - [ ] **0.3** Confirm `homeai_pipeline` can already reach all of them (it has ALL via V246): `psql ... -c "\du homeai_pipeline"` and spot-check with the smoke script. Commit the matrix.
 
+### Phase 0 RESULTS (run 2026-06-07) — READINESS GATES THE SWAPS
+- `homeai_pipeline` LOGIN works (u71 smoke green: queried 15 tables, set realm/entity). **Dependency satisfied.**
+- **Per-service context-setting** (`app.current_entity`/`set_config`/`SET LOCAL ROLE`/`_apply_db_context` refs) — a non-super DSN with RLS returns SILENT 0 ROWS for any query that doesn't set context:
+  - build-dashboard: **76** (canary; already runs `RLS_ENFORCE_SET_ROLE=1` by default) — BUT has **70 raw `.acquire()` paths**, not all provably routed through the context helper → unverifiable by reading; needs runtime exercise before swap.
+  - playwright **8**, bot-responder **7**, google-fetch **3** — PARTIAL; per-path runtime verification needed.
+  - **wa-bridge 0, critical-listener 0** — NOT READY; need Phase-1 code (add context-setting) BEFORE any swap or they break instantly.
+- **postgres-exporter**: its custom `queries.yaml` reads RLS tables (`events`, `bank_transactions`, `dead_letter`, `audit_log`) for metrics → a scoped role would RLS-filter to wrong counts. Needs a `homeai_monitor` role with `BYPASSRLS` + SELECT on those tables + `pg_monitor`, credential **Vault-injected** (do NOT add another `.env` secret — that's the open T7 drift).
+- **Conclusion:** the 7 DSN swaps CANNOT be safely batched/auto-verified. Each is a watched, flag-gated, runtime-verified step; 2 services need code first. Do incrementally.
+
 ---
 
 ## Phase 1: Enforce RLS on the Python writer services (flag-gated, reversible)
