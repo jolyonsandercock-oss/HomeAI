@@ -93,6 +93,24 @@ restic backup \
 echo "→ enforcing retention (7d 4w 6m)"
 restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
 
+# 5. Replicate to a SECOND restic repo on the HDD (separate physical disk) so an
+#    NVMe failure / ransomware-of-one-disk doesn't lose the data. This is
+#    off-NVMe resilience; a true OFF-BOX target (NAS/cloud) is still TODO — set
+#    RESTIC_HDD_REPO or mount it and re-point. Failures here WARN but don't fail
+#    the run (the primary NVMe backup already succeeded).
+HDD_REPO="${RESTIC_HDD_REPO:-/mnt/shared_storage/home_ai-archive/restic-hdd}"
+if [ -w "$(dirname "$HDD_REPO")" ] 2>/dev/null; then
+  echo "→ replicating snapshots to HDD repo $HDD_REPO"
+  if restic -r "$HDD_REPO" snapshots >/dev/null 2>&1 || restic -r "$HDD_REPO" init; then
+    restic -r "$HDD_REPO" copy --from-repo "$REPO_PATH" --from-password-file "$PW_FILE" \
+      || echo "  WARN: HDD restic copy failed"
+    restic -r "$HDD_REPO" forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune \
+      || echo "  WARN: HDD retention prune failed"
+  fi
+else
+  echo "  WARN: HDD repo parent not writable — skipping off-NVMe replication"
+fi
+
 # Cleanup staging
 rm -rf "$STAGING"
 

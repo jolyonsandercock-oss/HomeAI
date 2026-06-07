@@ -121,6 +121,10 @@ echo
 echo "[7] Backup"
 check "nightly backup ran < 24h ago" "f=/home_ai/backups/last-backup.log; [[ -f \$f ]] && age=\$(( \$(date +%s) - \$(stat -c %Y \$f) )); [[ \$age -lt 86400 ]] && echo \"\${age}s ago\""
 check "restic snapshots exist"        "RESTIC_REPOSITORY=/home_ai/backups/restic-local RESTIC_PASSWORD_FILE=/home_ai/backups/.restic-pw restic snapshots --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d))' | grep -E '^[1-9]' "
+# Off-NVMe replica on the HDD (separate physical disk) — guards against the
+# 'pg_dump to the same disk' single-point-of-failure. Latest HDD snapshot must
+# be < 36h old (nightly + slack). WARNING severity (the NVMe copy is primary).
+check "off-NVMe HDD backup fresh < 36h" "RESTIC_REPOSITORY=/mnt/shared_storage/home_ai-archive/restic-hdd RESTIC_PASSWORD_FILE=/home_ai/backups/.restic-pw restic snapshots --json 2>/dev/null | python3 -W ignore -c 'import json,sys,datetime as D; d=json.load(sys.stdin); t=max(x[\"time\"][:19] for x in d); age=(D.datetime.utcnow()-D.datetime.fromisoformat(t)).total_seconds(); assert age<129600, f\"{int(age)}s\"; print(f\"{int(age)}s ago\")'" "warning"
 echo
 
 # ── Fixtures ───────────────────────────────────────────────────
