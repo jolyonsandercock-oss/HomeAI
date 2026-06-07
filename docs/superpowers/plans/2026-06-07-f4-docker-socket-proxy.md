@@ -1,110 +1,102 @@
 # F4 — Remove build-dashboard's raw Docker socket access
 
-**Goal:** The build-dashboard container (web-facing, behind Authelia) currently mounts `/var/run/docker.sock` **read-write**. A web surface with the raw Docker socket = effective **root on the host** if compromised. Reduce that blast radius without breaking the one feature that needs Docker.
+**Goal:** build-dashboard (web-facing, behind Authelia) mounts `/var/run/docker.sock` **read-write** → effective **root on the host** if compromised. Remove that access entirely without breaking the one feature that needs it.
 
-**Status:** PLAN ONLY — to be reviewed via Codex (see `f4-codex-review-prompt.md`) before execution.
-
----
-
-## Verified current state (2026-06-07)
-
-- Mount: `docker-compose.yml:303` → `- /var/run/docker.sock:/var/run/docker.sock` (read-write).
-- **Only** socket consumer in build-dashboard: `GET /api/benchmark/stream` (`services/build-dashboard/main.py:5993`) runs:
-  ```
-  /usr/local/bin/docker exec -e PYTHONUNBUFFERED=1 homeai-model-evaluator \
-      python -u /app/run_benchmark.py --model <model> --tier <tier>
-  ```
-  i.e. a single `docker exec` into **one fixed container** (`homeai-model-evaluator`), streamed back as SSE.
-- Container **status** on the dashboard is already socket-less (HTTP probes — `main.py:296`); the hardware panel uses `nvidia-smi`/host reads, not Docker.
-- build-dashboard: container `homeai-build-dashboard`, listens **:8090**, networks `[ai-internal, ai-monitoring, ai-egress]`.
-
-**Why `:ro` is NOT the fix:** a read-only *bind mount* only marks the socket file read-only; the Docker Engine API still accepts write/exec calls through it. `:ro` would pass a naive check while leaving full control intact. (Action item: tighten the checker so `:ro` on docker.sock no longer counts as resolved.)
+**Status:** PLAN v2 — revised after Codex review (2026-06-07). **Option A (socket-proxy) REJECTED** (see below). Primary approach is now **Option C**. Re-review v2 via `f4-codex-review-prompt.md` before execution.
 
 ---
 
-## Options (security best → cheapest)
+## Verified current state
 
-**Option C — HTTP benchmark endpoint (best; dashboard loses Docker entirely).**
-model-evaluator exposes its own SSE endpoint that runs `run_benchmark.py`; build-dashboard calls it over HTTP like every other service. build-dashboard has **zero** Docker access. *Cost:* requires model-evaluator to be (or become) an HTTP service + rewrite the stream client. Bigger change; verify model-evaluator's runtime first.
-
-**Option A — Docker socket proxy (recommended: proper + low-risk + compose-only).**
-Put `tecnativa/docker-socket-proxy` in front of the engine, exposing **only** the API surface `docker exec` needs; build-dashboard talks to the proxy over the internal network and never touches the raw socket. Removes the host-root vectors (container create with host mounts, delete, image pull, etc.). *Residual:* the proxy filters by API *type*, not by target container — so `exec` into *any* container is still possible (not just model-evaluator). Acceptable given everything is behind Authelia; Option C closes even that.
-
-**Option B — bespoke exec sidecar.** A tiny service that only runs the model-evaluator benchmark. Between A and C on effort/security. Not recommended over C.
-
-**Recommendation: Option A now** (big risk reduction, contained, reversible), with Option C as a follow-up if we want to remove exec-into-any. The rest of this plan implements **A**.
+- Mount: `docker-compose.yml:303` → `- /var/run/docker.sock:/var/run/docker.sock` (RW).
+- **Only** socket consumer: `GET /api/benchmark/stream` (`services/build-dashboard/main.py:5988`) runs
+  `/usr/local/bin/docker exec … homeai-model-evaluator python -u /app/run_benchmark.py --model <m> --tier <t>` and relays stdout as SSE. (Container status is HTTP-probe based; hardware panel uses `nvidia-smi`. Confirmed by Codex — no other Docker/socket use.)
+- Docker CLI present at `/usr/local/bin/docker` (`services/build-dashboard/Dockerfile:7`).
+- **model-evaluator is already a FastAPI service** (`services/model-evaluator/Dockerfile:6` → uvicorn `main:app` on `:8008`), on `ai-internal`. It already has `run_benchmark.py` and `_benchmark()` locally. build-dashboard is also on `ai-internal` → can reach `homeai-model-evaluator:8008` over HTTP today.
+- `:ro` is NOT mitigation (the socket is a command channel; mount mode isn't the authz boundary). Codex confirmed.
 
 ---
 
-## Implementation (Option A)
+## Why Option A (Tecnativa socket-proxy) is rejected
 
-### Task 1: add the socket proxy
+`docker exec` needs `POST /containers/{id}/exec` + `POST /exec/{id}/start`. In Tecnativa v0.3.0 those require `CONTAINERS=1, EXEC=1, POST=1`. But the proxy gates by **path-prefix + method**, not per-operation — so `CONTAINERS=1 + POST=1` *also* permits `POST /containers/create` (with `-v /:/host` → host root), plus stop/kill/rename/prune. It **cannot** allow `exec` while denying `create`. So Option A does **not** remove the host-root vector — it only blocks the images/networks/volumes/swarm API sections. Not worth the moving part. (Codex, citing the v0.3.0 haproxy.cfg mapping.)
 
-- [ ] **Step 1:** Add to `docker-compose.yml` (on `ai-monitoring`, shared with build-dashboard):
-  ```yaml
-  docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:0.3.0
-    container_name: homeai-docker-proxy
-    environment:
-      CONTAINERS: "1"   # GET/inspect containers (resolve name->id for exec)
-      EXEC: "1"         # /exec endpoints (docker exec)
-      POST: "1"         # tecnativa blocks POST unless enabled; exec needs POST
-      # everything else stays default-DENY:
-      IMAGES: "0"
-      NETWORKS: "0"
-      VOLUMES: "0"
-      INFO: "0"
-      SERVICES: "0"
-      TASKS: "0"
-      SWARM: "0"
-      SYSTEM: "0"
-      AUTH: "0"
-      BUILD: "0"
-      COMMIT: "0"
-      CONFIGS: "0"
-      DISTRIBUTION: "0"
-      NODES: "0"
-      PLUGINS: "0"
-      SECRETS: "0"
-      SESSION: "0"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro   # proxy may read-only mount; it gatekeeps the API
-    networks: [ai-monitoring]
-    read_only: true
-    restart: unless-stopped
+---
+
+## Option C — model-evaluator owns the benchmark; dashboard gets ZERO Docker
+
+build-dashboard stops shelling out to Docker and instead calls a narrow SSE endpoint on model-evaluator, which runs the benchmark **inside its own container** (where `run_benchmark.py` already lives). Real isolation: the web-facing container has no socket, no Docker CLI, no `DOCKER_HOST`.
+
+### Task 1: add the benchmark SSE endpoint to model-evaluator
+**File:** `services/model-evaluator/main.py`
+- [ ] **Step 1:** Add (reuses the exact streaming logic build-dashboard had, minus the `docker exec` prefix — it runs locally now):
+  ```python
+  import os
+  import asyncio.subprocess as asp
+  from fastapi.responses import StreamingResponse
+
+  @app.get("/api/benchmark/stream")
+  async def benchmark_stream(model: str = "qwen2.5:7b", tier: str = "hot"):
+      if tier not in ("hot", "medium", "heavy"):
+          raise HTTPException(400, "tier must be hot|medium|heavy")
+      cmd = ["python", "-u", "/app/run_benchmark.py", "--model", model, "--tier", tier]
+      async def gen():
+          proc = await asp.create_subprocess_exec(
+              *cmd, stdout=asp.PIPE, stderr=asp.STDOUT,
+              env={**os.environ, "PYTHONUNBUFFERED": "1"})
+          try:
+              while True:
+                  line = await proc.stdout.readline()
+                  if not line:
+                      break
+                  yield f"data: {line.decode('utf-8', 'replace').rstrip()}\n\n"
+              await proc.wait()
+              yield f"event: done\ndata: exit_code={proc.returncode}\n\n"
+          finally:
+              if proc.returncode is None:
+                  proc.kill()
+      return StreamingResponse(gen(), media_type="text/event-stream")
   ```
+- [ ] **Step 2:** `docker compose build model-evaluator && docker compose up -d model-evaluator`. Smoke: `docker exec homeai-caddy wget -qO- 'http://homeai-model-evaluator:8008/api/benchmark/stream?model=qwen2.5:7b&tier=hot'` streams lines + `exit_code=0`.
 
-- [ ] **Step 2:** Point build-dashboard at the proxy and drop the raw socket. In the `build-dashboard` service:
-  - remove the volume line `- /var/run/docker.sock:/var/run/docker.sock`
-  - add env `DOCKER_HOST: "tcp://homeai-docker-proxy:2375"`
-  - confirm it shares the `ai-monitoring` network with the proxy (it does).
-
-- [ ] **Step 3:** Deploy: `docker compose up -d docker-socket-proxy build-dashboard`.
-
-### Task 2: verify the benchmark still works AND destructive ops are blocked
-
-- [ ] **Step 4 (positive):** trigger a Deep benchmark from the dashboard (or `curl` `/api/benchmark/stream?model=qwen2.5:7b&tier=hot` with auth) → SSE lines stream and it exits 0. This proves `docker exec` works through the proxy.
-- [ ] **Step 5 (negative — the whole point):** from inside build-dashboard, confirm dangerous ops are denied:
+### Task 2: build-dashboard relays over HTTP, loses Docker
+**Files:** `services/build-dashboard/main.py` (the `/api/benchmark/stream` handler ~L5988), `services/build-dashboard/Dockerfile:7`, `docker-compose.yml` (build-dashboard service)
+- [ ] **Step 3:** Replace the `docker exec` subprocess with an HTTP relay (raw passthrough preserves SSE framing):
+  ```python
+  @app.get("/api/benchmark/stream")
+  async def benchmark_stream(model: str = Query("qwen2.5:7b"),
+                             tier: str = Query("hot", pattern="^(hot|medium|heavy)$")):
+      url = (f"http://homeai-model-evaluator:8008/api/benchmark/stream"
+             f"?model={model}&tier={tier}")
+      async def gen():
+          async with httpx.AsyncClient(timeout=None) as client:
+              async with client.stream("GET", url) as r:
+                  async for chunk in r.aiter_raw():
+                      yield chunk
+      return StreamingResponse(gen(), media_type="text/event-stream")
   ```
-  docker exec homeai-build-dashboard sh -c 'docker -H tcp://homeai-docker-proxy:2375 ps'      # OK
-  docker exec homeai-build-dashboard sh -c 'docker -H tcp://homeai-docker-proxy:2375 images'  # DENIED (403)
-  docker exec homeai-build-dashboard sh -c 'docker -H tcp://homeai-docker-proxy:2375 run --rm -v /:/host alpine true'  # DENIED
-  ```
-  Expect 403/forbidden on images/run/volume — that's the blast-radius reduction.
-- [ ] **Step 6:** confirm the dashboard's container-status + hardware panels still render (they don't use the socket, so should be unaffected).
+  Remove the now-dead `asyncio.subprocess as asp` import if unused elsewhere.
+- [ ] **Step 4:** `docker-compose.yml` build-dashboard: **remove** the `- /var/run/docker.sock:/var/run/docker.sock` volume. (No `DOCKER_HOST` is added — there is no Docker access at all.)
+- [ ] **Step 5:** `Dockerfile:7` — remove the Docker CLI install line (no longer needed). Optional but recommended (smaller image, no CLI to abuse).
+- [ ] **Step 6:** `docker compose build build-dashboard && docker compose up -d build-dashboard`.
 
-### Task 3: tighten the checker + commit
+### Task 3: verify isolation + no regression
+- [ ] **Step 7 (feature works):** trigger a Deep benchmark from the dashboard → SSE streams, exits 0 (now sourced from model-evaluator).
+- [ ] **Step 8 (isolation — the point):** `docker exec homeai-build-dashboard sh -c 'ls -la /var/run/docker.sock; which docker; echo $DOCKER_HOST'` → socket absent, no CLI, no DOCKER_HOST. The container literally cannot talk to Docker.
+- [ ] **Step 9:** dashboard container-status + hardware panels still render (they never used the socket).
 
-- [ ] **Step 7:** Update `scripts/audit-invariants.py` INV-DOCKER-SOCK: a raw `docker.sock` mount on an app service is a FAIL **even with `:ro`** (`:ro` is not real mitigation); a socket mounted only on `homeai-docker-proxy` is allowed. Refresh `.audit-baseline.txt`.
-- [ ] **Step 8:** Commit compose + checker.
+### Task 4: tighten the checker + commit
+- [ ] **Step 10:** `scripts/audit-invariants.py` INV-DOCKER-SOCK: any `docker.sock` mount on an **app** service is FAIL **including `:ro`** (`:ro` is not mitigation). Only an explicit, documented gatekeeper may mount it. Refresh `.audit-baseline.txt`.
+- [ ] **Step 11:** commit model-evaluator + build-dashboard + compose + Dockerfile + checker.
 
 ---
 
 ## Rollback
+Revert the build-dashboard handler to the `docker exec` version and re-add the `docker.sock` volume + Dockerfile CLI line; `docker compose up -d build-dashboard`. model-evaluator's new endpoint is additive and harmless if left.
 
-Single step: restore build-dashboard's `- /var/run/docker.sock:/var/run/docker.sock` volume, remove `DOCKER_HOST`, `docker compose up -d build-dashboard`. The proxy container can stay or be removed; it touches nothing else.
+## Residual / notes
+- model-evaluator `:8008` is host-published (`ports: ["8008:8008"]`, 0.0.0.0) and already serves unauthenticated internal endpoints (`/api/models`, deploy, etc.). The benchmark endpoint inherits that posture — it does **not** widen it (build-dashboard reaches it via internal DNS). Tightening 8008's host binding is a separate INV-PORTS item.
+- Net effect: build-dashboard goes from host-root-capable to **zero** Docker access.
 
-## Open questions for review
-1. Is `exec`-into-any-container (Option A residual) acceptable, or do we want Option C (no Docker at all on the dashboard)?
-2. Does `docker exec` over the tecnativa proxy need any flag beyond `CONTAINERS`+`EXEC`+`POST` (e.g. `ALLOW_START`, version/ping)? Verify against tecnativa 0.3.0 docs.
-3. Does build-dashboard's image actually contain the `docker` CLI client (it calls `/usr/local/bin/docker`)? Confirm it does and that the CLI honours `DOCKER_HOST` for `exec` streaming.
+## Negative tests retained for the checker (defence-in-depth, even though C has no proxy)
+If anyone ever reintroduces socket access, the checker must catch it; and these are the ops a socket would expose: `docker create -v /:/host …`, `stop`, `kill`, `rename`, `container prune`. None are reachable under Option C.
