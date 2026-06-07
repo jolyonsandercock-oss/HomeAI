@@ -5988,29 +5988,20 @@ async def forensics_resolve(dl_id: int = Query(...),
 @app.get("/api/benchmark/stream")
 async def benchmark_stream(model: str = Query("qwen2.5:7b"),
                            tier: str  = Query("hot", pattern="^(hot|medium|heavy)$")):
-    """Server-Sent Events: streams stdout from /app/run_benchmark.py inside
-    the model-evaluator container. Each SSE event is one stdout line."""
-    cmd = ["/usr/local/bin/docker", "exec",
-           "-e", "PYTHONUNBUFFERED=1",
-           "homeai-model-evaluator",
-           "python", "-u", "/app/run_benchmark.py",
-           "--model", model, "--tier", tier]
-
+    """Relay the benchmark SSE from model-evaluator over HTTP (F4: this
+    container has NO Docker access). model-evaluator runs the benchmark in its
+    own container and enforces the installed-model allowlist + single-flight."""
     async def gen():
-        proc = await asp.create_subprocess_exec(
-            *cmd, stdout=asp.PIPE, stderr=asp.STDOUT)
-        try:
-            while True:
-                line = await proc.stdout.readline()
-                if not line:
-                    break
-                # SSE event format: "data: <line>\n\n"
-                yield f"data: {line.decode('utf-8', errors='replace').rstrip()}\n\n"
-            await proc.wait()
-            yield f"event: done\ndata: exit_code={proc.returncode}\n\n"
-        finally:
-            if proc.returncode is None:
-                proc.terminate()
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream(
+                    "GET", "http://homeai-model-evaluator:8008/api/benchmark/stream",
+                    params={"model": model, "tier": tier}) as r:
+                if r.status_code != 200:
+                    body = (await r.aread()).decode("utf-8", "replace")[:200]
+                    yield f"event: error\ndata: model-evaluator {r.status_code}: {body}\n\n"
+                    return
+                async for chunk in r.aiter_raw():
+                    yield chunk
 
     return StreamingResponse(
         gen(),

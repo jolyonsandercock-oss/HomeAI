@@ -297,10 +297,9 @@ services:
       - ./AGENTS.md:/home_ai/AGENTS.md:ro
       - ./HOME-AI-STRETCH.md:/home_ai/HOME-AI-STRETCH.md:ro
       - /proc:/host/proc:ro
-      # Docker socket so /api/benchmark/stream can `docker exec` the
-      # benchmark runner inside homeai-model-evaluator and tail stdout.
-      # Read-write because docker exec needs to attach a session.
-      - /var/run/docker.sock:/var/run/docker.sock
+      # F4: NO docker.sock. /api/benchmark/stream now relays over HTTP from
+      # homeai-model-evaluator, which runs the benchmark in its own container.
+      # This web-facing container has zero Docker access.
     environment:
       PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
       PROM_URL: "http://homeai-prometheus:9090"
@@ -394,7 +393,8 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       ollama:   {condition: service_started}
-    ports: ["8008:8008"]
+    # F4: no host port — reached only over ai-internal (build-dashboard relays
+    # /api/benchmark/stream). Was 0.0.0.0:8008 (unauth deploy/benchmark surface).
     restart: unless-stopped
 
   google-fetch:

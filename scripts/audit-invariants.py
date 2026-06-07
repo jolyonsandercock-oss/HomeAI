@@ -17,7 +17,8 @@ Invariants checked (see AGENTS.md "Build rules"):
                    next query on a pooled connection.                    [WARN]
   INV-PG-SUPERUSER services must not connect as the postgres superuser
                    (BYPASSRLS defeats entity isolation).                 [FAIL]
-  INV-DOCKER-SOCK  docker.sock mounts must be read-only (:ro).           [FAIL]
+  INV-DOCKER-SOCK  no app service mounts docker.sock (RW=FAIL host-root;
+                   :ro=WARN — :ro is not real isolation).                 [FAIL]
   INV-BODY-TEXT    AI-prompt paths must use body_text_safe, never the raw
                    body_text (PII redaction).                            [WARN]
   INV-DIRECT-LLM   cloud LLM calls should route through the gateway
@@ -229,9 +230,17 @@ def check_compose() -> None:
             add("FAIL", "INV-PG-SUPERUSER", f"docker-compose.yml:{i}",
                 "service DSN connects as postgres superuser (BYPASSRLS) — "
                 "use a scoped role.")
-        if "docker.sock" in line and not stripped.rstrip(",").endswith(":ro"):
-            add("FAIL", "INV-DOCKER-SOCK", f"docker-compose.yml:{i}",
-                "docker.sock mounted read-write — use :ro or a socket proxy.")
+        if "docker.sock" in line and stripped.lstrip("-").strip().startswith("/"):
+            # :ro is NOT real isolation — the socket is a command channel to the
+            # daemon; the mount mode is not the authz boundary. RW = host-root
+            # vector (FAIL); :ro = still full API access, confirm it's needed (WARN).
+            ro = stripped.rstrip(",").endswith(":ro")
+            add("WARN" if ro else "FAIL", "INV-DOCKER-SOCK", f"docker-compose.yml:{i}",
+                "docker.sock mounted read-only — :ro does NOT block Engine API "
+                "writes; confirm this service truly needs Docker access."
+                if ro else
+                "docker.sock mounted read-write — host-root vector; remove it "
+                "(run the workload in its owning container + relay over HTTP).")
         # inline-array form: ports: ["8200:8200", "0.0.0.0:11434:11434"]
         if re.match(r"ports:\s*\[", stripped):
             for sm in PORT_SPEC_RE.finditer(line):

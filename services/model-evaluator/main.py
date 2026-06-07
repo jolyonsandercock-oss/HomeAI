@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -10,6 +11,7 @@ from typing import Literal
 import asyncpg
 import httpx
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 
 from benchmark_tasks import (
     EMAIL_CLASSIFICATION_SAMPLES,
@@ -98,6 +100,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# Single-flight guard for the benchmark SSE endpoint (one run at a time).
+_BENCH_LOCK = asyncio.Lock()
 
 
 @app.get("/healthcheck")
@@ -422,3 +427,48 @@ async def manual_trigger(
             })
 
     return {"scan": scan_result, "sweep": sweep_results}
+
+
+@app.get("/api/benchmark/stream")
+async def benchmark_stream(model: str = "qwen2.5:7b", tier: str = "hot"):
+    """SSE: run run_benchmark.py IN THIS container and stream stdout line by
+    line. Replaces build-dashboard's `docker exec` (F4 — the dashboard no longer
+    has any Docker access). Guards (per Codex review):
+      - model must be installed (model_registry.installed) — no arbitrary pulls;
+      - single-flight (one benchmark at a time) — 409 if busy;
+      - model/tier passed as argv (no shell), child reaped on disconnect.
+    """
+    if tier not in ("hot", "medium", "heavy"):
+        raise HTTPException(400, "tier must be hot|medium|heavy")
+    async with app.state.pool.acquire() as conn:
+        installed = await conn.fetchval(
+            "SELECT installed FROM model_registry WHERE model_name = $1", model)
+    if not installed:
+        raise HTTPException(400, f"model '{model}' is not installed")
+    if _BENCH_LOCK.locked():
+        raise HTTPException(409, "a benchmark is already running")
+
+    async def gen():
+        async with _BENCH_LOCK:
+            proc = await asyncio.create_subprocess_exec(
+                "python", "-u", "/app/run_benchmark.py",
+                "--model", model, "--tier", tier,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"})
+            try:
+                while True:
+                    line = await proc.stdout.readline()
+                    if not line:
+                        break
+                    yield f"data: {line.decode('utf-8', 'replace').rstrip()}\n\n"
+                await proc.wait()
+                yield f"event: done\ndata: exit_code={proc.returncode}\n\n"
+            finally:
+                if proc.returncode is None:
+                    proc.kill()
+                    await proc.wait()   # reap — avoid zombie on client disconnect
+
+    return StreamingResponse(
+        gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
