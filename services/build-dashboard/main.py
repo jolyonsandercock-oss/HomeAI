@@ -4775,10 +4775,9 @@ async def api_kpi_sparklines(days: int = 14):
 async def api_vehicles():
     """U51 T5 — vehicles + 30-day expiry alerts. U66 — also surfaces docs
     linked to each vehicle (auto-linked at upload by plate regex, or manual)."""
-    p = await pool()
-    async with p.acquire() as c:
-        await c.execute("SET app.current_entity = 'all'")
-        await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+    # Phase B (H5): use db_session so this enforces RLS as homeai_pipeline under
+    # RLS_ENFORCE_SET_ROLE (was inline pool + superuser bypass).
+    async with db_session(entity="all") as c:
         rows = await c.fetch("""
           SELECT v.id, v.registration, v.make_model, v.year_built, v.v5c_doc_ref,
                  v.mot_due, v.insurance_renewal, v.road_tax_due,
@@ -4795,7 +4794,8 @@ async def api_vehicles():
             ORDER BY v.registration
         """)
         alerts = await c.fetch("""
-          SELECT vehicle_id, registration, make_model, kind, due, days_until
+          SELECT vehicle_id, registration, make_model, kind,
+                 due_date AS due, days_to_due AS days_until
             FROM v_vehicle_alerts
         """)
         docs = await c.fetch("""
