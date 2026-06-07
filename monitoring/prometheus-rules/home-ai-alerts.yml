@@ -111,25 +111,39 @@ groups:
           summary: "Tier {{ $labels.tier }} would have been quota-throttled ({{ $value }} calls today)"
           description: "If enforce_mode were true, {{ $value }} calls to tier {{ $labels.tier }} would have returned 429. Shadow mode is doing its job — review whether enforce_mode is safe to flip yet."
 
-      # U143 — tier ceiling actually breached (enforce mode would 429)
+      # U143 — a CAPPED tier (P1/P2/P3) breached its ceiling.
+      # P0 is a FLOOR (guaranteed minimum), not a cap — it may legitimately use
+      # P1/P2/P3's idle budget, so it's excluded here (P0 busyness is a heads-up,
+      # see P0FloorBusy, not a breach). Fire only when a capped tier is over its
+      # ceiling — that means it's trying to eat into P0's reserved floor.
       - alert: TierCeilingBreached
-        expr: ai_spend_today_by_tier_spent_gbp > on(tier) ai_quota_ceiling_ceiling_gbp
-        for: 1m
-        labels: { severity: warning, component: quota }
-        annotations:
-          summary: "AI spend tier {{ $labels.tier }} exceeded daily ceiling"
-          description: "Spent £{{ $value }} > tier ceiling. In shadow mode this is a warning; in enforce mode the gateway is now returning 429 to {{ $labels.tier }} workflows."
-
-      # U143 — P0 floor being eaten
-      # Fires when P0 has used ≥80% of its floor — gives time to investigate
-      # before financial-recon workflows actually start to fail.
-      - alert: P0FloorRunningLow
-        expr: ai_spend_today_by_tier_spent_gbp{tier="P0"} > 0.72
+        expr: ai_spend_today_by_tier_spent_gbp{tier!="P0"} > on(tier) ai_quota_ceiling_ceiling_gbp
         for: 5m
         labels: { severity: warning, component: quota }
         annotations:
-          summary: "P0 (financial) spend at £{{ $value }} of £0.90 floor"
-          description: "P0 floor is reserved for bank recon + invoice extraction + compliance. >80% used means a heavy day for those flows. Check what's running."
+          summary: "AI spend tier {{ $labels.tier }} exceeded its ceiling"
+          description: "Spent £{{ $value }} > tier ceiling — a capped tier is over budget. Advisory in shadow mode; in enforce mode the gateway would 429 {{ $labels.tier }}."
+
+      # U143 — P0 floor is busy. Informational (not actionable in shadow mode):
+      # a heavy-but-normal invoice/recon day routinely passes 80% of the floor.
+      # Downgraded to info so it doesn't raise a warning every busy day.
+      - alert: P0FloorBusy
+        expr: ai_spend_today_by_tier_spent_gbp{tier="P0"} > 0.72
+        for: 10m
+        labels: { severity: info, component: quota }
+        annotations:
+          summary: "P0 (financial) spend at £{{ $value }} — heavy day for recon/invoices"
+          description: "P0 covers bank recon + invoice extraction + compliance. Busy is fine; informational only. Real budget risk is DailyBudgetNearCap."
+
+      # The actually-actionable budget signal: total daily spend nearing the
+      # £3/day API-key cap (real money; the key gets throttled at the cap).
+      - alert: DailyBudgetNearCap
+        expr: sum(ai_spend_today_by_tier_spent_gbp) > 2.70
+        for: 5m
+        labels: { severity: warning, component: quota }
+        annotations:
+          summary: "Total AI spend £{{ $value }} — nearing the £3/day cap"
+          description: "Sum across all tiers is >90% of the £3 daily API budget. This is the real budget signal; per-tier ceilings are advisory in shadow mode."
 
   # U226: GPU runtime health
   - name: home-ai-gpu
