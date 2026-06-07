@@ -34,7 +34,11 @@ def _load_schema():
     return None
 _SCHEMA = _load_schema()
 
-TIER_THRESHOLD = {"local": 0.75, "haiku": 0.55, "sonnet": 0.50}
+# local-accept lowered 0.75 -> 0.70 (2026-06-07): keep the 0.70-0.75 confidence
+# band on the free local qwen instead of escalating to paid Haiku — qwen2.5:7b is
+# ~95.7% composite (U7 tuning), so this is a low-risk cost cut. Watch extraction
+# accuracy; raise back toward 0.75 if borderline invoices start coming out wrong.
+TIER_THRESHOLD = {"local": 0.70, "haiku": 0.55, "sonnet": 0.50}
 # Anthropic pricing $/MTok (in, out)
 PRICE = {HAIKU: (1.0, 5.0), SONNET: (3.0, 15.0)}
 
