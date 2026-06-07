@@ -71,6 +71,11 @@ check "current month partition"      "v=\$($PSQL \"SELECT to_regclass('public.ev
 check "next-month partition"         "v=\$($PSQL \"SELECT to_regclass('public.events_'||to_char(NOW()+INTERVAL'1 month','YYYY_MM'))::text\"); [[ -n \$v ]] && [[ \$v != '<NULL>' ]] && echo \$v"
 check "stuck processing leases"      "v=\$($PSQL \"SELECT count(*) FROM events WHERE status='processing' AND processing_started_at < NOW()-INTERVAL'30 minutes'\"); [[ \$v -eq 0 ]] && echo \$v"
 check "dead_letter recent"           "v=\$($PSQL \"SELECT count(*) FROM dead_letter WHERE created_at > NOW()-INTERVAL'1 hour' AND pipeline!='system_marker'\"); [[ \$v -lt 5 ]] && echo \$v" warning
+# Silent-pipeline-failure detector (V248): a record that should have produced a
+# downstream row but didn't (e.g. a Paperless invoice doc that never reached
+# vendor_invoice_inbox — the post-consume-webhook gap). Warning: a backlog should
+# surface but isn't service-down.
+check "no pipeline drift"            "v=\$($PSQL \"SELECT count(*) FROM home_ai.v_pipeline_drift\"); [[ \$v -eq 0 ]] && echo ok || { echo \"\$v drifted\"; false; }" warning
 check "system.state running"         "$PSQL \"SELECT value->>'state' FROM static_context WHERE key='system.state'\" | command grep -q '^running$' && echo running"
 check "RLS test suite"               "docker exec -i homeai-postgres psql -U homeai_pipeline -d homeai -v ON_ERROR_STOP=1 < /home_ai/postgres/tests/rls-test-suite.sql 2>&1 | command grep -q 'RLS test suite passed' && echo ok"
 echo
