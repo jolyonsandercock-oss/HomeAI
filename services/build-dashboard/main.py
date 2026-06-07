@@ -3541,14 +3541,15 @@ async def api_bot_ask(body: dict = Body(...)):
                         try:
                             await db_one("""
                                 INSERT INTO audit_log
-                                    (action, source, payload)
-                                VALUES ('bot_run_query', 'api/bot/ask',
+                                    (pipeline, action, result, ai_parsed, realm)
+                                VALUES ('api/bot/ask', 'bot_run_query', 'ok',
                                         jsonb_build_object(
                                           'channel', $1::text,
                                           'sql', $2::text,
                                           'purpose', $3::text,
-                                          'n_rows', $4::int))
-                            """, channel, sql_to_run, purpose, len(rows))
+                                          'n_rows', $4::int),
+                                        $5)
+                            """, channel, sql_to_run, purpose, len(rows), caller_realm)
                         except Exception:
                             pass
                         preview = [_isoify(dict(r)) for r in rows[:50]]
