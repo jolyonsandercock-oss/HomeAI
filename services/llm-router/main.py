@@ -97,6 +97,33 @@ DEFAULT_THRESHOLDS = {
     "heavy": 0.90,
 }
 
+# Budget circuit-breaker (Hermes HIGH #4). The per-tier quota ceilings are SHADOW
+# (advisory) — nothing blocks a runaway. This is the hard backstop: once today's
+# TOTAL spend crosses a high ceiling (well above the £3 soft cap), cloud calls are
+# refused so a tight loop / prompt injection can't burn unbounded money. Escalations
+# degrade gracefully (keep the free local result); direct cloud tasks get a 429.
+# FAIL-OPEN: any error in the check ALLOWS the call — a breaker bug must never take
+# the inference pipeline down. Cached ~15s to avoid a query per request.
+HARD_DAILY_CAP_GBP = float(os.environ.get("HARD_DAILY_CAP_GBP", "6.0"))
+_budget_cache = {"day": None, "spent": 0.0, "at": 0.0}
+
+async def _over_hard_budget(pool) -> bool:
+    try:
+        import datetime
+        now = time.time()
+        today = datetime.date.today().isoformat()
+        if _budget_cache["day"] == today and (now - _budget_cache["at"]) < 15:
+            return _budget_cache["spent"] >= HARD_DAILY_CAP_GBP
+        async with pool.acquire() as c:
+            spent = await c.fetchval(
+                "SELECT coalesce(sum(cost_gbp), 0) FROM ai_usage "
+                "WHERE timestamp::date = current_date")
+        spent = float(spent or 0.0)
+        _budget_cache.update(day=today, spent=spent, at=now)
+        return spent >= HARD_DAILY_CAP_GBP
+    except Exception:
+        return False  # fail open — never block a real call due to a breaker bug
+
 
 class RouteRequest(BaseModel):
     task_type: str
@@ -362,6 +389,11 @@ async def route(req: RouteRequest) -> RouteResponse:
         return RouteResponse(**cached_response)
 
     if req.task_type in CLAUDE_DIRECT:
+        if await _over_hard_budget(app.state.pool):
+            raise HTTPException(
+                429,
+                f"daily AI hard cap £{HARD_DAILY_CAP_GBP:.2f} exceeded — cloud paused "
+                f"(runaway guard); retry tomorrow or raise HARD_DAILY_CAP_GBP")
         model_to_use = CLAUDE_DIRECT[req.task_type]
         text, prompt_tokens, completion_tokens, latency_ms = await _call_claude(
             app.state.http, model_to_use, req.prompt, task_type=req.task_type
@@ -442,7 +474,8 @@ async def route(req: RouteRequest) -> RouteResponse:
         escalated = True
         escalation_reason = "ollama unavailable or timed out"
 
-    if escalated and req.allow_escalation:
+    over_budget = escalated and req.allow_escalation and await _over_hard_budget(app.state.pool)
+    if escalated and req.allow_escalation and not over_budget:
         model_to_use = "claude-haiku-4-5-20251001"
         try:
             text, prompt_tokens, completion_tokens, latency_ms = await _call_claude(
@@ -459,6 +492,15 @@ async def route(req: RouteRequest) -> RouteResponse:
             )
             raise
         tier = "claude"
+    elif over_budget:
+        # Hard budget cap hit — keep the free local result instead of escalating.
+        # This is the designed degradation: the caller (e.g. invoice ladder) still
+        # gets an answer, just the lower-confidence local one.
+        escalation_reason = (
+            f"{escalation_reason}; cloud escalation skipped (hard budget cap "
+            f"£{HARD_DAILY_CAP_GBP:.2f})")
+        escalated = False
+        model_to_use = model_name
     elif escalated:
         asyncio.create_task(
             _log_usage(

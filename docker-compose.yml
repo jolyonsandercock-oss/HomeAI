@@ -433,6 +433,9 @@ services:
       REDIS_HOST: "redis"
       REDIS_PASSWORD: "${REDIS_PASSWORD}"
       PAYLOAD_HMAC_KEY: "${PAYLOAD_HMAC_KEY}"
+      # Hard runaway budget cap (Hermes #4). Above the £3/day soft cap; only trips
+      # on a genuine runaway. Cloud calls refused over this; escalations keep local.
+      HARD_DAILY_CAP_GBP: "${HARD_DAILY_CAP_GBP:-6.0}"
     depends_on:
       postgres: {condition: service_healthy}
       ollama:   {condition: service_started}
