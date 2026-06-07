@@ -52,13 +52,26 @@ No 5xx / errors during the flag-on window; `/api/healthz-deep` stayed 200.
   (db_one/db_all/db_session) now enforce RLS. Instant rollback: `.env`
   `RLS_ENFORCE_SET_ROLE=0` + recreate.
 
-### Phase B — remaining for FULL coverage (not blocking; helper paths done)
-- [ ] **Inline-pool endpoints** (main.py ~2002–2335 etc.) acquire `pool()`
-  directly and `SET app.current_entity` inline — under the flag they stay
-  superuser (no enforcement, but no breakage). Route them through the helpers.
-- [ ] **bot-responder** — separate service, still superuser; apply the same
-  SET LOCAL ROLE + dual-GUC pattern.
-- [ ] Pre-existing bug to fix separately: `/api/vehicles` malformed query.
+### Phase B — STARTED 2026-06-07; scope collapsed after investigation
+- [x] **`/api/vehicles`** — fixed the pre-existing malformed query (v_vehicle_alerts
+  → due_date/days_to_due) AND migrated off the inline pool to `db_session` — first
+  inline→helper conversion; now enforces RLS. (commit 4695f27)
+- [x] **bot-responder — already enforced, no migration needed.** Its
+  security-critical path (`run_slug`, executing AI/slug SQL) runs on a dedicated
+  **`homeai_readonly`** (non-superuser) connection in a `readonly=True` tx with
+  `SET LOCAL app.current_entity` + `set_realm(caller_realm)` — RLS already applies
+  (responder.py:157-173, ro_dsn at 299-303). The superuser `PG_DSN` connection is
+  used ONLY for internal bookkeeping writes (query_rejections, audit, status). This
+  is arguably a cleaner pattern than the dashboard's SET ROLE.
+- [ ] **Inline-pool dashboard endpoints** (~50 sites, main.py) still acquire
+  `pool()` directly + `SET app.current_entity` inline → stay superuser under the
+  flag (unenforced, not broken). These are owner-facing admin/dashboard reads;
+  RLS adds marginal value for single-owner usage. **Recommendation: migrate
+  opportunistically when touching each endpoint** (as done for vehicles), not as a
+  risky 50-edit big-bang. Heterogeneous (entity 'all'/'1', some hardcode
+  set_realm('work'), a few session-level `set_config(...,false)`), so each needs
+  its entity/realm preserved — `db_session` would need an optional realm override
+  to migrate the hardcoded-realm ones uniformly.
 
 ## (historical) Before flipping `RLS_ENFORCE_SET_ROLE=1` in production
 - [ ] **Grant-gap audit on writes.** `homeai_pipeline` has INSERT on 191/254 and
