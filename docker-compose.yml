@@ -317,11 +317,13 @@ services:
       # U52 R2 realm enforcement. 0 = dormant (every request runs as OWNER);
       # flip to 1 once Authelia (R3) is wired and sets the X-Realm header.
       REALM_ENFORCE: "1"
-      # H5 Path B — RLS service-role enforcement (default 0 = connect as
-      # superuser, RLS bypassed, pre-H5 behaviour). 1 = shared db helpers
-      # SET LOCAL ROLE to a non-superuser so realm/entity policies apply.
-      # Toggle via .env; flip back to 0 to instantly revert.
-      RLS_ENFORCE_SET_ROLE: "${RLS_ENFORCE_SET_ROLE:-0}"
+      # H5 Path B — RLS service-role enforcement. ROLLED OUT 2026-06-07: default
+      # now 1 = shared db helpers SET LOCAL ROLE homeai_pipeline (non-superuser)
+      # so realm/entity RLS policies actually enforce on helper-path queries.
+      # Grant gap closed in V246; soak-tested 68/69 GET endpoints clean. Inline-
+      # pool endpoints + bot-responder still connect as superuser (Phase B).
+      # Instant rollback: set RLS_ENFORCE_SET_ROLE=0 in .env + recreate.
+      RLS_ENFORCE_SET_ROLE: "${RLS_ENFORCE_SET_ROLE:-1}"
     # U226: CDI device naming — see ollama service for context.
     devices:
       - nvidia.com/gpu=all

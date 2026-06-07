@@ -34,7 +34,33 @@ No 5xx / errors during the flag-on window; `/api/healthz-deep` stayed 200.
 3. **`home_ai.set_realm()` sets only the realm, never the entity.** Any code that
    relies on it for RLS context must also set the entity under `SET ROLE`.
 
-## Before flipping `RLS_ENFORCE_SET_ROLE=1` in production
+## ROLLOUT 2026-06-07 — flag ENABLED in production (helper paths)
+
+- **Grant gap closed (V246):** `GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES`
+  + `USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO homeai_pipeline`, plus
+  `ALTER DEFAULT PRIVILEGES` so future tables/sequences auto-grant. Re-audit: 0
+  missing across all four privileges + sequences. (homeai_pipeline stays
+  non-super/non-bypassrls, so RLS still enforces — table grants are coarse, RLS
+  is the row boundary; this is the same config n8n already runs under.)
+- **Soak-tested under flag ON:** 68/69 GET `/api/*` endpoints clean via the
+  `X-Realm: all` test override; the one 500 (`/api/vehicles`) is a PRE-EXISTING
+  malformed-query bug (`column "due" does not exist`, main.py ~4798), unrelated
+  to RLS (the `vehicles` table reads fine as homeai_pipeline). healthz-deep 200,
+  0 firing alerts. Canary: running_as=homeai_pipeline, bypasses_rls=false,
+  bank_txn owner/work/personal = 22476/12941/9535 (filtered).
+- **Default flipped to 1** in docker-compose.yml. Helper-path queries
+  (db_one/db_all/db_session) now enforce RLS. Instant rollback: `.env`
+  `RLS_ENFORCE_SET_ROLE=0` + recreate.
+
+### Phase B — remaining for FULL coverage (not blocking; helper paths done)
+- [ ] **Inline-pool endpoints** (main.py ~2002–2335 etc.) acquire `pool()`
+  directly and `SET app.current_entity` inline — under the flag they stay
+  superuser (no enforcement, but no breakage). Route them through the helpers.
+- [ ] **bot-responder** — separate service, still superuser; apply the same
+  SET LOCAL ROLE + dual-GUC pattern.
+- [ ] Pre-existing bug to fix separately: `/api/vehicles` malformed query.
+
+## (historical) Before flipping `RLS_ENFORCE_SET_ROLE=1` in production
 - [ ] **Grant-gap audit on writes.** `homeai_pipeline` has INSERT on 191/254 and
       UPDATE on 180/254 public tables. Helper-using write endpoints that target an
       ungranted table will `permission denied` (500) under the flag. Enumerate
