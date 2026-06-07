@@ -125,9 +125,11 @@ RLS_SET_ROLE_NAME = os.environ.get("RLS_SET_ROLE_NAME", "homeai_pipeline")
 if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", RLS_SET_ROLE_NAME):
     raise RuntimeError(f"unsafe RLS_SET_ROLE_NAME: {RLS_SET_ROLE_NAME!r}")
 
-async def _apply_db_context(c, entity: str | None):
+async def _apply_db_context(c, entity: str | None, realm: str | None = None):
     """Set realm (+ entity) on the transaction; under RLS_ENFORCE_SET_ROLE also
-    drop superuser for the txn. Must run inside an open transaction."""
+    drop superuser for the txn. Must run inside an open transaction. `realm`
+    overrides the request realm — pass it for endpoints that must pin a specific
+    realm (e.g. 'owner' for cross-realm admin/recon views)."""
     if RLS_ENFORCE_SET_ROLE:
         await c.execute(f"SET LOCAL ROLE {RLS_SET_ROLE_NAME}")
         # Without an explicit entity the permissive entity_isolation policy
@@ -136,7 +138,8 @@ async def _apply_db_context(c, entity: str | None):
                         str(entity) if entity is not None else "all")
     elif entity is not None:
         await c.execute("SELECT set_config('app.current_entity', $1, true)", str(entity))
-    await c.execute("SELECT home_ai.set_realm($1)", _current_realm.get())
+    await c.execute("SELECT home_ai.set_realm($1)",
+                    realm if realm is not None else _current_realm.get())
 
 async def db_one(sql: str, *args):
     p = await pool()
@@ -159,14 +162,15 @@ async def db_all(sql: str, *args):
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
-async def db_session(entity: str | None = None):
+async def db_session(entity: str | None = None, realm: str | None = None):
     """Yields an asyncpg connection with realm + optional entity SET LOCAL.
     The connection is released on context exit — use inside endpoint
-    blocks only, never around `await call_next` or template renders."""
+    blocks only, never around `await call_next` or template renders.
+    Pass `realm` to pin a specific realm (else the request realm is used)."""
     p = await pool()
     async with p.acquire() as c:
         async with c.transaction():
-            await _apply_db_context(c, entity)
+            await _apply_db_context(c, entity, realm)
             yield c
 
 # ─── Helpers ────────────────────────────────────────────────────
@@ -6424,10 +6428,10 @@ async def recon_page():
 @app.get("/api/recon/summary")
 async def api_recon_summary(window_days: int = 30):
     """U69 T3: top-of-page tiles for /recon — counts per level + cash variance."""
-    p = await pool()
-    async with p.acquire() as c:
-        await c.execute("SELECT set_config('app.current_entity','all',false)")
-        await c.execute("SELECT set_config('app.current_realm','owner',false)")
+    # db_session: transaction-local entity/realm (was session-level set_config
+    # with is_local=false, which leaked onto the pooled connection). Pinned to
+    # owner/all — recon tiles are a cross-realm admin view.
+    async with db_session(entity="all", realm="owner") as c:
         l1 = await c.fetchrow("""
             SELECT
               COUNT(*) FILTER (WHERE status='ok')          AS ok,
@@ -6478,10 +6482,8 @@ async def api_recon_summary(window_days: int = 30):
 @app.get("/api/recon/exceptions")
 async def api_recon_exceptions(window_days: int = 30, status: str = "open"):
     """U69 T3: mart.exceptions filtered + sorted for Tabulator."""
-    p = await pool()
-    async with p.acquire() as c:
-        await c.execute("SELECT set_config('app.current_entity','all',false)")
-        await c.execute("SELECT set_config('app.current_realm','owner',false)")
+    # db_session: transaction-local (was leaking session-level set_config).
+    async with db_session(entity="all", realm="owner") as c:
         rows = await c.fetch("""
             SELECT id, raised_at, severity, kind, source, site, transaction_date,
                    summary, status
@@ -6497,9 +6499,9 @@ async def api_recon_exceptions(window_days: int = 30, status: str = "open"):
 async def api_recipes_sales_vs_consumption(weeks: int = 8, family: str = ""):
     """U66 T3: sales→consumption from recipe expansion vs invoice purchases.
     Returns weekly rows per product_canonical, oldest→newest within window."""
-    p = await pool()
-    async with p.acquire() as c:
-        await c.execute("SELECT set_config('app.current_entity','all',false)")
+    # db_session: transaction-local (was leaking session-level set_config; this
+    # one never set realm at all — now pinned owner/all like the other recon views).
+    async with db_session(entity="all", realm="owner") as c:
         params = [weeks]
         where  = ["week >= current_date - ($1::int * 7)::int"]
         if family.strip():
