@@ -84,19 +84,18 @@ echo
 echo "[4] n8n workflows"
 ACTIVE=$($PSQL "SELECT count(*) FROM workflow_entity WHERE active=true")
 check "active workflow count >= 13" "[[ $ACTIVE -ge 13 ]] && echo $ACTIVE"
-# STALE NOTE CORRECTED 2026-06-07: P2 was NOT permanently retired. It was revived +
-# proven working 2026-06-06 (U243 — 55 invoices captured clean, zero failures), then
-# turned off ~11:35 that day for an unrecorded reason. While off, invoice.detected
-# events accumulate `pending` (uncaptured). Flagged below as WARNING (not FAIL) so it
-# surfaces in the selftest instead of being silently ignored, without paging the
-# supervisor — bump to critical once the keep-it-on decision is made.
+# invoice-pipeline-v1 (P2): keep-on decision MADE 2026-06-08 — reactivated +
+# drained cleanly (claim re-admit V250 + router trigger + active + reload; 0 flood).
+# Expected active = CRITICAL so a future silent drop pages. (Was retired 05-30,
+# revived 06-06, silently off 06-06→06-08 because of a stale selftest exclusion —
+# that's the gap this check closes.)
 for wf in test-master-router gmail-ingest-v1 partition-maintenance-v1 \
           bank-csv-import-v1 nanny-v1 report-ingestion-v1 \
           alert-sink-v1 hmac-verifier-v1 diagnostics-v1 cleanup-v1 \
           watchdog-n8n-errors; do
   check "  workflow $wf active" "$PSQL \"SELECT active FROM workflow_entity WHERE id='$wf'\" | command grep -q '^t$' && echo active"
 done
-check "  invoice-pipeline-v1 (P2) active" "$PSQL \"SELECT active FROM workflow_entity WHERE id='invoice-pipeline-v1'\" | command grep -q '^t$' && echo active" "warning"
+check "  invoice-pipeline-v1 (P2) active" "$PSQL \"SELECT active FROM workflow_entity WHERE id='invoice-pipeline-v1'\" | command grep -q '^t$' && echo active"
 echo
 
 # ── HTTP probes ────────────────────────────────────────────────
