@@ -21,7 +21,7 @@
       "position": [480, 300],
       "parameters": {
         "operation": "executeQuery",
-        "query": "SET LOCAL app.current_entity = 'all'; SELECT e.id AS email_id, e.gmail_message_id, e.from_address, e.subject, e.body_text, e.received_at FROM emails e WHERE (e.from_address ILIKE '%@touchoffice.%' OR e.from_address ILIKE '%@icrtouch.%') AND e.received_at > NOW() - INTERVAL '7 days' AND NOT EXISTS (SELECT 1 FROM epos_daily ed WHERE ed.email_id = e.id) ORDER BY e.received_at DESC LIMIT 50;",
+        "query": "SET app.current_entity = 'all'; SELECT e.id AS email_id, e.gmail_message_id, e.from_address, e.subject, e.body_text, e.received_at FROM emails e WHERE (e.from_address ILIKE '%@touchoffice.%' OR e.from_address ILIKE '%@icrtouch.%') AND e.received_at > NOW() - INTERVAL '7 days' AND NOT EXISTS (SELECT 1 FROM epos_daily ed WHERE ed.email_id = e.id) ORDER BY e.received_at DESC LIMIT 50;",
         "options": {}
       },
       "credentials": {
@@ -68,7 +68,7 @@
       "position": [1200, 240],
       "parameters": {
         "operation": "executeQuery",
-        "query": "SET LOCAL app.current_entity = '1'; INSERT INTO epos_daily (entity_id, report_date, session, gross, net, vat, covers, email_id, raw_text) VALUES (1, '{{ $json.report_date }}', '{{ $json.session }}', {{ $json.gross ?? 'NULL' }}, {{ $json.net ?? 'NULL' }}, {{ $json.vat ?? 'NULL' }}, {{ $json.covers ?? 'NULL' }}, {{ $json.email_id }}, $pl${{ $json.raw_text }}$pl$) ON CONFLICT (entity_id, report_date, session) DO UPDATE SET gross = EXCLUDED.gross, net = EXCLUDED.net, vat = EXCLUDED.vat, covers = EXCLUDED.covers, email_id = EXCLUDED.email_id, raw_text = EXCLUDED.raw_text RETURNING id; INSERT INTO audit_log (pipeline, action, ai_worker, ai_parsed, result, provider) VALUES ('p5-epos', 'parsed_z_report', 'epos_parser', $pl${{ JSON.stringify({email_id: $json.email_id, report_date: $json.report_date, session: $json.session, gross: $json.gross, covers: $json.covers}) }}$pl$::jsonb, 'success', 'local') RETURNING id;",
+        "query": "SET app.current_entity = '1'; INSERT INTO epos_daily (entity_id, report_date, session, gross, net, vat, covers, email_id, raw_text) VALUES (1, '{{ $json.report_date }}', '{{ $json.session }}', {{ $json.gross ?? 'NULL' }}, {{ $json.net ?? 'NULL' }}, {{ $json.vat ?? 'NULL' }}, {{ $json.covers ?? 'NULL' }}, {{ $json.email_id }}, $pl${{ $json.raw_text }}$pl$) ON CONFLICT (entity_id, report_date, session) DO UPDATE SET gross = EXCLUDED.gross, net = EXCLUDED.net, vat = EXCLUDED.vat, covers = EXCLUDED.covers, email_id = EXCLUDED.email_id, raw_text = EXCLUDED.raw_text RETURNING id; INSERT INTO audit_log (pipeline, action, ai_worker, ai_parsed, result, provider) VALUES ('p5-epos', 'parsed_z_report', 'epos_parser', $pl${{ JSON.stringify({email_id: $json.email_id, report_date: $json.report_date, session: $json.session, gross: $json.gross, covers: $json.covers}) }}$pl$::jsonb, 'success', 'local') RETURNING id;",
         "options": {}
       },
       "credentials": {

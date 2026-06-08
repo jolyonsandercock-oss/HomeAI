@@ -304,7 +304,7 @@
         },
         "parameters": {
           "operation": "executeQuery",
-          "query": "SET LOCAL app.current_entity = '{{ $json.ai_entity_id }}';\nINSERT INTO emails (\n  gmail_message_id, account, from_address, from_name, subject,\n  body_text, body_text_safe, received_at, classification, confidence_score,\n  entity_id, has_attachment, requires_human, action_required, processed\n) VALUES (\n  '{{ $json.sql_gmail_message_id }}',\n  '{{ $json.sql_account }}',\n  '{{ $json.sql_from_address }}',\n  '{{ $json.sql_from_name }}',\n  '{{ $json.sql_subject }}',\n  '{{ $json.sql_body_text }}',\n  '{{ $json.body_text_safe.replace(/'/g, \"''\") }}',\n  '{{ $json.sql_received_at }}',\n  '{{ $json.ai_category }}',\n  {{ $json.ai_confidence }},\n  {{ $json.ai_entity_id }},\n  {{ !!$json.has_attachment }},\n  {{ !!$json.ai_requires_human }},\n  {{ $json.ai_category === 'action-required' }},\n  false\n) RETURNING id, trace_id;\nRESET LOCAL app.current_entity;",
+          "query": "SET app.current_entity = '{{ $json.ai_entity_id }}';\nINSERT INTO emails (\n  gmail_message_id, account, from_address, from_name, subject,\n  body_text, body_text_safe, received_at, classification, confidence_score,\n  entity_id, has_attachment, requires_human, action_required, processed\n) VALUES (\n  '{{ $json.sql_gmail_message_id }}',\n  '{{ $json.sql_account }}',\n  '{{ $json.sql_from_address }}',\n  '{{ $json.sql_from_name }}',\n  '{{ $json.sql_subject }}',\n  '{{ $json.sql_body_text }}',\n  '{{ $json.body_text_safe.replace(/'/g, \"''\") }}',\n  '{{ $json.sql_received_at }}',\n  '{{ $json.ai_category }}',\n  {{ $json.ai_confidence }},\n  {{ $json.ai_entity_id }},\n  {{ !!$json.has_attachment }},\n  {{ !!$json.ai_requires_human }},\n  {{ $json.ai_category === 'action-required' }},\n  false\n) RETURNING id, trace_id;\nRESET app.current_entity;",
           "options": {
             "allowMultipleStatements": true
           }
@@ -353,7 +353,7 @@
         },
         "parameters": {
           "operation": "executeQuery",
-          "query": "SET LOCAL app.current_entity = '{{ $json.ai_entity_id }}';\nINSERT INTO events (event_type, source, entity_id, payload, payload_signature,\n                   trace_id, idempotency_key, status, pipeline_version)\nSELECT 'email.received', 'gmail', {{ $json.ai_entity_id }},\n       '{{ $json.rcvd_payload }}'::jsonb, '{{ $json.rcvd_sig }}',\n       '{{ $json.trace_id }}'::uuid, '{{ $json.idem_email }}',\n       'processed', '1.0'\n WHERE NOT EXISTS (\n   SELECT 1 FROM events WHERE idempotency_key = '{{ $json.idem_email }}'\n )\nRETURNING id;",
+          "query": "SET app.current_entity = '{{ $json.ai_entity_id }}';\nINSERT INTO events (event_type, source, entity_id, payload, payload_signature,\n                   trace_id, idempotency_key, status, pipeline_version)\nSELECT 'email.received', 'gmail', {{ $json.ai_entity_id }},\n       '{{ $json.rcvd_payload }}'::jsonb, '{{ $json.rcvd_sig }}',\n       '{{ $json.trace_id }}'::uuid, '{{ $json.idem_email }}',\n       'processed', '1.0'\n WHERE NOT EXISTS (\n   SELECT 1 FROM events WHERE idempotency_key = '{{ $json.idem_email }}'\n )\nRETURNING id;",
           "options": {}
         }
       },
@@ -374,7 +374,7 @@
         },
         "parameters": {
           "operation": "executeQuery",
-          "query": "SET LOCAL app.current_entity = '{{ $('Sign Payloads').first().json.ai_entity_id }}';\nINSERT INTO events (event_type, source, entity_id, payload, payload_signature,\n                   trace_id, idempotency_key, status, pipeline_version)\nSELECT 'email.classified', 'email_pipeline', {{ $('Sign Payloads').first().json.ai_entity_id }},\n       '{{ $('Sign Payloads').first().json.clsf_payload }}'::jsonb,\n       '{{ $('Sign Payloads').first().json.clsf_sig }}',\n       '{{ $('Sign Payloads').first().json.trace_id }}'::uuid,\n       '{{ $('Sign Payloads').first().json.idem_classified }}',\n       'processed', '1.0'\n WHERE NOT EXISTS (\n   SELECT 1 FROM events WHERE idempotency_key = '{{ $('Sign Payloads').first().json.idem_classified }}'\n )\nRETURNING id;",
+          "query": "SET app.current_entity = '{{ $('Sign Payloads').first().json.ai_entity_id }}';\nINSERT INTO events (event_type, source, entity_id, payload, payload_signature,\n                   trace_id, idempotency_key, status, pipeline_version)\nSELECT 'email.classified', 'email_pipeline', {{ $('Sign Payloads').first().json.ai_entity_id }},\n       '{{ $('Sign Payloads').first().json.clsf_payload }}'::jsonb,\n       '{{ $('Sign Payloads').first().json.clsf_sig }}',\n       '{{ $('Sign Payloads').first().json.trace_id }}'::uuid,\n       '{{ $('Sign Payloads').first().json.idem_classified }}',\n       'processed', '1.0'\n WHERE NOT EXISTS (\n   SELECT 1 FROM events WHERE idempotency_key = '{{ $('Sign Payloads').first().json.idem_classified }}'\n )\nRETURNING id;",
           "options": {}
         }
       },
@@ -431,7 +431,7 @@
         },
         "parameters": {
           "operation": "executeQuery",
-          "query": "SET LOCAL app.current_entity = '{{ $(\"Sign Payloads\").first().json.ai_entity_id }}';\nINSERT INTO events (event_type, source, entity_id, payload, payload_signature,\n                   trace_id, idempotency_key, status, pipeline_version,\n                   parent_event_id)\nSELECT 'invoice.detected', 'email_pipeline', {{ $('Sign Payloads').first().json.ai_entity_id }},\n       '{{ $('Sign Payloads').first().json.inv_payload }}'::jsonb,\n       '{{ $('Sign Payloads').first().json.inv_sig }}',\n       '{{ $('Sign Payloads').first().json.trace_id }}'::uuid,\n       '{{ $('Sign Payloads').first().json.idem_invoice }}',\n       'pending', '1.0', NULL\n WHERE NOT EXISTS (\n   SELECT 1 FROM events WHERE idempotency_key = '{{ $('Sign Payloads').first().json.idem_invoice }}'\n );",
+          "query": "SET app.current_entity = '{{ $(\"Sign Payloads\").first().json.ai_entity_id }}';\nINSERT INTO events (event_type, source, entity_id, payload, payload_signature,\n                   trace_id, idempotency_key, status, pipeline_version,\n                   parent_event_id)\nSELECT 'invoice.detected', 'email_pipeline', {{ $('Sign Payloads').first().json.ai_entity_id }},\n       '{{ $('Sign Payloads').first().json.inv_payload }}'::jsonb,\n       '{{ $('Sign Payloads').first().json.inv_sig }}',\n       '{{ $('Sign Payloads').first().json.trace_id }}'::uuid,\n       '{{ $('Sign Payloads').first().json.idem_invoice }}',\n       'pending', '1.0', NULL\n WHERE NOT EXISTS (\n   SELECT 1 FROM events WHERE idempotency_key = '{{ $('Sign Payloads').first().json.idem_invoice }}'\n );",
           "options": {}
         }
       },
@@ -452,7 +452,7 @@
         },
         "parameters": {
           "operation": "executeQuery",
-          "query": "SET LOCAL app.current_entity = '{{ $(\"Sign Payloads\").first().json.ai_entity_id }}';\nINSERT INTO audit_log (pipeline, action, entity_id, record_type, record_id,\n                      ai_worker, ai_model, ai_raw_output, ai_parsed,\n                      trace_id, pipeline_version, result)\nVALUES ('email_pipeline', 'classify_email',\n        {{ $('Sign Payloads').first().json.ai_entity_id }},\n        'email', {{ $('Sign Payloads').first().json.email_db_id }},\n        '{{ $('Sign Payloads').first().json.ai_worker }}',\n        '{{ $('Sign Payloads').first().json.ai_model }}',\n        '{{ $('Sign Payloads').first().json.ai_raw_output.replace(/'/g, \"''\") }}',\n        '{{ $('Sign Payloads').first().json.outcome_json }}'::jsonb, -- OUTCOME_PATCH_v1\n        '{{ $('Sign Payloads').first().json.trace_id }}'::uuid,\n        '1.0', 'success');",
+          "query": "SET app.current_entity = '{{ $(\"Sign Payloads\").first().json.ai_entity_id }}';\nINSERT INTO audit_log (pipeline, action, entity_id, record_type, record_id,\n                      ai_worker, ai_model, ai_raw_output, ai_parsed,\n                      trace_id, pipeline_version, result)\nVALUES ('email_pipeline', 'classify_email',\n        {{ $('Sign Payloads').first().json.ai_entity_id }},\n        'email', {{ $('Sign Payloads').first().json.email_db_id }},\n        '{{ $('Sign Payloads').first().json.ai_worker }}',\n        '{{ $('Sign Payloads').first().json.ai_model }}',\n        '{{ $('Sign Payloads').first().json.ai_raw_output.replace(/'/g, \"''\") }}',\n        '{{ $('Sign Payloads').first().json.outcome_json }}'::jsonb, -- OUTCOME_PATCH_v1\n        '{{ $('Sign Payloads').first().json.trace_id }}'::uuid,\n        '1.0', 'success');",
           "options": {}
         }
       },
@@ -486,7 +486,7 @@
         },
         "parameters": {
           "operation": "executeQuery",
-          "query": "SET LOCAL app.current_entity = '{{ $('Sign Payloads').first().json.ai_entity_id }}';\n-- Emit child.event.detected only when classifier marked it school-medical.\nINSERT INTO events\n  (event_type, source, entity_id, payload, payload_signature,\n   trace_id, idempotency_key, status, pipeline_version)\nSELECT 'child.event.detected',\n       'email_pipeline',\n       {{ $('Sign Payloads').first().json.ai_entity_id }},\n       $pl${{ $('Sign Payloads').first().json.child_payload }}$pl$::jsonb,\n       '{{ $('Sign Payloads').first().json.child_sig }}',\n       '{{ $('Sign Payloads').first().json.trace_id }}'::uuid,\n       '{{ $('Sign Payloads').first().json.idem_child }}',\n       'pending', '1.0'\n WHERE '{{ $('Sign Payloads').first().json.ai_category }}' = 'school-medical'\n   AND NOT EXISTS (\n     SELECT 1 FROM events\n      WHERE idempotency_key = '{{ $('Sign Payloads').first().json.idem_child }}'\n   )\nRETURNING id;",
+          "query": "SET app.current_entity = '{{ $('Sign Payloads').first().json.ai_entity_id }}';\n-- Emit child.event.detected only when classifier marked it school-medical.\nINSERT INTO events\n  (event_type, source, entity_id, payload, payload_signature,\n   trace_id, idempotency_key, status, pipeline_version)\nSELECT 'child.event.detected',\n       'email_pipeline',\n       {{ $('Sign Payloads').first().json.ai_entity_id }},\n       $pl${{ $('Sign Payloads').first().json.child_payload }}$pl$::jsonb,\n       '{{ $('Sign Payloads').first().json.child_sig }}',\n       '{{ $('Sign Payloads').first().json.trace_id }}'::uuid,\n       '{{ $('Sign Payloads').first().json.idem_child }}',\n       'pending', '1.0'\n WHERE '{{ $('Sign Payloads').first().json.ai_category }}' = 'school-medical'\n   AND NOT EXISTS (\n     SELECT 1 FROM events\n      WHERE idempotency_key = '{{ $('Sign Payloads').first().json.idem_child }}'\n   )\nRETURNING id;",
           "options": {}
         }
       }

@@ -12,9 +12,9 @@ Invariants checked (see AGENTS.md "Build rules"):
                    partitioned table can't UNIQUE-index a non-partition-key
                    column, so ON CONFLICT throws at runtime).            [FAIL]
   INV-ENTITY-GUC   every PostgreSQL write must set app.current_entity.   [FAIL]
-  INV-ENTITY-LOCAL entity GUC must be transaction-local (SET LOCAL / the
-                   3-arg set_config(...,true)); bare SET leaks into the
-                   next query on a pooled connection.                    [WARN]
+  (INV-ENTITY-LOCAL removed 2026-06-08: recommending `SET LOCAL` in n8n
+   Postgres-node queries broke their write path — n8n errors on it. Bare
+   `SET app.current_entity` is the working pattern; do not flag it.)
   INV-PG-SUPERUSER services must not connect as the postgres superuser
                    (BYPASSRLS defeats entity isolation).                 [FAIL]
   INV-DOCKER-SOCK  no app service mounts docker.sock (RW=FAIL host-root;
@@ -166,13 +166,13 @@ def check_n8n() -> None:
                     add("FAIL", "INV-ENTITY-GUC", loc,
                         f"write to RLS table(s) {sorted(rls_hit)} with no "
                         "app.current_entity set.")
-                elif has_guc and not has_local:
-                    add("WARN", "INV-ENTITY-LOCAL", loc,
-                        "entity GUC set without LOCAL — leaks to next query "
-                        "on a pooled connection.")
-                elif SET_BARE_RE.search(body) and not has_local:
-                    add("WARN", "INV-ENTITY-LOCAL", loc,
-                        "bare SET app.current_entity (no LOCAL) — session leak.")
+                # NOTE: do NOT recommend `SET LOCAL` for n8n Postgres-node queries.
+                # The n8n node errors ("syntax error near app") on `SET LOCAL` in a
+                # multi-statement write, which took out gmail-ingest for ~11h on
+                # 2026-06-08. Bare `SET app.current_entity` is the working pattern
+                # here; the pooled-connection GUC leak is bounded because every
+                # query re-sets the GUC. (For a real fix use a wrapping txn or
+                # set_config(...,true) — verified against n8n first.)
 
             # body_text in an AI prompt: only flag a fallback that actually
             # reaches raw body_text (e.g. `body_text_safe || x.body_text`).

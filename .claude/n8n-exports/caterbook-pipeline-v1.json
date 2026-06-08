@@ -21,7 +21,7 @@
       "position": [480, 300],
       "parameters": {
         "operation": "executeQuery",
-        "query": "SET LOCAL app.current_entity = 'all'; SELECT e.id AS email_id, e.gmail_message_id, e.from_address, e.subject, e.body_text, e.received_at FROM emails e WHERE e.from_address ILIKE '%@caterbook.%' AND e.received_at > NOW() - INTERVAL '7 days' AND NOT EXISTS (SELECT 1 FROM accommodation_daily ad WHERE ad.email_id = e.id) ORDER BY e.received_at DESC LIMIT 50;",
+        "query": "SET app.current_entity = 'all'; SELECT e.id AS email_id, e.gmail_message_id, e.from_address, e.subject, e.body_text, e.received_at FROM emails e WHERE e.from_address ILIKE '%@caterbook.%' AND e.received_at > NOW() - INTERVAL '7 days' AND NOT EXISTS (SELECT 1 FROM accommodation_daily ad WHERE ad.email_id = e.id) ORDER BY e.received_at DESC LIMIT 50;",
         "options": {}
       },
       "credentials": {
@@ -68,7 +68,7 @@
       "position": [1200, 240],
       "parameters": {
         "operation": "executeQuery",
-        "query": "SET LOCAL app.current_entity = '1'; INSERT INTO accommodation_daily (entity_id, report_date, occupancy_pct, rooms_occupied, total_rooms, adr, revpar, room_revenue, email_id, raw_text) VALUES (1, '{{ $json.report_date }}', {{ $json.occupancy_pct ?? 'NULL' }}, {{ $json.rooms_occupied ?? 'NULL' }}, {{ $json.total_rooms ?? 'NULL' }}, {{ $json.adr ?? 'NULL' }}, {{ $json.revpar ?? 'NULL' }}, {{ $json.room_revenue ?? 'NULL' }}, {{ $json.email_id }}, $pl${{ $json.raw_text }}$pl$) ON CONFLICT (entity_id, report_date) DO UPDATE SET occupancy_pct = EXCLUDED.occupancy_pct, rooms_occupied = EXCLUDED.rooms_occupied, total_rooms = EXCLUDED.total_rooms, adr = EXCLUDED.adr, revpar = EXCLUDED.revpar, room_revenue = EXCLUDED.room_revenue, email_id = EXCLUDED.email_id, raw_text = EXCLUDED.raw_text RETURNING id; INSERT INTO audit_log (pipeline, action, ai_worker, ai_parsed, result, provider) VALUES ('p6-caterbook', 'parsed_accommodation_report', 'caterbook_parser', $pl${{ JSON.stringify({email_id: $json.email_id, report_date: $json.report_date, occupancy_pct: $json.occupancy_pct, rooms_occupied: $json.rooms_occupied}) }}$pl$::jsonb, 'success', 'local') RETURNING id;",
+        "query": "SET app.current_entity = '1'; INSERT INTO accommodation_daily (entity_id, report_date, occupancy_pct, rooms_occupied, total_rooms, adr, revpar, room_revenue, email_id, raw_text) VALUES (1, '{{ $json.report_date }}', {{ $json.occupancy_pct ?? 'NULL' }}, {{ $json.rooms_occupied ?? 'NULL' }}, {{ $json.total_rooms ?? 'NULL' }}, {{ $json.adr ?? 'NULL' }}, {{ $json.revpar ?? 'NULL' }}, {{ $json.room_revenue ?? 'NULL' }}, {{ $json.email_id }}, $pl${{ $json.raw_text }}$pl$) ON CONFLICT (entity_id, report_date) DO UPDATE SET occupancy_pct = EXCLUDED.occupancy_pct, rooms_occupied = EXCLUDED.rooms_occupied, total_rooms = EXCLUDED.total_rooms, adr = EXCLUDED.adr, revpar = EXCLUDED.revpar, room_revenue = EXCLUDED.room_revenue, email_id = EXCLUDED.email_id, raw_text = EXCLUDED.raw_text RETURNING id; INSERT INTO audit_log (pipeline, action, ai_worker, ai_parsed, result, provider) VALUES ('p6-caterbook', 'parsed_accommodation_report', 'caterbook_parser', $pl${{ JSON.stringify({email_id: $json.email_id, report_date: $json.report_date, occupancy_pct: $json.occupancy_pct, rooms_occupied: $json.rooms_occupied}) }}$pl$::jsonb, 'success', 'local') RETURNING id;",
         "options": {}
       },
       "credentials": {
