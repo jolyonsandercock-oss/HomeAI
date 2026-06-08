@@ -64,6 +64,34 @@ fi
 if printf '%s' "$FAILS" | grep -qiE 'pending|backlog'; then
   bash /home_ai/scripts/u239-event-close-sweep.sh >/dev/null 2>&1 && { audit close_sweep ""; repaired+=("ran event close-sweep"); }
 fi
+# E) ollama down -> restart it + re-drive failed email classifications. Cap 3/hr.
+#    Tied to the kill switch: if the system is PAUSED (deliberate maintenance /
+#    GPU freed for gaming) we do NOT fight it — leave ollama down, don't page.
+#    A clean ollama stop otherwise drops email classification; restarting +
+#    re-driving the failed email.received events (no email row yet) self-heals it.
+if printf '%s' "$FAILS" | grep -qiE 'ollama'; then
+  state=$(q "SELECT value->>'state' FROM static_context WHERE key='system.state'")
+  n=$(repair_count_1h restart_ollama); n=${n:-0}
+  if [ "${state:-running}" != "running" ]; then
+    skipped+=("ollama down but system paused — not auto-restarting (deliberate)")
+    EXCL="$EXCL|ollama"
+  elif [ "$n" -lt 3 ]; then
+    docker start homeai-ollama >/dev/null 2>&1 || (cd /home_ai && docker compose up -d ollama) >/dev/null 2>&1
+    for i in $(seq 1 12); do docker exec homeai-ollama ollama --version >/dev/null 2>&1 && break; sleep 3; done
+    # re-drive email.received events that failed/stuck with no email row (classification gap)
+    q "UPDATE events e SET status='pending', processing_started_at=NULL, processing_node_id=NULL, retry_count=0
+       FROM (SELECT e2.id FROM events e2
+               LEFT JOIN emails em ON em.gmail_message_id = e2.payload->>'gmail_message_id'
+              WHERE e2.event_type='email.received' AND e2.status IN ('failed','processing')
+                AND em.gmail_message_id IS NULL AND e2.created_at > now()-interval '6 hours') s
+        WHERE e.id = s.id" >/dev/null
+    audit restart_ollama "started + re-drove failed email classifications"
+    repaired+=("restarted ollama + re-drove failed email events")
+  else
+    skipped+=("ollama restarted ${n}x/hr — flapping, needs eyes")
+    EXCL="$EXCL|ollama"
+  fi
+fi
 
 # ── re-check after repairs ──
 OUT2=$(bash /home_ai/scripts/selftest.sh 2>&1); RC2=$?
