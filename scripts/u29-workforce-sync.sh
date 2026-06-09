@@ -134,26 +134,39 @@ async def upsert_shifts(conn, items):
             hours = None
             if isinstance(start_unix, int) and isinstance(finish_unix, int) and finish_unix > start_unix:
                 hours = round((finish_unix - start_unix) / 3600 - break_min/60, 3)
+            # Workforce base wage cost (show_costs=true). cost = award + allowance.
+            cb = s.get("cost_breakdown") or {}
+            award_cost     = cb.get("award_cost")
+            allowance_cost = cb.get("allowance_cost")
+            if award_cost is None and s.get("cost") is not None:
+                award_cost = s.get("cost")  # fallback if breakdown absent
             n = await conn.fetchval("""
               INSERT INTO workforce_shifts (external_id, user_external_id, location_external_id,
                                              department_external_id, shift_date, start_time, end_time,
                                              break_minutes, hours_worked, cost_estimate, status,
-                                             raw_payload, last_synced_at)
-              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,now())
+                                             raw_payload, last_synced_at,
+                                             award_cost, allowance_cost, cost_last_synced_at)
+              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,now(),
+                      $13::numeric,$14::numeric, CASE WHEN $13::numeric IS NULL THEN NULL ELSE now() END)
               ON CONFLICT (external_id) DO UPDATE SET
                 start_time=EXCLUDED.start_time, end_time=EXCLUDED.end_time,
                 break_minutes=EXCLUDED.break_minutes,
                 hours_worked=EXCLUDED.hours_worked, cost_estimate=EXCLUDED.cost_estimate,
                 department_external_id=EXCLUDED.department_external_id,
-                status=EXCLUDED.status, raw_payload=EXCLUDED.raw_payload, last_synced_at=now()
+                status=EXCLUDED.status, raw_payload=EXCLUDED.raw_payload, last_synced_at=now(),
+                award_cost=COALESCE(EXCLUDED.award_cost, workforce_shifts.award_cost),
+                allowance_cost=COALESCE(EXCLUDED.allowance_cost, workforce_shifts.allowance_cost),
+                cost_last_synced_at=CASE WHEN EXCLUDED.award_cost IS NULL
+                                         THEN workforce_shifts.cost_last_synced_at ELSE now() END
               RETURNING (xmax = 0)
             """,
               s.get("id"), s.get("user_id"), s.get("location_id"),
               s.get("department_id"), to_date(s.get("date")),
               to_dt(start_unix), to_dt(finish_unix),
               int(break_min) if break_min else None, hours,
-              None,  # cost_estimate — not in /shifts payload; populated via /timesheets
-              s.get("status"), json.dumps(s))
+              None,  # cost_estimate — unchanged; trigger fills it until Thursday's on-cost rebuild
+              s.get("status"), json.dumps(s),
+              award_cost, allowance_cost)
             if n: ins += 1
             else: upd += 1
     return ins, upd
@@ -209,7 +222,7 @@ async def main():
         while page <= MAX_PAGES:
             status, body, ms, err = wf_call(base, tok, "/api/v2/shifts",
                 {"from": window_start.isoformat(), "to": window_end.isoformat(),
-                 "page": page, "page_size": PAGE_SIZE})
+                 "page": page, "page_size": PAGE_SIZE, "show_costs": "true"})
             last_status = status
             seen = ins = upd = 0
             if status == 200 and isinstance(body, list):
