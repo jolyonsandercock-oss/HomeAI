@@ -150,7 +150,7 @@ echo "[9] Counterparty resolver"
 check "financial_counterparty seeded" "$PSQL \"SELECT count(*)>0 FROM financial_counterparty WHERE status='active'\" | command grep -q '^t$' && echo ok"
 check "resolver resolves a seeded domain" "$PSQL \"SELECT home_ai.resolve_counterparty(jsonb_build_object('email_domain','jrf.lls.com'))->>'decision'\" | command grep -q '^resolve$' && echo ok"
 check "resolver abstains on a fake counterparty" "$PSQL \"SELECT home_ai.resolve_counterparty(jsonb_build_object('raw_counterparty','zzzq fake nobody 99999'))->>'decision'\" | command grep -q '^abstain$' && echo ok"
-check "resolver in shadow mode (no auto-attribution)" "$PSQL \"SELECT value FROM static_context WHERE key='resolver.mode'\" | command grep -q shadow && echo ok"
+check "resolver in review mode (invoices auto-attributed, abstains queued; not enforce/shadow)" "$PSQL \"SELECT value FROM static_context WHERE key='resolver.mode'\" | command grep -q review && echo ok"
 echo
 
 # ── Summary ────────────────────────────────────────────────────

@@ -30,10 +30,10 @@ DO $$ DECLARE q text; t text; BEGIN
   END LOOP;
 END $$;
 
--- resolver mode flag present and shadow
+-- resolver mode flag present and a valid mode (review since 2026-06-09 activation)
 DO $$ BEGIN
-  IF (SELECT value FROM static_context WHERE key='resolver.mode') IS DISTINCT FROM '"shadow"'::jsonb THEN
-    RAISE EXCEPTION 'resolver.mode not set to shadow'; END IF;
+  IF (SELECT value FROM static_context WHERE key='resolver.mode') NOT IN ('"shadow"'::jsonb,'"review"'::jsonb,'"enforce"'::jsonb) THEN
+    RAISE EXCEPTION 'resolver.mode missing or invalid'; END IF;
 END $$;
 
 -- upsert_anchor exists
