@@ -145,6 +145,14 @@ check "P2 invoice fixture passes" "docker exec -i homeai-postgres psql -U homeai
 check "dashboard SQL plans vs live schema" "bash /home_ai/scripts/check-dashboard-sql.sh"
 echo
 
+# ── counterparty resolver (refactor 2026-06-09) — read-only smoke, no test rows ──
+echo "[9] Counterparty resolver"
+check "financial_counterparty seeded" "$PSQL \"SELECT count(*)>0 FROM financial_counterparty WHERE status='active'\" | command grep -q '^t$' && echo ok"
+check "resolver resolves a seeded domain" "$PSQL \"SELECT home_ai.resolve_counterparty(jsonb_build_object('email_domain','jrf.lls.com'))->>'decision'\" | command grep -q '^resolve$' && echo ok"
+check "resolver abstains on a fake counterparty" "$PSQL \"SELECT home_ai.resolve_counterparty(jsonb_build_object('raw_counterparty','zzzq fake nobody 99999'))->>'decision'\" | command grep -q '^abstain$' && echo ok"
+check "resolver in shadow mode (no auto-attribution)" "$PSQL \"SELECT value FROM static_context WHERE key='resolver.mode'\" | command grep -q shadow && echo ok"
+echo
+
 # ── Summary ────────────────────────────────────────────────────
 echo "── summary ──"
 echo "  PASS:    $PASS"
