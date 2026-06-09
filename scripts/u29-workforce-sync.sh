@@ -201,22 +201,30 @@ async def main():
     total_seen = total_ins = total_upd = 0
     last_status = None
     window_start = from_date
+    PAGE_SIZE = 100
+    MAX_PAGES = 100  # safety cap (10k shifts/window) against an unterminated loop
     while window_start <= to_date_window:
         window_end = min(window_start + timedelta(days=30), to_date_window)
-        status, body, ms, err = wf_call(base, tok, "/api/v2/shifts",
-            {"from": window_start.isoformat(), "to": window_end.isoformat(),
-             "page": 1, "page_size": 100})
-        last_status = status
-        seen = ins = upd = 0
-        if status == 200 and isinstance(body, list):
-            seen = len(body)
-            ins, upd = await upsert_shifts(conn, body)
-        await log_sync(conn, "/api/v2/shifts",
-            {"from": window_start.isoformat(), "to": window_end.isoformat()},
-            status, seen, ins, upd, err, ms)
-        total_seen += seen; total_ins += ins; total_upd += upd
-        if err:
-            print(f"  shifts {window_start}..{window_end}: HTTP {status} {ms}ms  {err}")
+        page = 1
+        while page <= MAX_PAGES:
+            status, body, ms, err = wf_call(base, tok, "/api/v2/shifts",
+                {"from": window_start.isoformat(), "to": window_end.isoformat(),
+                 "page": page, "page_size": PAGE_SIZE})
+            last_status = status
+            seen = ins = upd = 0
+            if status == 200 and isinstance(body, list):
+                seen = len(body)
+                ins, upd = await upsert_shifts(conn, body)
+            await log_sync(conn, "/api/v2/shifts",
+                {"from": window_start.isoformat(), "to": window_end.isoformat(), "page": page},
+                status, seen, ins, upd, err, ms)
+            total_seen += seen; total_ins += ins; total_upd += upd
+            if err:
+                print(f"  shifts {window_start}..{window_end} p{page}: HTTP {status} {ms}ms  {err}")
+            # Tanda caps each page at PAGE_SIZE; a short/empty page means we're done.
+            if status != 200 or not isinstance(body, list) or len(body) < PAGE_SIZE:
+                break
+            page += 1
         window_start = window_end + timedelta(days=1)
     print(f"  shifts:       last HTTP {last_status}  seen={total_seen} ins={total_ins} upd={total_upd}")
 
