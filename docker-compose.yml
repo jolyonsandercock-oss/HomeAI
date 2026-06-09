@@ -218,7 +218,10 @@ services:
       - "100.104.82.53:443:443"
       - "100.104.82.53:5678:5678"
       - "100.104.82.53:3000:3000"
-      - "100.104.82.53:8080:8080"
+      # 8080 dropped 2026-06-09: Hermes (~/.hermes/scripts/api-dashboard.py) owns
+      # host 0.0.0.0:8080, which blocked Caddy from binding the tailnet IP:8080
+      # (open-webui convenience proxy) and prevented Caddy starting at all.
+      # - "100.104.82.53:8080:8080"
     restart: unless-stopped
 
   grafana:
