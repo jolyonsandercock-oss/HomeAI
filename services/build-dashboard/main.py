@@ -6438,3 +6438,107 @@ async def finance_ask(body: dict = Body(...)):
         "narrative": "(tool-loop did not converge after 3 turns)",
         "tool_results": tool_results,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Counterparty resolver — review-queue UX (refactor plan 2026-06-09).
+# Additive + revertible. The resolver runs in SHADOW mode, so the queue is empty
+# until resolver.mode is flipped to 'review'/'enforce'. Actions call the tested
+# home_ai.* SQL functions (confirm/merge/ignore/create). Delete this block + the
+# static page + nav link to revert; no DB change needed.
+# ─────────────────────────────────────────────────────────────────────────────
+def _jload(v):
+    import json as _j
+    if isinstance(v, str):
+        try: return _j.loads(v)
+        except Exception: return v
+    return v
+
+@app.get("/counterparty-review")
+async def counterparty_review_page():
+    return FileResponse(str(STATIC / "counterparty-review.html"))
+
+@app.get("/api/counterparty/review-queue")
+async def cp_review_queue(limit: int = Query(50, ge=1, le=200)):
+    rows = await db_all(
+        """SELECT id, created_at, source_system, source_ref, entity_id, realm,
+                  evidence_json, abstain_reason, top_candidates, suggested_action
+             FROM counterparty_resolution_review_queue
+            WHERE status='open' ORDER BY created_at DESC LIMIT $1""", limit)
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["evidence_json"] = _jload(d.get("evidence_json"))
+        d["top_candidates"] = _jload(d.get("top_candidates"))
+        d["created_at"] = d["created_at"].isoformat() if d.get("created_at") else None
+        items.append(d)
+    mode_row = await db_one("SELECT value FROM static_context WHERE key='resolver.mode'")
+    return {"mode": _jload(mode_row["value"]) if mode_row else None,
+            "count": len(items), "items": items}
+
+@app.get("/api/counterparty/search")
+async def cp_search(q: str = Query(..., min_length=1), limit: int = Query(10, ge=1, le=50)):
+    rows = await db_all(
+        """SELECT id, display_name, domain, kind,
+                  round(similarity(lower(display_name), lower($1))::numeric, 3) AS sim
+             FROM financial_counterparty WHERE status='active'
+            ORDER BY (domain = lower($1)) DESC, similarity(lower(display_name), lower($1)) DESC
+            LIMIT $2""", q, limit)
+    return {"results": [dict(r) for r in rows]}
+
+@app.post("/api/counterparty/review/confirm")
+async def cp_confirm(body: dict = Body(...)):
+    try:
+        rid = int(body["review_id"]); cid = int(body["counterparty_id"])
+    except (KeyError, ValueError, TypeError):
+        return JSONResponse({"error": "review_id and counterparty_id (ints) required"}, status_code=400)
+    promote = bool(body.get("promote_anchor", False)); by = (body.get("by") or "dashboard")[:80]
+    try:
+        r = await db_one("SELECT home_ai.confirm_resolution($1,$2,$3,$4) AS d", rid, cid, by, promote)
+        return {"ok": True, "result": _jload(r["d"])}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+@app.post("/api/counterparty/review/ignore")
+async def cp_ignore(body: dict = Body(...)):
+    try: rid = int(body["review_id"])
+    except (KeyError, ValueError, TypeError):
+        return JSONResponse({"error": "review_id (int) required"}, status_code=400)
+    decision = (body.get("decision") or "ignored")[:40]; by = (body.get("by") or "dashboard")[:80]
+    try:
+        r = await db_one("SELECT home_ai.ignore_review($1,$2,$3) AS d", rid, by, decision)
+        return {"ok": True, "result": _jload(r["d"])}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+@app.post("/api/counterparty/review/merge")
+async def cp_merge(body: dict = Body(...)):
+    try: f = int(body["from_id"]); t = int(body["into_id"])
+    except (KeyError, ValueError, TypeError):
+        return JSONResponse({"error": "from_id and into_id (ints) required"}, status_code=400)
+    by = (body.get("by") or "dashboard")[:80]; reason = body.get("reason") or None
+    try:
+        r = await db_one("SELECT home_ai.merge_counterparty($1,$2,$3,$4) AS d", f, t, by, reason)
+        return {"ok": True, "result": _jload(r["d"])}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+@app.post("/api/counterparty/review/create")
+async def cp_create(body: dict = Body(...)):
+    try: rid = int(body["review_id"])
+    except (KeyError, ValueError, TypeError):
+        return JSONResponse({"error": "review_id (int) required"}, status_code=400)
+    name = (body.get("display_name") or "").strip()
+    if not name: return JSONResponse({"error": "display_name required"}, status_code=400)
+    domain = body.get("domain") or None; kind = body.get("kind") or "supplier"
+    realm = body.get("realm") or _current_realm.get(); by = (body.get("by") or "dashboard")[:80]
+    try:
+        async with db_session() as c:
+            new = await c.fetchrow(
+                """INSERT INTO financial_counterparty (display_name, domain, kind, realms, source_seed)
+                   VALUES ($1,$2,$3,$4,'manual') RETURNING id""", name, domain, kind, [realm])
+            await c.execute("SELECT home_ai.fc_touch_version($1,'create')", new["id"])
+            d = await c.fetchrow("SELECT home_ai.confirm_resolution($1,$2,$3,true) AS d", rid, new["id"], by)
+        return {"ok": True, "counterparty_id": new["id"], "result": _jload(d["d"])}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)

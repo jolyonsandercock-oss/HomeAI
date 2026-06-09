@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Counterparty Review — Home AI</title>
+<style>
+  :root { --em:#059669; --bg:#f8fafc; --bd:#e2e8f0; --mut:#64748b; }
+  * { box-sizing:border-box; } body { font-family:system-ui,sans-serif; margin:0; background:var(--bg); color:#0f172a; }
+  header { padding:16px 24px; border-bottom:1px solid var(--bd); display:flex; gap:16px; align-items:baseline; }
+  h1 { font-size:20px; margin:0; } a { color:var(--em); text-decoration:none; }
+  #mode { font-size:13px; color:var(--mut); }
+  main { padding:24px; max-width:1100px; margin:0 auto; }
+  .banner { background:#ecfdf5; border:1px solid #a7f3d0; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:14px; }
+  .item { background:#fff; border:1px solid var(--bd); border-radius:10px; padding:16px; margin-bottom:14px; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+  .ev { font-size:13px; color:#334155; background:var(--bg); border-radius:6px; padding:8px 10px; overflow:auto; }
+  .reason { display:inline-block; font-size:12px; font-weight:600; color:#b45309; background:#fffbeb; border:1px solid #fde68a; padding:2px 8px; border-radius:999px; }
+  .cands { margin:10px 0; } .cand { display:flex; gap:8px; align-items:center; padding:4px 0; font-size:14px; }
+  button { font-size:13px; padding:6px 12px; border-radius:6px; border:1px solid var(--bd); background:#fff; cursor:pointer; }
+  button.primary { background:var(--em); color:#fff; border-color:var(--em); }
+  input { font-size:14px; padding:6px 10px; border:1px solid var(--bd); border-radius:6px; }
+  .muted { color:var(--mut); font-size:13px; } .actions { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+  .sr { font-family:ui-monospace,monospace; font-size:12px; color:var(--mut); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Counterparty Review</h1>
+  <a href="/dashboard/">← dashboard</a>
+  <span id="mode"></span>
+</header>
+<main>
+  <div id="banner"></div>
+  <div id="list"></div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+async function jget(u){ const r = await fetch(u); return r.json(); }
+async function jpost(u,b){ const r = await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); return r.json(); }
+
+async function load(){
+  const d = await jget('/api/counterparty/review-queue?limit=100');
+  $('#mode').textContent = 'resolver mode: ' + (d.mode || '?') + ' · ' + d.count + ' open';
+  const banner = $('#banner');
+  if (d.mode === 'shadow') {
+    banner.innerHTML = '<div class="banner">Resolver is in <b>shadow</b> mode — it scores into metrics but writes no attribution and queues nothing. ' +
+      'The queue stays empty by design until <code>resolver.mode</code> is set to <b>review</b>. This page is ready for that.</div>';
+  } else { banner.innerHTML = ''; }
+  const list = $('#list');
+  if (!d.items.length) { list.innerHTML = '<p class="muted">No open review items.</p>'; return; }
+  list.innerHTML = '';
+  for (const it of d.items) list.appendChild(renderItem(it));
+}
+
+function renderItem(it){
+  const el = document.createElement('div'); el.className='item';
+  const ev = it.evidence_json || {};
+  const cands = (it.top_candidates || []).map(c =>
+    `<div class="cand"><button class="primary" onclick="confirmCp(${it.id},${c.counterparty_id})">Confirm #${c.counterparty_id}</button>
+       <span>${c.why || ''} ${c.score!=null?('· score '+c.score):''}</span></div>`).join('');
+  el.innerHTML = `
+    <div class="row"><span class="reason">${it.abstain_reason||'review'}</span>
+      <span class="sr">${it.source_system}/${it.source_ref}</span>
+      <span class="muted">realm ${it.realm||'-'} · entity ${it.entity_id||'-'}</span></div>
+    <div class="ev">${escapeHtml(JSON.stringify(ev))}</div>
+    <div class="cands">${cands||'<span class="muted">no candidates suggested</span>'}</div>
+    <div class="actions">
+      <input id="srch-${it.id}" placeholder="search counterparty…" oninput="search(${it.id})" autocomplete="off">
+      <span id="res-${it.id}"></span>
+    </div>
+    <div class="actions">
+      <button onclick="createCp(${it.id})">+ Create new identity</button>
+      <button onclick="ignoreCp(${it.id},'non_financial')">Not financial</button>
+      <button onclick="ignoreCp(${it.id},'ignored')">Ignore</button>
+      <span class="muted">promote anchor: <input type="checkbox" id="promote-${it.id}" checked></span>
+    </div>`;
+  return el;
+}
+function escapeHtml(s){ return (s||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function search(id){
+  const q = $('#srch-'+id).value.trim(); const out = $('#res-'+id);
+  if (q.length<2){ out.textContent=''; return; }
+  const d = await jget('/api/counterparty/search?q='+encodeURIComponent(q)+'&limit=8');
+  out.innerHTML = d.results.map(r =>
+    `<button onclick="confirmCp(${id},${r.id})">${escapeHtml(r.display_name)} ${r.domain?('('+r.domain+')'):''}</button>`).join(' ') || '<span class="muted">no match</span>';
+}
+async function act(p,b){ const r = await jpost(p,b); if(r.error){ alert('Error: '+r.error); return false; } return true; }
+async function confirmCp(id,cid){ if(await act('/api/counterparty/review/confirm',{review_id:id,counterparty_id:cid,promote_anchor:$('#promote-'+id)?.checked})) load(); }
+async function ignoreCp(id,dec){ if(await act('/api/counterparty/review/ignore',{review_id:id,decision:dec})) load(); }
+async function createCp(id){
+  const name = prompt('New counterparty display name:'); if(!name) return;
+  const domain = prompt('Domain (optional):')||null;
+  if(await act('/api/counterparty/review/create',{review_id:id,display_name:name,domain:domain})) load();
+}
+load();
+</script>
+</body>
+</html>
