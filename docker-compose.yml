@@ -104,7 +104,10 @@ services:
       - ./security/vault-config:/vault/config
     environment:
       VAULT_ADDR: "http://0.0.0.0:8200"
-    ports: ["8200:8200"]
+    # localhost-only (was 8200:8200 = all interfaces; tightened 2026-06-11).
+    # In-stack services reach vault via the docker network, host tools via
+    # 127.0.0.1. Remote vault CLI use goes over SSH.
+    ports: ["127.0.0.1:8200:8200"]
     restart: unless-stopped
 
   n8n:
@@ -353,6 +356,7 @@ services:
     cap_add: [SYS_PTRACE]
     security_opt: [apparmor:unconfined]
     volumes:
+      - ./monitoring/netdata.conf:/etc/netdata/netdata.conf:ro
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro

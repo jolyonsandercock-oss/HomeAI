@@ -96,4 +96,16 @@ else
   echo "== 6. SKIPPED Docker log rotation (run with --with-docker-restart during a maintenance window) =="
 fi
 
+echo "== 7. Firewall posture (ufw already active) =="
+# Everything service-side now binds 127.0.0.1 / 100.104.82.53 (Tailscale), so
+# the host policy can be strict: SSH + Tailscale in, nothing else.
+ufw status verbose
+ufw allow 22/tcp >/dev/null
+ufw allow in on tailscale0 >/dev/null
+ufw default deny incoming >/dev/null
+ufw default allow outgoing >/dev/null
+ufw --force enable >/dev/null
+echo "--- after ---"
+ufw status verbose
+
 echo "== DONE =="
