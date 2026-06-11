@@ -192,14 +192,22 @@ async def main():
 
     conn = await asyncpg.connect(PG_DSN)
 
-    # 1. Users
-    status, body, ms, err = wf_call(base, tok, "/api/v2/users", {"page": 1, "page_size": 100})
+    # 1. Users (paginate — same 100-row cap as /shifts; >100 staff would
+    # silently truncate otherwise. 2026-06-11 review fix.)
     seen = ins = upd = 0
-    if status == 200 and isinstance(body, list):
-        seen = len(body)
-        ins, upd = await upsert_users(conn, body)
+    page = 1
+    while page <= 50:
+        status, body, ms, err = wf_call(base, tok, "/api/v2/users", {"page": page, "page_size": 100})
+        if status != 200 or not isinstance(body, list) or not body:
+            break
+        seen += len(body)
+        i, u = await upsert_users(conn, body)
+        ins += i; upd += u
+        if len(body) < 100:
+            break
+        page += 1
     print(f"  users:        HTTP {status} {ms}ms  seen={seen} ins={ins} upd={upd}  {err or ''}")
-    await log_sync(conn, "/api/v2/users", {"page_size":100}, status, seen, ins, upd, err, ms)
+    await log_sync(conn, "/api/v2/users", {"page_size":100,"pages":page}, status, seen, ins, upd, err, ms)
 
     # 2. Locations
     status, body, ms, err = wf_call(base, tok, "/api/v2/locations")
