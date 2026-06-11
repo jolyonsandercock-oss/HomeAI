@@ -599,8 +599,8 @@ export default function DashboardPage() {
             </div>
           ) : (
             <PlaceholderState
-              message="No Trail reports for this date"
-              hint="Trail checks run at 7:30 am, 1:30 pm, and 7:30 pm. Most recent results shown." />
+              message="Trail integration is blocked (Access Group SSO/OIDC)"
+              hint="No data is expected here until the Playwright rewrite ships (U250 decision list) — this is not a sync failure." />
           )}
         </Section>
       </SandboxWrapper>

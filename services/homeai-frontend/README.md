@@ -85,3 +85,21 @@ See `docs/wix-migration.md`. Architecture: Wix Members → Velo HMAC handoff →
 `/api/slug/[slug]` is the generic surface — any slug in `query_whitelist` is callable. To skip the whitelist for one-off pages, write a dedicated route under `app/api/...`.
 
 `POST /api/sandbox/comments` and `GET /api/sandbox/comments?component_id=…` are the sandbox storage.
+
+## UI design rules (from the 2026-06-11 snag audit — 73 snags reviewed)
+
+1. **Drill-down first.** Every aggregate number links to its evidence rows
+   (invoice list, email, transactions). 15 of 73 snags were this ask. Links
+   must carry filters in the URL AND the target must read them
+   (`/app/invoices?department=…` pattern — see urlParam() in invoices/page.tsx).
+2. **Freshness badges on scrape-fed sections.** Use
+   `<FreshnessBadge source="touchoffice|caterbook|workforce|reviews|weather|emails|invoices|bank"/>`
+   in the Section `action` slot. Backed by the `data_freshness` slug.
+3. **Honest empty states.** A widget that CANNOT have data (blocked
+   integration, unused flow) must say why — set `query_whitelist.empty_state_md`
+   and/or a specific PlaceholderState message. Never render a permanently
+   blank/zero widget as if it were loading.
+4. **Tables: 10 visible rows** then scroll; filter/sort on anything Jo scans.
+5. **No CTAs in Jo's read-path** unless input is genuinely required (snag #54).
+6. **Submit buttons: disable in flight + explicit success state** (duplicate
+   snags came from missing feedback).

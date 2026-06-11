@@ -1,5 +1,6 @@
 'use client';
 
+import { FreshnessBadge } from '@/components/ui/FreshnessBadge';
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { DateRangePicker, DateRange } from '@/components/ui/DateRangePicker';
@@ -189,7 +190,7 @@ export default function StaffPage() {
 
       {/* On rota today */}
       <SandboxWrapper id="staff.on-rota" label="On rota today">
-        <Section title={`On rota today (${rota.data?.length ?? 0})`}>
+        <Section title={`On rota today (${rota.data?.length ?? 0})`} action={<FreshnessBadge source="workforce" />}>
           {rota.isLoading ? <PlaceholderState message="Loading…" /> :
            rota.data && rota.data.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

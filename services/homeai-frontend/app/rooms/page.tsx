@@ -1,5 +1,6 @@
 'use client';
 
+import { FreshnessBadge } from '@/components/ui/FreshnessBadge';
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -223,7 +224,7 @@ export default function RoomsPage() {
       </div>
 
       <SandboxWrapper id="rooms.summary" label="Today summary">
-        <Section title="Today">
+        <Section title="Today" action={<FreshnessBadge source="caterbook" />}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <KPICard label="Arrivals" value={accom.data?.[0]?.arrivals ?? '—'} />
             <KPICard label="Staying" value={accom.data?.[0]?.staying ?? '—'} />
