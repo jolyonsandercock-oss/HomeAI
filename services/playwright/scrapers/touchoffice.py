@@ -123,7 +123,7 @@ async def _parse_table_in_widget(page: Page, widget_div_id: str) -> dict[str, An
     }
 
 
-async def _load_widget(page: Page, widget_div_id: str, *, timeout_ms: int = 20000) -> bool:
+async def _load_widget(page: Page, widget_div_id: str, *, timeout_ms: int = 300000) -> bool:
     """Scroll the widget into view + wait for its parent div's data-loaded=true.
 
     Returns True if the widget reports loaded, False on timeout. Most widgets
@@ -172,6 +172,7 @@ async def scrape(
         )
         ctx = await browser.new_context()
         page = await ctx.new_page()
+        page.set_default_timeout(300000)  # 5 min — TouchOffice dashboard can be slow for historical dates
         try:
             # ── 1. Login ──
             log.info("touchoffice: login as %s", username)
@@ -179,7 +180,7 @@ async def scrape(
             await page.fill("#username", username)
             await page.fill("#password", password)
             await page.click('button[name="submit-login"]')
-            await page.wait_for_load_state("networkidle", timeout=90000)
+            await page.wait_for_load_state("domcontentloaded", timeout=90000)
 
             # ── 2. Select site via Select2 (the underlying <select> is hidden;
             #     setting .value + firing jQuery 'change' triggers Select2).
@@ -203,7 +204,7 @@ async def scrape(
             # page so subsequent evaluates run in a stable context with the
             # new site session.
             await page.goto(BASE_URL + "/", wait_until="domcontentloaded")
-            await page.wait_for_selector("#filter", timeout=15000)
+            await page.wait_for_selector("#filter", timeout=180000)
             try:
                 await page.wait_for_load_state("networkidle", timeout=10000)
             except Exception:
@@ -229,29 +230,24 @@ async def scrape(
 
             # ── 4. Submit filter ──
             log.info("touchoffice: submit filter")
-            # Try multiple selectors — TouchOffice UI can vary
-            submit_selectors = [
-                'button[name="submit-filter"]',
-                'button:has-text("Submit")',
-                'input[type="submit"]',
-                '#filter button[type="submit"]',
-                '#filter input[type="submit"]',
-                'form#filter button',
-                'form#filter input[type="submit"]',
-            ]
-            clicked = False
-            for sel in submit_selectors:
-                try:
-                    btn = page.locator(sel)
-                    if await btn.count() > 0:
-                        await btn.first.click()
-                        clicked = True
-                        log.info(f"touchoffice: clicked {sel}")
-                        break
-                except Exception:
-                    continue
-            if not clicked:
-                raise Exception(f"Could not find submit button — tried {submit_selectors}")
+            # Instead of form submission (which fights with Playwright's navigation
+            # detection), navigate directly with the site + date in session.
+            # The site was set above. For date: submit the form via fetch API,
+            # then reload the page to get the filtered data.
+            await page.evaluate("""
+                (args) => {
+                    const fd = new FormData(document.getElementById('filter'));
+                    fd.set('filter-startdate', args.uk_date);
+                    fd.set('filter-enddate', args.uk_date);
+                    return fetch('/', { method: 'POST', body: fd, redirect: 'follow' })
+                        .then(r => r.text());
+                }
+            """, {"uk_date": uk_date, "iso_date": report_date})
+            # Reload the page to render with the posted date filter
+            resp = await page.goto(BASE_URL + "/", wait_until="domcontentloaded",
+                                    timeout=120000)
+            log.info(f"touchoffice: goto status={resp.status if resp else '?'}")
+            clicked = True
             # Don't wait for networkidle — historical dates can take minutes.
             # Instead wait a fixed time + scroll widgets into view.
             await page.wait_for_timeout(10000)
