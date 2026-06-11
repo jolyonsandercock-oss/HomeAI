@@ -517,6 +517,11 @@ function SnagInboxSection() {
   const [showForm, setShowForm] = useState(false);
   const snags = useSlug<SnagRow>('snag_inbox_pending', {}, { refetchInterval: 5_000 });
   const [actingId, setActingId] = useState<number | null>(null);
+  // Snag-audit 2026-06-11: no submit feedback + no in-flight guard produced 5
+  // duplicate-snag groups (#19-22 x4, #61-63 x3, #67/68, #69-71). Disable the
+  // button while submitting + show explicit confirmation.
+  const [snagSubmitting, setSnagSubmitting] = useState(false);
+  const [snagSubmitted, setSnagSubmitted] = useState(false);
 
   const counts = { pending: (snags.data ?? []).filter(s => s.status === 'pending').length, accepted: (snags.data ?? []).filter(s => s.status === 'accepted').length, in_progress: (snags.data ?? []).filter(s => s.status === 'in_progress').length, done: (snags.data ?? []).filter(s => s.status === 'done').length };
 
@@ -533,6 +538,8 @@ function SnagInboxSection() {
         <div className="text-xs text-ink-500 uppercase mb-2">Submit new snag</div>
         <form onSubmit={async (e) => {
           e.preventDefault();
+          if (snagSubmitting) return;  // double-fire guard
+          setSnagSubmitting(true);
           const form = e.currentTarget;
           const fd = new FormData();
           fd.append('title', (form.querySelector('[name=title]') as HTMLInputElement).value);
@@ -546,9 +553,10 @@ function SnagInboxSection() {
             if (!res.ok) throw new Error('Upload failed');
             (form as HTMLFormElement).reset();
             (form.querySelector('.preview-img') as HTMLElement).style.display = 'none';
-            setShowForm(false);
-            
+            setSnagSubmitted(true);
+            setTimeout(() => { setSnagSubmitted(false); setShowForm(false); }, 1800);
           } catch (err) { alert('Failed to submit. Try again.'); }
+          finally { setSnagSubmitting(false); }
         }} className="space-y-2">
           <input name="title" placeholder="What's the issue? (paste screenshot with Ctrl+V here)" required onPaste={(e) => { const items = e.clipboardData?.items; if (!items) return; for (let i = 0; i < items.length; i++) { if (items[i].type.startsWith("image/")) { e.preventDefault(); const file = items[i].getAsFile(); if (!file) continue; const dt = new DataTransfer(); dt.items.add(file); const fi = e.currentTarget.parentElement?.querySelector('input[type=file]') as HTMLInputElement; fi.files = dt.files; const pv = e.currentTarget.parentElement?.querySelector('.preview-img') as HTMLImageElement; if (pv) { pv.src = URL.createObjectURL(file); pv.style.display = "block"; } break; } } }} className="w-full bg-ink-50 border border-ink-200 rounded px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:outline-none focus:border-amber-500" />
           <textarea name="desc" placeholder="Description (optional)" rows={2} className="w-full bg-ink-50 border border-ink-200 rounded px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:outline-none focus:border-amber-500" />
@@ -618,7 +626,13 @@ function SnagInboxSection() {
             <img className="preview-img hidden max-h-40 mx-auto mb-2 rounded" alt="Preview" />
             <div className="text-xs text-ink-400">Drop a screenshot, click to upload, or click here then Ctrl+V to paste</div>
           </div>
-          <button type="submit" className="w-full bg-amber-500 text-ink-50 rounded px-3 py-2 text-sm font-medium hover:bg-amber-400 transition-colors">Submit snag</button>
+          <button type="submit" disabled={snagSubmitting || snagSubmitted}
+            className={`w-full rounded px-3 py-2 text-sm font-medium transition-colors ${
+              snagSubmitted ? 'bg-emerald-600 text-white'
+              : snagSubmitting ? 'bg-ink-300 text-ink-500 cursor-wait'
+              : 'bg-amber-500 text-ink-50 hover:bg-amber-400'}`}>
+            {snagSubmitted ? '✓ Snag received — thank you' : snagSubmitting ? 'Submitting…' : 'Submit snag'}
+          </button>
         </form>
       </div>
 
