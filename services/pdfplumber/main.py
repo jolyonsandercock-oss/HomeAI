@@ -33,10 +33,13 @@ async def parse_csv(file: UploadFile = File(...)):
     return {"data": df.to_dict(orient='records'), "row_count": len(df)}
 
 @app.post("/render-page1-png")
-async def render_page1_png(file: UploadFile = File(...), width: int = 1200):
-    """U61 T2 — render page 1 of a PDF as a PNG (Wand/ImageMagick under the
-    hood via pdfplumber.Page.to_image). Used by the dashboard invoice side panel.
-    Capped at 10MB input and 2000px width."""
+async def render_page1_png(file: UploadFile = File(...), width: int = 1200, page: int = 0):
+    """U61 T2 / U276 — render one page of a PDF as a PNG (pdfplumber
+    Page.to_image). Used by the dashboard invoice side panel and the vision-OCR
+    pipeline. `page` is 0-based (default 0 — back-compat with the original
+    page-1-only behaviour); the X-Page-Count header reports the total so
+    callers can iterate multi-page documents (invoice totals are often on the
+    LAST page). Capped at 10MB input and 2000px width."""
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(413, "File too large")
@@ -44,13 +47,17 @@ async def render_page1_png(file: UploadFile = File(...), width: int = 1200):
     with pdfplumber.open(io.BytesIO(content)) as pdf:
         if not pdf.pages:
             raise HTTPException(400, "PDF has no pages")
+        if page < 0 or page >= len(pdf.pages):
+            raise HTTPException(416, f"page {page} out of range (0..{len(pdf.pages)-1})")
         # resolution=N maps to N DPI. 1200px wide at A4 portrait ≈ 144 DPI.
-        page = pdf.pages[0]
-        target_dpi = max(72, int(width / (page.width / 72)))
-        img = page.to_image(resolution=target_dpi)
+        pg = pdf.pages[page]
+        target_dpi = max(72, int(width / (pg.width / 72)))
+        img = pg.to_image(resolution=target_dpi)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
-    return Response(content=buf.getvalue(), media_type="image/png")
+        n_pages = len(pdf.pages)
+    return Response(content=buf.getvalue(), media_type="image/png",
+                    headers={"X-Page-Count": str(n_pages)})
 
 
 @app.get("/healthcheck")

@@ -377,8 +377,10 @@ services:
     build: ./services/pdfplumber
     mem_limit: 1g
     container_name: homeai-pdfplumber
-    networks: [ai-internal]
-    ports: ["8003:8003"]
+    # ai-monitoring (non-internal bridge) added so the 127.0.0.1 port can
+    # publish — ai-internal is internal:true, which silently blocks publishing.
+    networks: [ai-internal, ai-monitoring]
+    ports: ["127.0.0.1:8003:8003"]  # host-local only (u276 bench/tools); services use container DNS
     restart: unless-stopped
 
   markitdown:
