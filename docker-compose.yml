@@ -36,6 +36,10 @@ services:
       POSTGRES_DB: homeai
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # 1GB /dev/shm: parallel-query DSM segments outgrow Docker's 64MB default
+    # once work_mem is tuned up (memory settings live in postgresql.auto.conf
+    # via ALTER SYSTEM, 2026-06-11).
+    shm_size: 1gb
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d homeai"]
       interval: 10s
