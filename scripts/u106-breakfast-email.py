@@ -19,7 +19,9 @@ import asyncpg
 VAULT_TOKEN = os.environ['VAULT_TOKEN']
 TEST = os.environ.get('TEST', '1') == '1'
 GF = 'http://google-fetch:8011'
-SECRET = os.environ.get('BREAKFAST_TOKEN_SECRET', 'u106-rotate-me-please-1234567890')
+SECRET = os.environ.get('BREAKFAST_TOKEN_SECRET', '')
+if not SECRET:
+    raise SystemExit('BREAKFAST_TOKEN_SECRET missing/empty — Vault secret/breakfast, mirrored in /home_ai/.env (U250)')
 
 TEST_RECIPIENTS = [
     'jolyon.sandercock@gmail.com',

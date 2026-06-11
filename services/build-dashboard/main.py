@@ -1431,7 +1431,11 @@ async def mobile_page():
 
 # ── U106 — Breakfast order public-form endpoint ───────────────────
 import hmac as _hmac, hashlib as _hashlib
-_BREAKFAST_SECRET = os.environ.get("BREAKFAST_TOKEN_SECRET", "u106-rotate-me-please-1234567890")
+_BREAKFAST_SECRET = os.environ.get("BREAKFAST_TOKEN_SECRET", "")
+if not _BREAKFAST_SECRET:
+    # U250: no fallback — old literal burned, rotated 2026-06-10.
+    # Source: Vault secret/breakfast token_secret, mirrored in /home_ai/.env.
+    raise RuntimeError("BREAKFAST_TOKEN_SECRET missing/empty — see U250 sprint doc")
 
 
 def _make_breakfast_token(booking_id: int, service_date: str) -> str:

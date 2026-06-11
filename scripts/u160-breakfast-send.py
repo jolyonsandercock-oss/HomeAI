@@ -33,7 +33,9 @@ REPLY_TO = "info@malthousetintagel.com"
 FROM_NAME = "The Malthouse Tintagel"
 
 # SECRET used for token generation — change if tokens need to be invalidated
-TOKEN_SECRET = os.environ.get("BREAKFAST_TOKEN_SECRET", "malthouse-breakfast-2026")
+TOKEN_SECRET = os.environ.get("BREAKFAST_TOKEN_SECRET", "")
+if not TOKEN_SECRET:
+    raise SystemExit("BREAKFAST_TOKEN_SECRET missing/empty — Vault secret/breakfast, mirrored in /home_ai/.env (U250)")
 
 # TEST MODE — all emails go here instead of guest emails
 TEST_EMAIL = "pounana@gmail.com"

@@ -7,7 +7,7 @@
 set -uo pipefail
 docker exec -i homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 <<SQL
 BEGIN; SET LOCAL app.current_entity='all'; SET LOCAL app.current_realm='owner';
-UPDATE events SET status='processed'
+UPDATE events SET status='processed', processed_at=COALESCE(processed_at, NOW())
  WHERE event_type='email.received' AND status IN ('pending','processing')
    AND payload->>'gmail_message_id' IN (SELECT gmail_message_id FROM emails);
 COMMIT;

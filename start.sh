@@ -138,11 +138,18 @@ fetch_secrets() {
     || { err "secret/postgres-roles missing 'paperless' — paperless will not start (run scripts/fix-paperless-role-pw.sh)"; PAPERLESS_DB_PASSWORD=""; }
   ROLES_JSON=""
 
+  # U250: breakfast-link signing secret. NON-CRITICAL — missing only degrades
+  # build-dashboard (fails loud at import) + the breakfast email crons.
+  BREAKFAST_TOKEN_SECRET=$(docker exec -e VAULT_TOKEN="$VAULT_TOKEN" "$VAULT_CONTAINER" \
+      vault kv get -format=json secret/breakfast 2>/dev/null \
+      | jq -er '.data.data.token_secret') \
+    || { err "secret/breakfast missing 'token_secret' — build-dashboard will not start (U250)"; BREAKFAST_TOKEN_SECRET=""; }
+
   export POSTGRES_PASSWORD N8N_DB_PASSWORD METABASE_APP_PASSWORD \
          PAPERLESS_DB_PASSWORD \
          REDIS_PASSWORD GRAFANA_ADMIN_PASSWORD OPEN_WEBUI_SECRET \
-         PAYLOAD_HMAC_KEY ANTHROPIC_API_KEY
-  ok "9 infrastructure secrets fetched"
+         PAYLOAD_HMAC_KEY ANTHROPIC_API_KEY BREAKFAST_TOKEN_SECRET
+  ok "10 infrastructure secrets fetched"
 }
 
 # -------------------------------------------------------------------

@@ -25,6 +25,11 @@ Invariants checked (see AGENTS.md "Build rules"):
                    (llm-router / claude_call wrapper), not raw SDK/HTTP.  [WARN]
   INV-PORTS        host-published ports should bind to 127.0.0.1 unless
                    intentionally exposed.                                [WARN]
+  INV-DB-ENTITY    live-DB check (U250): no work-realm bank_transactions
+                   row may have NULL entity_id (PERMISSIVE RLS hides such
+                   rows silently), and realm must equal
+                   realm_from_entity_id(entity_id) wherever entity_id is
+                   set. Skipped (WARN) if the DB container is down.      [FAIL]
 
 Exit code: 0 if no FAIL-level findings, 1 otherwise (CI / cron friendly).
 Stdlib only — no install step.
@@ -329,6 +334,45 @@ def check_frontend() -> None:
                 "realm/entity are set transaction-locally before any query.")
 
 
+# ── live database ─────────────────────────────────────────────────────
+def check_db() -> None:
+    """DB-level invariants (U250). Greps can't see data drift; ask postgres.
+
+    Degrades to a single WARN if the container/psql is unreachable so the
+    file-based checks still run offline.
+    """
+    import subprocess
+    queries = {
+        "work-realm bank_transactions rows with NULL entity_id "
+        "(PERMISSIVE RLS silently hides them)":
+            "SELECT count(*) FROM bank_transactions "
+            "WHERE realm='work' AND entity_id IS NULL;",
+        "bank_transactions rows where realm contradicts "
+        "realm_from_entity_id(entity_id)":
+            "SELECT count(*) FROM bank_transactions "
+            "WHERE entity_id IS NOT NULL "
+            "AND realm <> realm_from_entity_id(entity_id);",
+    }
+    for desc, sql in queries.items():
+        try:
+            out = subprocess.run(
+                ["docker", "exec", "homeai-postgres", "psql", "-U", "postgres",
+                 "-d", "homeai", "-tA", "-c", sql],
+                capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.TimeoutExpired):
+            add("WARN", "INV-DB-ENTITY", "db",
+                "homeai-postgres unreachable — DB invariants not checked")
+            return
+        if out.returncode != 0:
+            add("WARN", "INV-DB-ENTITY", "db",
+                f"psql error — DB invariants not checked: {out.stderr.strip()[:120]}")
+            return
+        n = int(out.stdout.strip() or 0)
+        if n:
+            add("FAIL", "INV-DB-ENTITY", "db:bank_transactions",
+                f"{n} {desc}")
+
+
 # ── report ────────────────────────────────────────────────────────────
 BASELINE = ROOT / "scripts" / ".audit-baseline.txt"
 
@@ -343,6 +387,7 @@ def _collect():
     check_compose()
     check_python()
     check_frontend()
+    check_db()
     order = {"FAIL": 0, "WARN": 1}
     findings.sort(key=lambda f: (order.get(f[0], 9), f[1], f[2]))
 
