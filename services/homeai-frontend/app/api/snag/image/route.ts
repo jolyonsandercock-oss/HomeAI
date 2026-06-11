@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   }
   const ext = file.split(".").pop()!;
   try {
-    const buf = await readFile(join("/tmp/snags", file));
+    const buf = await readFile(join("/data/snags", file));
     return new NextResponse(buf, {
       headers: { "Content-Type": MIME[ext], "Cache-Control": "max-age=3600" },
     });

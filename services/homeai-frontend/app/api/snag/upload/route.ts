@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
 
   // Save image if provided
   if (image && image.size > 0) {
-    const dir = "/tmp/snags";
+    const dir = "/data/snags";  // persistent bind mount (was /tmp — wiped on recreate)
     await mkdir(dir, { recursive: true });
     const ext = image.name.split(".").pop() || "png";
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;

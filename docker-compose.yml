@@ -593,6 +593,11 @@ services:
     # homeai-frontend:3000) behind Authelia forward_auth. Publishing :3003 was
     # the "IP backdoor" that bypassed forward_auth and let Remote-Groups be
     # spoofed for owner-realm access (Codex 2026-06-07 HIGH). Removed.
+    volumes:
+      # Snag screenshots used to live in /tmp/snags INSIDE the container —
+      # wiped on every recreate/reboot (all pre-2026-06-11 snag images lost).
+      - ./storage/snags:/data/snags
+
     environment:
       POSTGRES_READONLY_URL: "postgresql://homeai_readonly:${HOMEAI_READONLY_PASSWORD}@homeai-postgres:5432/homeai"
       NEXT_TELEMETRY_DISABLED: "1"

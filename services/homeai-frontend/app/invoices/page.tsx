@@ -46,6 +46,14 @@ function num(s: string | number | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+// Snags #69-71: pages deep-link here with ?department=&q=&vendor= — initialise
+// filters from the URL or those links silently show an unfiltered page.
+// window-based (not useSearchParams) to avoid the Suspense-boundary build trap.
+function urlParam(name: string): string | null {
+  if (typeof window === 'undefined') return null;
+  return new URLSearchParams(window.location.search).get(name);
+}
+
 export default function InvoicesPage() {
   const [realm, setRealm] = useState<Realm>('all');
   const [range, setRange] = useState<DateRange>({
@@ -53,11 +61,12 @@ export default function InvoicesPage() {
     start: new Date(Date.now() - 364 * 864e5).toISOString().slice(0, 10),
     end: new Date().toISOString().slice(0, 10),
   });
-  const [q, setQ] = useState('');
-  const [groupBy, setGroupBy] = useState<GroupBy>('vendor');
-  const [vendor, setVendor] = useState<string | null>(null);
-  const [department, setDepartment] = useState<string | null>(null);
-  const [product, setProduct] = useState<string | null>(null);
+  const [q, setQ] = useState(() => urlParam('q') ?? '');
+  const [groupBy, setGroupBy] = useState<GroupBy>(
+    () => (urlParam('department') ? 'department' : 'vendor') as GroupBy);
+  const [vendor, setVendor] = useState<string | null>(() => urlParam('vendor'));
+  const [department, setDepartment] = useState<string | null>(() => urlParam('department'));
+  const [product, setProduct] = useState<string | null>(() => urlParam('product'));
 
   // Shared filter params for the slugs.
   const params = useMemo(() => {

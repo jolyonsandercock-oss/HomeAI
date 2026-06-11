@@ -6,7 +6,10 @@
 LOG=/home_ai/logs/u163-reviews-simple.log
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Run start" >> "$LOG"
 
-docker exec homeai-postgres psql -U postgres -d homeai << 'SQL'
+# 2026-06-11 fix: `docker exec` WITHOUT -i discards the heredoc — psql received
+# empty stdin, so this script had NEVER executed its SQL (exit 0, "Run complete",
+# zero inserts, snags 57/59 falsely closed). The -i is load-bearing.
+docker exec -i homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 << 'SQL'
 DO $$
 DECLARE
   r RECORD;
