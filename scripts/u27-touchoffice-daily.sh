@@ -17,7 +17,11 @@ set -uo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YEL='\033[0;33m'; NC='\033[0m'
 
 DATE=${1:-$(date -d 'yesterday' '+%Y-%m-%d')}
-SITES=(malthouse sandwich)
+# head_office (site 0) is the CONSOLIDATED aggregate — single combined DRINK line,
+# no per-till contamination. Authoritative revenue source: matches the TouchOffice
+# head-office report (reconciled 2026-06-11). malthouse/sandwich kept for per-site
+# labour attribution. v_daily_unit_economics revenue derives from head_office.
+SITES=(head_office malthouse sandwich)
 ENDPOINT_HOST=homeai-playwright
 ENDPOINT_PORT=8001
 
