@@ -78,6 +78,10 @@ services:
     environment:
       BASE_URL: "http://100.104.82.53/search/"
       INSTANCE_NAME: "Home AI"
+    ports:
+      # localhost-only: Hermes Agent search backend (2026-06-11). Publishing
+      # works because searxng is also on ai-egress (non-internal).
+      - "127.0.0.1:8888:8080"
     restart: unless-stopped
 
   vault:

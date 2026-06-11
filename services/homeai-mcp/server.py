@@ -16,6 +16,7 @@ import os, json, asyncio, asyncpg, logging
 from contextlib import asynccontextmanager
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("homeai-mcp")
@@ -25,11 +26,21 @@ TRANSPORT = os.environ.get("MCP_TRANSPORT", "sse")  # 'sse' (HTTP) or 'stdio'
 TOKEN     = os.environ.get("HOMEAI_MCP_TOKEN")      # bearer token for HTTP mode
 DEFAULT_REALM = os.environ.get("HOMEAI_MCP_REALM", "owner")
 
+# mcp>=1.9 enables DNS-rebinding protection that 421s any Host other than
+# localhost; allow the Tailscale identities this server is actually reached on.
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get(
+    "MCP_ALLOWED_HOSTS",
+    "100.104.82.53:8765,jolybox.tailc27dff.ts.net:8765,localhost:8765,127.0.0.1:8765",
+).split(",") if h.strip()]
+
 mcp = FastMCP("Home AI", instructions=(
     "This MCP server exposes Home AI's whitelisted database queries. "
     "Use list_slugs to discover available tools. Each slug is a "
     "pre-approved, parameterised SQL view. Results respect Home AI's "
     "realm-based row-level security."
+), transport_security=TransportSecuritySettings(
+    allowed_hosts=ALLOWED_HOSTS,
+    allowed_origins=[f"http://{h}" for h in ALLOWED_HOSTS],
 ))
 
 _pool: asyncpg.Pool | None = None
