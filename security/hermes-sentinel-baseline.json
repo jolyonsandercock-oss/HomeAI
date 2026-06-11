@@ -1,0 +1,98 @@
+{
+ "active_provider": "nous",
+ "channels": [
+  "telegram:8495534790:J S"
+ ],
+ "config": {
+  "approvals": {
+   "cron_mode": "deny",
+   "destructive_slash_confirm": true,
+   "mcp_reload_confirm": true,
+   "mode": "manual",
+   "timeout": 60
+  },
+  "command_allowlist": [
+   "shell command via -c/-lc flag",
+   "execute_code",
+   "script execution via heredoc",
+   "script execution via -e/-c flag"
+  ],
+  "delegation": {
+   "model": "deepseek-v4-flash",
+   "provider": "deepseek",
+   "subagent_auto_approve": false
+  },
+  "fallback_providers": "[\"nous\"]",
+  "hooks": {},
+  "hooks_auto_accept": false,
+  "mcp_servers": {
+   "homeai": {
+    "transport": "sse",
+    "url": "http://100.104.82.53:8765/sse"
+   }
+  },
+  "model": {
+   "base_url": "",
+   "default": "deepseek-v4-flash",
+   "provider": "deepseek"
+  },
+  "prefill_messages_file": "",
+  "quick_commands": {},
+  "security": {
+   "acked_advisories": [],
+   "allow_lazy_installs": false,
+   "allow_private_urls": true,
+   "redact_secrets": true,
+   "tirith_enabled": true,
+   "tirith_fail_open": true,
+   "tirith_path": "tirith",
+   "tirith_timeout": 5,
+   "website_blocklist": {
+    "domains": [],
+    "enabled": false,
+    "shared_files": []
+   }
+  },
+  "skills": {
+   "external_dirs": [],
+   "guard_agent_created": true,
+   "inline_shell": false
+  }
+ },
+ "cron_jobs": [
+  {
+   "deliver": "local",
+   "enabled": true,
+   "id": "1de89a1739f0",
+   "name": "API Cost Tracker",
+   "prompt_sha": "857861885bfea739",
+   "schedule": "0 8,20 * * *",
+   "script": null
+  },
+  {
+   "deliver": "telegram:8495534790",
+   "enabled": true,
+   "id": "bedf5ed8fe5b",
+   "name": "Morning brief",
+   "prompt_sha": "404fec1f645f6032",
+   "schedule": "30 7 * * *",
+   "script": "morning-brief-data.sh"
+  }
+ ],
+ "hooks_sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+ "kanban_open": [],
+ "memory_sha": "64381c96a89d7706d3af85609c6ae2fa9fb939b5d73a5b6e042e45a13e5f3196",
+ "providers": {
+  "anthropic": 1,
+  "deepseek": 2,
+  "nous": 1,
+  "openai-api": 1
+ },
+ "skills_count": 535,
+ "skills_sha": "1d25d1bc845d76a2e0e50f974f07b29206da6bf60d068ffc63eb442144fa2777",
+ "soul_sha": "558e157435ba2108bdc99beb45878ae30b2ce65371c3574f5bfbd08821fe9b66",
+ "user_listeners": [
+  "100.104.82.53:8091"
+ ],
+ "user_profile_sha": "aca8a908962eb6ecb6764cc3a6f92b9cbc7809b36f902e07a01e8bd17267d311"
+}

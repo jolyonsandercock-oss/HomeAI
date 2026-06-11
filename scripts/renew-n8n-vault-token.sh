@@ -41,6 +41,10 @@ if out=$(docker exec -e VAULT_TOKEN="$TOK" "$VAULT_CONTAINER" \
            vault token renew -format=json 2>&1); then
   ttl=$(printf '%s' "$out" | jq -r '.auth.lease_duration // empty' 2>/dev/null)
   echo "$(ts) OK renewed n8n vault token (ttl=${ttl:-?}s)" >>"$LOG"
+  # Also heartbeat to stdout: cron redirects it to /home_ai/logs/…, which is the
+  # file cron-health-check.py watches (it was reading an always-empty log and
+  # flagging this job CronStale every cycle).
+  echo "$(ts) OK (ttl=${ttl:-?}s)"
 else
   echo "$(ts) FAIL renew: $out" >>"$LOG"
   # Surface loudly — a failed renew means the daily-outage is ~168h from recurring.
