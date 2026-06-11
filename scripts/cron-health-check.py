@@ -39,6 +39,10 @@ def tolerance_min(sched_fields):
 def main():
     stale, ok = [], []
     for line in crontab_lines():
+        # @reboot entries are boot hooks, not schedules — their logs are
+        # legitimately old between reboots (u273 false-stale fix, 2026-06-11).
+        if line.strip().startswith("@"):
+            continue
         mlog = re.search(r">>?\s*(\S+\.log)", line)
         if not mlog:
             continue

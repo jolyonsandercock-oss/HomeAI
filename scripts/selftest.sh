@@ -153,6 +153,12 @@ check "resolver abstains on a fake counterparty" "$PSQL \"SELECT home_ai.resolve
 check "resolver in review mode (invoices auto-attributed, abstains queued; not enforce/shadow)" "$PSQL \"SELECT value FROM static_context WHERE key='resolver.mode'\" | command grep -q review && echo ok"
 echo
 
+# ── revenue integrity (head_office basis, 2026-06-11) ─────────────────────────
+echo "[10] Revenue integrity"
+check "head_office consolidated scraped for yesterday" "$PSQL \"SELECT count(*)>0 FROM touchoffice_department_sales WHERE site='head_office' AND report_date=current_date-1\" | command grep -q '^t$' && echo ok"
+check "workforce on-cost anchor intact (May-2026 = report £44,447.24)" "$PSQL \"SELECT round(sum(cost_estimate),0) BETWEEN 44440 AND 44455 FROM workforce_shifts WHERE shift_date BETWEEN '2026-05-01' AND '2026-05-31' AND hours_worked IS NOT NULL AND award_cost IS NOT NULL\" | command grep -q '^t$' && echo ok"
+echo
+
 # ── Summary ────────────────────────────────────────────────────
 echo "── summary ──"
 echo "  PASS:    $PASS"
