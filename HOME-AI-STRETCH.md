@@ -540,6 +540,50 @@ The spec uses `nomic-embed-text` via Ollama for embeddings. As of 2026,
 tasks. Pull alongside nomic-embed-text and benchmark both on a sample of your
 actual emails and invoices before committing to either for the Qdrant collections.
 
+**48GB GPU upgrade — Sapphire Radeon PRO W7800 48GB (ORDERED Jun-2026)** *(canonical hardware plan)*
+
+> Supersedes the NVIDIA assumptions in `analysis/48gb-hardware-plan.md` (which
+> assumed RTX 6000 Ada/A6000). The W7800 PRO is **AMD RDNA3 (Navi 31), 48GB
+> GDDR6, ROCm — not CUDA** — so the migration is a software-stack change, not
+> just a card swap. gfx1100 family = officially ROCm-supported.
+
+*Model assumptions (build everything against these):*
+
+| Role | Model | VRAM (Q4) | Notes |
+|---|---|---|---|
+| Vision/OCR workhorse | **qwen2.5vl:32b** | ~20-24GB | Robust on poor scans; the default OCR engine |
+| Vision max-accuracy | qwen2.5vl:72b | ~40GB+ | Batch re-pass on pages 32B flags low-confidence; tight with KV — verify fit on arrival |
+| Text workhorse | qwen2.5:32b (or 72b Q4 ~40GB) | 20/40GB | Replaces phi4 tier; hot tier qwen2.5:7b stays for speed |
+| Embeddings | nomic-embed-text / mxbai | <2GB | unchanged |
+
+Interim (pre-arrival): vision pipeline runs **qwen2.5vl:7b on the 3060** —
+pipeline is model-agnostic via a `VISION_MODEL` setting, so arrival day is a
+config flip to 32b, zero rework. Don't size prompts/tiling to the 7B's limits.
+
+*Arrival-day migration checklist (NVIDIA → ROCm):*
+1. Host: confirm `amdgpu` kernel driver sees the card (`/dev/kfd` + `/dev/dri`
+   present); kernel 7.x is plenty new. Install `rocm-smi` for monitoring.
+2. compose `ollama`: image → `ollama/ollama:X.Y-rocm`; REMOVE the CDI
+   `nvidia.com/gpu=all` device; ADD `devices: [/dev/kfd, /dev/dri]` +
+   `group_add: [video, render]`. `ollama_data` volume (GGUF blobs) carries over
+   unchanged — re-pull nothing except to upgrade sizes.
+3. Retire NVIDIA-specific plumbing: U226 CDI watchdog + `nvidia-cdi-refresh`
+   hooks; sweep `scripts/gamemode.sh` + `scripts/u226-gpu-recover.sh` for
+   `nvidia-smi` → `rocm-smi` (gamemode flow itself unchanged — pause AI, free
+   card, game, resume).
+4. Re-run the U7-style benchmark suite: re-validate hot-tier latency and pick
+   32b-vs-72b per workload from measured numbers, not assumptions.
+5. Selftest: add a GPU check that asserts the expected VRAM (≈48GB) and that
+   ollama placed the vision model fully on-GPU (no CPU spill — the qwen3.5:9b
+   lesson).
+6. The 3060 leaves the chassis (single-GPU assumption; ollama can't mix
+   CUDA+ROCm backends in one instance — dual-GPU would need a second ollama).
+
+*What 48GB unlocks beyond OCR:* local 32B/72B as the default reasoning tier
+(quota pressure off the Anthropic budget), Postgres `shared_buffers` headroom
+stays untouched (card RAM, not system), and the 1,262-invoice OCR backlog +
+mortgage-statement vision re-pass run entirely on-box (zero data egress).
+
 ---
 
 ### 3.10 Storyblok — Public-Facing Content (Phase 5, alongside Playground Agent)
