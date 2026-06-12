@@ -97,7 +97,8 @@ def main():
             phone = find(det, "phone") or find(det, "phone2")
             booker = (a.get("booker") or "").strip()
             booking_no = str(a.get("bookingNo") or "").strip()
-            if not (email or phone) or not (booker or booking_no):
+            # name-only updates allowed: contactless bookings still fill guest_name
+            if not (email or phone or booker) or not (booker or booking_no):
                 continue
             q = lambda s: s.replace("'", "''")
             email_sql = f"'{q(email)}'" if email else "NULL"
