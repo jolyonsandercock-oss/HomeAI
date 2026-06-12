@@ -21,6 +21,7 @@ u286-caterbook-guest-sync.sh. Keep stdout protocol stable.
 import json
 import os
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, timedelta
@@ -40,19 +41,33 @@ def main():
     c = vault("caterbook")
     H = {"Content-Type": "application/json", "application-name": "app",
          "Origin": "https://app.caterbook.net", "Referer": "https://app.caterbook.net/"}
-    r = json.loads(urllib.request.urlopen(urllib.request.Request(
-        "https://api.caterbook.net/api/User/Login",
-        data=json.dumps({"username": c["username"], "password": c["password"],
-                         "accountID": str(c["account_id"])}).encode(),
-        headers=H, method="POST"), timeout=30).read())
-    tok = next((v for v in r.values() if isinstance(v, str) and v.startswith("eyJ")), "")
+
+    def login():
+        r = json.loads(urllib.request.urlopen(urllib.request.Request(
+            "https://api.caterbook.net/api/User/Login",
+            data=json.dumps({"username": c["username"], "password": c["password"],
+                             "accountID": str(c["account_id"])}).encode(),
+            headers=H, method="POST"), timeout=30).read())
+        return next((v for v in r.values() if isinstance(v, str) and v.startswith("eyJ")), "")
+
+    tok = login()
     if not tok:
         print("FATAL no token"); return
     HA = {**H, "Authorization": tok}
 
-    def get(u):
-        return json.loads(urllib.request.urlopen(
-            urllib.request.Request(u, headers=HA), timeout=30).read())
+    def get(u, _retried=False):
+        # JWT expires mid-run on long backfills (~60min TTL) — re-login once on 401
+        try:
+            return json.loads(urllib.request.urlopen(
+                urllib.request.Request(u, headers=HA), timeout=30).read())
+        except urllib.error.HTTPError as e:
+            if e.code == 401 and not _retried:
+                t = login()
+                if t:
+                    HA["Authorization"] = t
+                    print("# re-login on 401 OK")
+                    return get(u, _retried=True)
+            raise
 
     seen_booking_ids = set()
     found = 0
