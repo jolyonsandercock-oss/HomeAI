@@ -96,19 +96,29 @@ def main():
             email = find(det, "email")
             phone = find(det, "phone") or find(det, "phone2")
             booker = (a.get("booker") or "").strip()
-            if not (email or phone) or not booker:
+            booking_no = str(a.get("bookingNo") or "").strip()
+            if not (email or phone) or not (booker or booking_no):
                 continue
-            surname = booker.split()[-1].replace("'", "''")
-            email_sql = f"'{email.replace(chr(39), chr(39)*2)}'" if email else "NULL"
-            phone_sql = f"'{phone.replace(chr(39), chr(39)*2)}'" if phone else "NULL"
+            q = lambda s: s.replace("'", "''")
+            email_sql = f"'{q(email)}'" if email else "NULL"
+            phone_sql = f"'{q(phone)}'" if phone else "NULL"
+            name_sql = f"'{q(booker)}'" if booker else "NULL"
+            # match: exact bookingNo == source_ref (hotel_email rows have no
+            # guest_name, only refs), else checkin_date + surname fallback
+            conds = []
+            if booking_no:
+                conds.append(f"source_ref = '{q(booking_no)}'")
+            if booker:
+                surname = q(booker.split()[-1].lower())
+                conds.append(f"(checkin_date = '{d}' AND lower(guest_name) LIKE '%{surname}%')")
             found += 1
             print("SQL\t"
                   f"UPDATE accommodation_bookings SET "
                   f"guest_email = COALESCE(guest_email, {email_sql}), "
-                  f"guest_phone = COALESCE(guest_phone, {phone_sql}) "
-                  f"WHERE checkin_date = '{d}' "
-                  f"AND lower(guest_name) LIKE '%{surname.lower()}%' "
-                  f"AND (guest_email IS NULL OR guest_phone IS NULL);")
+                  f"guest_phone = COALESCE(guest_phone, {phone_sql}), "
+                  f"guest_name  = COALESCE(guest_name, {name_sql}) "
+                  f"WHERE ({' OR '.join(conds)}) "
+                  f"AND (guest_email IS NULL OR guest_phone IS NULL OR guest_name IS NULL);")
             time.sleep(0.3)
         time.sleep(0.2)
     print(f"# done: {len(seen_booking_ids)} bookings inspected, {found} with contacts")
