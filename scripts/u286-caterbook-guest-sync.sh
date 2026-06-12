@@ -15,7 +15,9 @@ while IFS= read -r line; do
   case "$line" in
     SQL$'\t'*)
       sql="${line#SQL$'\t'}"
-      docker exec -i homeai-postgres psql -d homeai -U postgres -q \
+      # NO -i here: an interactive exec inside a while-read loop inherits the
+      # loop's stdin and slurps the remaining python output (lost SQL + # done)
+      docker exec homeai-postgres psql -d homeai -U postgres -q \
         -c "SET app.current_entity='all';" -c "$sql" >/dev/null 2>&1 && applied=$((applied+1))
       ;;
     *) echo "$line" ;;
