@@ -36,6 +36,16 @@ WITH wanted AS (
 SELECT w.d::text FROM wanted w
  WHERE NOT EXISTS (SELECT 1 FROM touchoffice_department_sales h
                     WHERE h.site='head_office' AND h.report_date = w.d)
+   -- 2026-06-12: don't retry forever. A SUCCESSFUL scrape that wrote 0 dept
+   -- rows = legitimately empty (e.g. Jan-2026: pub closed — verified manually,
+   -- widgets return nothing). >=3 attempts of any outcome = give up nightly
+   -- churn (pre-2026 dates that hard-fail ~60s each were eating the window).
+   AND NOT EXISTS (SELECT 1 FROM touchoffice_scrapes s
+                    WHERE s.site='head_office' AND s.report_date = w.d
+                      AND s.widget='department_sales' AND s.success AND s.rows_written = 0)
+   AND (SELECT count(*) FROM touchoffice_scrapes s2
+         WHERE s2.site='head_office' AND s2.report_date = w.d
+           AND s2.widget='department_sales') < 3
  ORDER BY w.d DESC;" | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
 
 total=$(printf '%s\n' "$DATES" | grep -c . || true)
