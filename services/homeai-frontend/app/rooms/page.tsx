@@ -382,6 +382,9 @@ export default function RoomsPage() {
                     <div className="mt-1 text-xs text-ink-500 flex gap-1.5 flex-wrap">
                       {r.arriving_today && <span className="text-good">arriving</span>}
                       {r.departing_today && <span className="text-warn">departing</span>}
+                      {/* #38 completed 2026-06-12: contact inline on the slab */}
+                      {r.guest_phone && <span className="font-mono text-ink-700 basis-full">{r.guest_phone}</span>}
+                      {r.guest_email && <span className="font-mono text-ink-700 text-2xs truncate basis-full" title={r.guest_email}>{r.guest_email}</span>}
                       {!r.arriving_today && !r.departing_today && (
                         <span>{r.nights_remaining}n remaining</span>
                       )}
