@@ -123,7 +123,8 @@ def main():
             # guest_name, only refs), else checkin_date + surname fallback
             conds = []
             if booking_no:
-                conds.append(f"source_ref = '{q(booking_no)}'")
+                # multi-room bookings are stored per-room as 'N-r1','N-r2'...
+                conds.append(f"(source_ref = '{q(booking_no)}' OR source_ref LIKE '{q(booking_no)}-r%')")
             if booker:
                 surname = q(booker.split()[-1].lower())
                 conds.append(f"(checkin_date = '{d}' AND lower(guest_name) LIKE '%{surname}%')")
