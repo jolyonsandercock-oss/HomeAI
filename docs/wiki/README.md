@@ -13,4 +13,8 @@ Rules:
   duplicate page content — link to it.
 
 Index:
+- [realm-entity-isolation.md](realm-entity-isolation.md) — entity vs realm, RLS GUCs, PERMISSIVE/RESTRICTIVE, override pattern
+- [invoice-pipeline.md](invoice-pipeline.md) — email → extraction ladder → vision-OCR → counterparty attribution
+- [vault-role.md](vault-role.md) — secret access patterns, seal blast radius, circular-dep mitigations
+- [n8n-topology.md](n8n-topology.md) — events table, master router, dead letters, runtime-edit traps
 - [touchoffice-revenue-model.md](touchoffice-revenue-model.md) — why head_office is the only revenue truth
