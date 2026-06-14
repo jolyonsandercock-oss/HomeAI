@@ -1,0 +1,15 @@
+# Which Claude Code memories cross to Hermes, and how.
+# Default: every memory file (by slug) NOT in `exclude` syncs to mnemosyne.
+# Slugs in `soul` ALSO render into SOUL.md's culture block (always-on).
+
+# Claude-Code-workflow-only — Hermes can't act on these.
+exclude:
+  - check_sprint_number_first
+  - ultraplan_handoff
+  - cognition_build          # about Claude Code's own hook system
+
+# Highest-altitude culture/discipline — always-on in SOUL.md (and also mnemosyne).
+soul:
+  - feedback_working_discipline
+  - feedback_financial_recon_discipline
+  - feedback_homeai            # build rules
