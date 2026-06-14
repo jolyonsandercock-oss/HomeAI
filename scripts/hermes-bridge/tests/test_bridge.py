@@ -1,6 +1,17 @@
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import bridge
+import shutil, subprocess, sqlite3, os
+
+LIVE_DB = os.path.expanduser("~/.hermes/mnemosyne/data/mnemosyne.db")
+VENV_PY = os.path.expanduser("~/.hermes/hermes-agent/venv/bin/python")
+
+
+def _copy_db(tmp_path):
+    """Copy live DB into tmp_path/mnemosyne.db; return the directory path."""
+    dst = tmp_path / "mnemosyne.db"
+    shutil.copy(LIVE_DB, dst)
+    return str(tmp_path)
 
 def test_parse_memory_splits_frontmatter(tmp_path):
     f = tmp_path / "feedback_example.md"
@@ -27,3 +38,15 @@ def test_select_excludes_manifest_and_index(tmp_path):
     manifest = {"exclude": ["check_sprint_number_first"], "soul": []}
     slugs = sorted(m.slug for m in bridge.select_memories(memdir, manifest))
     assert slugs == ["feedback_keep"]          # MEMORY.md skipped, excluded skipped
+
+
+def test_store_then_find_by_slug(tmp_path):
+    data_dir = _copy_db(tmp_path)
+    adapter = bridge.Mnemosyne(data_dir=data_dir, venv_py=VENV_PY)
+    rid = adapter.store(slug="probe-slug", content="probe body alpha", importance=0.6)
+    assert rid                                   # got an id back
+    found = adapter.find_by_slug("probe-slug")
+    assert found and found["id"] == rid
+    assert found["source"] == bridge.SOURCE_PREFIX + "probe-slug"
+    assert found["author_type"] == "claude-code"  # stamped
+    assert found["scope"] == "global"
