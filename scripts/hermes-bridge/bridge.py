@@ -75,10 +75,25 @@ class Mnemosyne:
     def delete(self, mem_id: str):
         self._cli("delete", mem_id)
 
+    def list_inherited_sources(self) -> list[str]:
+        with sqlite3.connect(self._db_path()) as cx:
+            return [r[0] for r in cx.execute(
+                "SELECT DISTINCT source FROM memories WHERE source LIKE ?",
+                (SOURCE_PREFIX + "%",)).fetchall()]
+
+    def delete_by_source(self, src: str):
+        with sqlite3.connect(self._db_path()) as cx:
+            ids = [r[0] for r in cx.execute(
+                "SELECT id FROM memories WHERE source=?", (src,)).fetchall()]
+        for mem_id in ids:
+            self.delete(mem_id)
+
 
 def sync(memdir: pathlib.Path, manifest: dict, adapter: "Mnemosyne") -> dict:
-    stats = {"new": 0, "updated": 0, "unchanged": 0}
-    for mem in select_memories(memdir, manifest):
+    stats = {"new": 0, "updated": 0, "unchanged": 0, "pruned": 0}
+    selected = select_memories(memdir, manifest)
+    selected_sources = {SOURCE_PREFIX + m.slug for m in selected}
+    for mem in selected:
         content = f"{mem.description}\n\n{mem.body}".strip()
         existing = adapter.find_by_slug(mem.slug)
         if existing is None:
@@ -90,6 +105,10 @@ def sync(memdir: pathlib.Path, manifest: dict, adapter: "Mnemosyne") -> dict:
             stats["updated"] += 1
         else:
             stats["unchanged"] += 1
+    for src in adapter.list_inherited_sources():
+        if src not in selected_sources:
+            adapter.delete_by_source(src)
+            stats["pruned"] += 1
     return stats
 
 

@@ -126,6 +126,22 @@ def test_sync_recallable(tmp_path):
     assert "zticonium" in adapter._cli("recall", "zticonium", "3")
 
 
+def test_sync_prunes_deselected(tmp_path):
+    data_dir = _copy_db(tmp_path)
+    memdir = tmp_path / "mem"; memdir.mkdir()
+    _write_mem(memdir, "feedback_a", "body one")
+    _write_mem(memdir, "feedback_b", "body two")
+    adapter = bridge.Mnemosyne(data_dir=data_dir, venv_py=VENV_PY)
+    bridge.sync(memdir, {"exclude": [], "soul": []}, adapter)
+    assert _count_inherit(data_dir) == 2
+    # now exclude feedback_b → it must be pruned from mnemosyne
+    stats = bridge.sync(memdir, {"exclude": ["feedback_b"], "soul": []}, adapter)
+    assert stats["pruned"] == 1
+    assert _count_inherit(data_dir) == 1
+    assert adapter.find_by_slug("feedback_b") is None
+    assert adapter.find_by_slug("feedback_a") is not None
+
+
 def test_soul_block_is_idempotent(tmp_path):
     soul = tmp_path / "SOUL.md"
     soul.write_text("# Hermes\n\nExisting contract.\n")

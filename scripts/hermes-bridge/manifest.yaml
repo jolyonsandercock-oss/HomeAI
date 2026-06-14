@@ -4,9 +4,9 @@
 
 # Claude-Code-workflow-only — Hermes can't act on these.
 exclude:
-  - check_sprint_number_first
-  - ultraplan_handoff
-  - cognition_build          # about Claude Code's own hook system
+  - feedback_check_sprint_number_first
+  - feedback_ultraplan_handoff
+  - project_cognition_build          # about Claude Code's own hook system
 
 # Highest-altitude culture/discipline — always-on in SOUL.md (and also mnemosyne).
 soul:
