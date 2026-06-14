@@ -104,3 +104,24 @@ def sync(memdir: pathlib.Path, manifest: dict, adapter: "Mnemosyne") -> dict:
         else:
             stats["unchanged"] += 1
     return stats
+
+
+def main():
+    import argparse, yaml
+    ap = argparse.ArgumentParser(description="One-way sync of Claude Code memories into Hermes mnemosyne.")
+    ap.add_argument("--memdir", default=os.path.expanduser("~/.claude/projects/-home-joly/memory"))
+    ap.add_argument("--data-dir", default=os.path.expanduser("~/.hermes/mnemosyne/data"))
+    ap.add_argument("--manifest", default=str(pathlib.Path(__file__).parent / "manifest.yaml"))
+    ap.add_argument("--soul", default=os.path.expanduser("~/.hermes/SOUL.md"))
+    ap.add_argument("--venv-py", default=os.path.expanduser("~/.hermes/hermes-agent/venv/bin/python"))
+    a = ap.parse_args()
+    manifest = yaml.safe_load(open(a.manifest))
+    adapter = Mnemosyne(data_dir=a.data_dir, venv_py=a.venv_py)
+    stats = sync(pathlib.Path(a.memdir), manifest, adapter)
+    import soul_block
+    soul_block.upsert_culture_block(pathlib.Path(a.soul))
+    print(f"bridge: {stats}")
+
+
+if __name__ == "__main__":
+    main()
