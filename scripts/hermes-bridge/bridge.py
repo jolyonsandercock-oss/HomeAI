@@ -29,3 +29,13 @@ def parse_memory(path: pathlib.Path) -> Memory:
     if mt:
         mtype = mt.group(1)
     return Memory(slug=path.stem, description=field("description"), mtype=mtype, body=body.strip())
+
+
+def select_memories(memdir: pathlib.Path, manifest: dict) -> list[Memory]:
+    exclude = set(manifest.get("exclude") or [])
+    out = []
+    for p in sorted(memdir.glob("*.md")):
+        if p.stem == "MEMORY" or p.stem in exclude:
+            continue
+        out.append(parse_memory(p))
+    return out

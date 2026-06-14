@@ -17,3 +17,13 @@ def test_parse_memory_splits_frontmatter(tmp_path):
     assert m.description == "a one-line summary"
     assert m.mtype == "feedback"
     assert m.body.strip() == "The actual fact body."
+
+
+def test_select_excludes_manifest_and_index(tmp_path):
+    memdir = tmp_path / "mem"; memdir.mkdir()
+    for name in ["feedback_keep", "check_sprint_number_first", "MEMORY"]:
+        (memdir / f"{name}.md").write_text(
+            "---\nname: x\ndescription: d\nmetadata:\n  type: feedback\n---\nbody\n")
+    manifest = {"exclude": ["check_sprint_number_first"], "soul": []}
+    slugs = sorted(m.slug for m in bridge.select_memories(memdir, manifest))
+    assert slugs == ["feedback_keep"]          # MEMORY.md skipped, excluded skipped
