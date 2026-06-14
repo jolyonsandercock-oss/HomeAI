@@ -49,15 +49,13 @@ def test_store_then_find_by_slug(tmp_path):
     found = adapter.find_by_slug("probe-slug")
     assert found and found["id"] == rid
     assert found["source"] == bridge.SOURCE_PREFIX + "probe-slug"
-    assert found["author_type"] == "claude-code"  # stamped
-    assert found["scope"] == "global"
+    assert "probe body alpha" in found["content"]
 
 
 def _count_inherit(data_dir):
-    db = os.path.join(data_dir, "mnemosyne.db")
-    with sqlite3.connect(db) as cx:
-        return cx.execute("SELECT count(*) FROM working_memory "
-                          "WHERE source LIKE 'claude-inherit:%' AND superseded_by IS NULL").fetchone()[0]
+    import os, sqlite3
+    with sqlite3.connect(os.path.join(data_dir, "mnemosyne.db")) as cx:
+        return cx.execute("SELECT count(*) FROM memories WHERE source LIKE 'claude-inherit:%'").fetchone()[0]
 
 
 def _write_mem(memdir, slug, body):
@@ -86,20 +84,35 @@ def test_sync_supersedes_on_change(tmp_path):
     bridge.sync(memdir, {"exclude": [], "soul": []}, adapter)
     live = adapter.find_by_slug("feedback_a")
     assert "CHANGED" in live["content"]                         # newest wins
-    assert _count_inherit(data_dir) == 1                        # old superseded, not duplicated
+    assert _count_inherit(data_dir) == 1                        # old hard-deleted, not duplicated
+
+
+def test_sync_idempotent_across_consolidation(tmp_path):
+    data_dir = _copy_db(tmp_path)
+    memdir = tmp_path / "mem"; memdir.mkdir()
+    _write_mem(memdir, "feedback_a", "body one")
+    adapter = bridge.Mnemosyne(data_dir=data_dir, venv_py=VENV_PY)
+    bridge.sync(memdir, {"exclude": [], "soul": []}, adapter)
+    first = _count_inherit(data_dir)
+    # simulate mnemosyne consolidation emptying the transient buffer
+    import os, sqlite3
+    with sqlite3.connect(os.path.join(data_dir, "mnemosyne.db")) as cx:
+        cx.execute("DELETE FROM working_memory")
+    bridge.sync(memdir, {"exclude": [], "soul": []}, adapter)   # must NOT duplicate
+    assert _count_inherit(data_dir) == first == 1
 
 
 def test_sync_never_touches_hermes_rows(tmp_path):
     data_dir = _copy_db(tmp_path)
     db = os.path.join(data_dir, "mnemosyne.db")
     with sqlite3.connect(db) as cx:
-        before = cx.execute("SELECT count(*), coalesce(sum(length(content)),0) FROM working_memory "
+        before = cx.execute("SELECT count(*), coalesce(sum(length(content)),0) FROM memories "
                             "WHERE source IS NULL OR source NOT LIKE 'claude-inherit:%'").fetchone()
     memdir = tmp_path / "mem"; memdir.mkdir()
     _write_mem(memdir, "feedback_a", "body one")
     bridge.sync(memdir, {"exclude": [], "soul": []}, bridge.Mnemosyne(data_dir=data_dir, venv_py=VENV_PY))
     with sqlite3.connect(db) as cx:
-        after = cx.execute("SELECT count(*), coalesce(sum(length(content)),0) FROM working_memory "
+        after = cx.execute("SELECT count(*), coalesce(sum(length(content)),0) FROM memories "
                           "WHERE source IS NULL OR source NOT LIKE 'claude-inherit:%'").fetchone()
     assert before == after                                      # Hermes-authored rows byte-stable
 

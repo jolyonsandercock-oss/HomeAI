@@ -60,33 +60,20 @@ class Mnemosyne:
     def store(self, slug: str, content: str, importance: float) -> str:
         src = SOURCE_PREFIX + slug
         out = self._cli("store", content, src, str(importance))
-        rid = out.split("Stored:")[-1].strip().split()[0]
-        self._stamp(rid)
-        return rid
-
-    def _stamp(self, rid: str):
-        with sqlite3.connect(self._db_path()) as cx:
-            for tbl in ("working_memory", "memories"):
-                cols = {r[1] for r in cx.execute(f"PRAGMA table_info({tbl})")}
-                sets = []
-                if "scope" in cols: sets.append("scope='global'")
-                if "author_type" in cols: sets.append("author_type='claude-code'")
-                if sets:
-                    cx.execute(f"UPDATE {tbl} SET {','.join(sets)} WHERE id=?", (rid,))
+        return out.split("Stored:")[-1].strip().split()[0]
 
     def find_by_slug(self, slug: str) -> dict | None:
         src = SOURCE_PREFIX + slug
         with sqlite3.connect(self._db_path()) as cx:
             cx.row_factory = sqlite3.Row
             row = cx.execute(
-                "SELECT id, content, source, scope, author_type FROM working_memory "
-                "WHERE source=? AND superseded_by IS NULL ORDER BY created_at DESC LIMIT 1",
+                "SELECT id, content, source FROM memories "
+                "WHERE source=? ORDER BY created_at DESC LIMIT 1",
                 (src,)).fetchone()
             return dict(row) if row else None
 
-    def supersede(self, old_id: str, new_id: str):
-        with sqlite3.connect(self._db_path()) as cx:
-            cx.execute("UPDATE working_memory SET superseded_by=? WHERE id=?", (new_id, old_id))
+    def delete(self, mem_id: str):
+        self._cli("delete", mem_id)
 
 
 def sync(memdir: pathlib.Path, manifest: dict, adapter: "Mnemosyne") -> dict:
@@ -98,8 +85,8 @@ def sync(memdir: pathlib.Path, manifest: dict, adapter: "Mnemosyne") -> dict:
             adapter.store(mem.slug, content, importance=0.6)
             stats["new"] += 1
         elif existing["content"].strip() != content:
-            new_id = adapter.store(mem.slug, content, importance=0.6)
-            adapter.supersede(existing["id"], new_id)
+            adapter.store(mem.slug, content, importance=0.6)
+            adapter.delete(existing["id"])
             stats["updated"] += 1
         else:
             stats["unchanged"] += 1
