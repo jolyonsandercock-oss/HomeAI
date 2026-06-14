@@ -1,6 +1,7 @@
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import bridge
+import soul_block
 import shutil, subprocess, sqlite3, os
 
 LIVE_DB = os.path.expanduser("~/.hermes/mnemosyne/data/mnemosyne.db")
@@ -110,3 +111,16 @@ def test_sync_recallable(tmp_path):
     adapter = bridge.Mnemosyne(data_dir=data_dir, venv_py=VENV_PY)
     bridge.sync(memdir, {"exclude": [], "soul": []}, adapter)
     assert "zticonium" in adapter._cli("recall", "zticonium", "3")
+
+
+def test_soul_block_is_idempotent(tmp_path):
+    soul = tmp_path / "SOUL.md"
+    soul.write_text("# Hermes\n\nExisting contract.\n")
+    soul_block.upsert_culture_block(soul)
+    once = soul.read_text()
+    soul_block.upsert_culture_block(soul)          # run again
+    twice = soul.read_text()
+    assert once == twice                           # block written exactly once
+    assert "Build & working discipline (inherited from Claude Code)" in once
+    assert "verify before declaring done" in once.lower()
+    assert "Existing contract." in once            # original preserved
