@@ -87,3 +87,20 @@ class Mnemosyne:
     def supersede(self, old_id: str, new_id: str):
         with sqlite3.connect(self._db_path()) as cx:
             cx.execute("UPDATE working_memory SET superseded_by=? WHERE id=?", (new_id, old_id))
+
+
+def sync(memdir: pathlib.Path, manifest: dict, adapter: "Mnemosyne") -> dict:
+    stats = {"new": 0, "updated": 0, "unchanged": 0}
+    for mem in select_memories(memdir, manifest):
+        content = f"{mem.description}\n\n{mem.body}".strip()
+        existing = adapter.find_by_slug(mem.slug)
+        if existing is None:
+            adapter.store(mem.slug, content, importance=0.6)
+            stats["new"] += 1
+        elif existing["content"].strip() != content:
+            new_id = adapter.store(mem.slug, content, importance=0.6)
+            adapter.supersede(existing["id"], new_id)
+            stats["updated"] += 1
+        else:
+            stats["unchanged"] += 1
+    return stats

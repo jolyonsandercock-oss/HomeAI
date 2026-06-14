@@ -50,3 +50,63 @@ def test_store_then_find_by_slug(tmp_path):
     assert found["source"] == bridge.SOURCE_PREFIX + "probe-slug"
     assert found["author_type"] == "claude-code"  # stamped
     assert found["scope"] == "global"
+
+
+def _count_inherit(data_dir):
+    db = os.path.join(data_dir, "mnemosyne.db")
+    with sqlite3.connect(db) as cx:
+        return cx.execute("SELECT count(*) FROM working_memory "
+                          "WHERE source LIKE 'claude-inherit:%' AND superseded_by IS NULL").fetchone()[0]
+
+
+def _write_mem(memdir, slug, body):
+    (memdir / f"{slug}.md").write_text(
+        f"---\nname: {slug}\ndescription: d\nmetadata:\n  type: feedback\n---\n{body}\n")
+
+
+def test_sync_idempotent(tmp_path):
+    data_dir = _copy_db(tmp_path)
+    memdir = tmp_path / "mem"; memdir.mkdir()
+    _write_mem(memdir, "feedback_a", "body one")
+    adapter = bridge.Mnemosyne(data_dir=data_dir, venv_py=VENV_PY)
+    bridge.sync(memdir, {"exclude": [], "soul": []}, adapter)
+    first = _count_inherit(data_dir)
+    bridge.sync(memdir, {"exclude": [], "soul": []}, adapter)   # run again
+    assert _count_inherit(data_dir) == first                    # no duplicates
+
+
+def test_sync_supersedes_on_change(tmp_path):
+    data_dir = _copy_db(tmp_path)
+    memdir = tmp_path / "mem"; memdir.mkdir()
+    _write_mem(memdir, "feedback_a", "body one")
+    adapter = bridge.Mnemosyne(data_dir=data_dir, venv_py=VENV_PY)
+    bridge.sync(memdir, {"exclude": [], "soul": []}, adapter)
+    _write_mem(memdir, "feedback_a", "body two CHANGED")
+    bridge.sync(memdir, {"exclude": [], "soul": []}, adapter)
+    live = adapter.find_by_slug("feedback_a")
+    assert "CHANGED" in live["content"]                         # newest wins
+    assert _count_inherit(data_dir) == 1                        # old superseded, not duplicated
+
+
+def test_sync_never_touches_hermes_rows(tmp_path):
+    data_dir = _copy_db(tmp_path)
+    db = os.path.join(data_dir, "mnemosyne.db")
+    with sqlite3.connect(db) as cx:
+        before = cx.execute("SELECT count(*), coalesce(sum(length(content)),0) FROM working_memory "
+                            "WHERE source IS NULL OR source NOT LIKE 'claude-inherit:%'").fetchone()
+    memdir = tmp_path / "mem"; memdir.mkdir()
+    _write_mem(memdir, "feedback_a", "body one")
+    bridge.sync(memdir, {"exclude": [], "soul": []}, bridge.Mnemosyne(data_dir=data_dir, venv_py=VENV_PY))
+    with sqlite3.connect(db) as cx:
+        after = cx.execute("SELECT count(*), coalesce(sum(length(content)),0) FROM working_memory "
+                          "WHERE source IS NULL OR source NOT LIKE 'claude-inherit:%'").fetchone()
+    assert before == after                                      # Hermes-authored rows byte-stable
+
+
+def test_sync_recallable(tmp_path):
+    data_dir = _copy_db(tmp_path)
+    memdir = tmp_path / "mem"; memdir.mkdir()
+    _write_mem(memdir, "feedback_uniqueword", "zticonium is the magic token")
+    adapter = bridge.Mnemosyne(data_dir=data_dir, venv_py=VENV_PY)
+    bridge.sync(memdir, {"exclude": [], "soul": []}, adapter)
+    assert "zticonium" in adapter._cli("recall", "zticonium", "3")
