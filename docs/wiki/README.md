@@ -18,3 +18,4 @@ Index:
 - [vault-role.md](vault-role.md) — secret access patterns, seal blast radius, circular-dep mitigations
 - [n8n-topology.md](n8n-topology.md) — events table, master router, dead letters, runtime-edit traps
 - [touchoffice-revenue-model.md](touchoffice-revenue-model.md) — why head_office is the only revenue truth
+- [architecture-review-2026-06.md](architecture-review-2026-06.md) — context-engineering scorecard + structural audit + ranked architectural debt (2026-06)
