@@ -100,9 +100,15 @@ def sync(memdir: pathlib.Path, manifest: dict, adapter: "Mnemosyne") -> dict:
             adapter.store(mem.slug, content, importance=0.6)
             stats["new"] += 1
         elif existing["content"].strip() != content:
-            adapter.store(mem.slug, content, importance=0.6)
-            adapter.delete(existing["id"])
-            stats["updated"] += 1
+            new_id = adapter.store(mem.slug, content, importance=0.6)
+            # mnemosyne's store() dedups by content: if our re-sent content hashes
+            # to the SAME row, new_id == existing["id"] and deleting it would
+            # destroy the memory we just "re-stored". Only delete a genuinely new row.
+            if new_id != existing["id"]:
+                adapter.delete(existing["id"])
+                stats["updated"] += 1
+            else:
+                stats["unchanged"] += 1
         else:
             stats["unchanged"] += 1
     for src in adapter.list_inherited_sources():

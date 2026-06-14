@@ -153,3 +153,26 @@ def test_soul_block_is_idempotent(tmp_path):
     assert "Build & working discipline (inherited from Claude Code)" in once
     assert "verify before declaring done" in once.lower()
     assert "Existing contract." in once            # original preserved
+
+
+def test_sync_update_path_survives_store_dedup(tmp_path):
+    """Regression: mnemosyne store() dedups by content. If stored content drifts
+    from source (sanitisation) the bridge takes the update path; store() then
+    dedups the re-sent content to the SAME id. Deleting that id would destroy the
+    memory. The id-guard must treat this as unchanged, not delete it."""
+    import os, sqlite3
+    data_dir = _copy_db(tmp_path)
+    memdir = tmp_path / "mem"; memdir.mkdir()
+    _write_mem(memdir, "feedback_a", "body one survives")
+    adapter = bridge.Mnemosyne(data_dir=data_dir, venv_py=VENV_PY)
+    bridge.sync(memdir, {"exclude": [], "soul": []}, adapter)
+    assert _count_inherit(data_dir) == 1
+    # simulate mnemosyne having sanitised the stored content (so the bridge sees
+    # "changed") while store() will still dedup the original re-sent content
+    with sqlite3.connect(os.path.join(data_dir, "mnemosyne.db")) as cx:
+        cx.execute("UPDATE memories SET content = content || ' [sanitised]' "
+                   "WHERE source LIKE 'claude-inherit:%'")
+    stats = bridge.sync(memdir, {"exclude": [], "soul": []}, adapter)
+    assert _count_inherit(data_dir) == 1            # NOT deleted
+    assert adapter.find_by_slug("feedback_a") is not None
+    assert stats["updated"] == 0                    # dedup → treated as unchanged
