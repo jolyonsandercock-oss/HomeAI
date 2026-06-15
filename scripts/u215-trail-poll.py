@@ -63,14 +63,24 @@ async def login_if_needed(page):
     if 'trailapp.com' in page.url and '/u/sign_in' not in page.url:
         return
     print('  re-auth required')
-    await page.evaluate("() => { document.getElementById('onetrust-consent-sdk')?.remove(); }")
+    # Dismiss the OneTrust cookie banner by CLICKING its button — the prior
+    # element-removal (#onetrust-consent-sdk .remove()) left an overlay that
+    # intercepted pointer events, so the OIDC link click timed out (2026-06-15).
+    for _sel in ('#onetrust-reject-all-handler', '#onetrust-accept-btn-handler'):
+        try:
+            await page.click(_sel, timeout=4000)
+            break
+        except Exception:
+            pass
+    await page.wait_for_timeout(800)
     await page.click('a[href="/u/auth/openid_connect"]', timeout=8000)
     await page.wait_for_url(lambda u: 'accessacloud.com' in u, timeout=15000)
-    await page.wait_for_load_state('networkidle', timeout=10000)
+    # accessacloud is server-rendered; networkidle was flaky, a fixed settle is enough
+    await page.wait_for_timeout(2000)
     await page.locator('input[type="email"]').first.fill(creds['username'])
     await page.click('button#Next, button[type="submit"]')
     await page.wait_for_url(lambda u: '/auth/password' in u or 'trailapp.com' in u, timeout=15000)
-    await page.wait_for_load_state('networkidle', timeout=10000)
+    await page.wait_for_timeout(2000)
     if 'accessacloud' in page.url:
         await page.locator('input[type="password"]').first.fill(creds['password'])
         await page.click('button[type="submit"]')
