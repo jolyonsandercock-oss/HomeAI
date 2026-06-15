@@ -161,7 +161,10 @@ services:
     networks: [ai-internal, ai-egress]
     volumes: [ollama_data:/root/.ollama]
     environment:
-      OLLAMA_KEEP_ALIVE: "-1"
+      # 5m (was -1/forever): un-pin idle models so the oversized qwen2.5vl:7b
+      # vision model (15GB) doesn't sit permanently resident on the 12GB 3060,
+      # spilling ~4GB to CPU and evicting the invoice model. 2026-06-15.
+      OLLAMA_KEEP_ALIVE: "5m"
       OLLAMA_NUM_PARALLEL: "2"
       OLLAMA_KV_CACHE_TYPE: "q8_0"
       OLLAMA_FLASH_ATTENTION: "0"
@@ -550,6 +553,10 @@ services:
   playwright-service:
     build: ./services/playwright
     container_name: homeai-playwright
+    # tini as PID 1 reaps exited headless_shell (Chrome) children. Without it,
+    # PID 1 (uvicorn) never waitpid()s them → 14k+ defunct zombies accrued by
+    # 2026-06-15. Takes effect on recreate.
+    init: true
     networks: [ai-internal, ai-egress]
     # U229/U230 pair.sh: VNC server on 5900 for interactive auth pairing
     # when working remotely. Bound to 127.0.0.1 only.
