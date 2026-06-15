@@ -12,7 +12,10 @@ ARCHIVE=$INBOX/processed
 mkdir -p "$ARCHIVE"
 
 count=0
-for csv in "$INBOX"/Transactions_*.csv "$INBOX"/transactions*.csv "$INBOX"/dojo*.csv; do
+# Leading * is required: u33-data-lane-router deposits files prefixed with the
+# gmail message id (e.g. '<msgid>__Transactions_..All-locations.csv'), so a
+# start-anchored glob ('Transactions_*') silently missed every routed file.
+for csv in "$INBOX"/*[Tt]ransactions*.csv "$INBOX"/*dojo*.csv; do
   [ -f "$csv" ] || continue
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] importing $csv"
   # Run the importer in homeai-bot-responder (has python3 + asyncpg + PG_DSN).
