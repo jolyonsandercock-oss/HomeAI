@@ -41,6 +41,7 @@ Run this top-to-bottom on install day.
 5. **Pipelines (optional, after Hermes proves stable)**
    - [ ] Consider pointing llm-router T3 (digest/reconciliation) at the 72B and retiring llama3.3:70b CPU runs.
    - [ ] Invoice vision re-pass for the 7 CamScanner-watermarked Principality PDFs (known Tesseract failure) — first real VL-72B job.
+   - [ ] **Invoice backlog drain (~1,944 stuck invoices).** Staged script ready: `scripts/invoice-backlog-drain.sh` (dry-run by default; `--execute` to run). Recovers invoices stuck `status='new'/extraction_method='no_pdf'` since the ~2026-05-30 u125 cron outage — resets the stamp, re-fetches PDFs (u125), re-extracts (u35), paced for budget. Deferred to the 48GB card because it re-runs the ladder + vision OCR at volume. FIRST re-add the routine cron so forward intake stays healthy: `5 * * * * bash /home_ai/scripts/u125-pdf-attachment-fetch.sh 200`. The 159 image-only ('haiku_no_text') rows also need the vision path — verify `u281-vision-ocr-drain` is *accepting* on the new card (it logged accepted=0/rejected=29 on the 3060) before resetting those. Diagnosis: see git 2026-06-15 + the drain script header.
 6. **Keep paying nothing you don't use**
    - [ ] Watch DeepSeek spend for a week; if local handles the load, lower the DeepSeek keys' priority but don't delete them.
 
