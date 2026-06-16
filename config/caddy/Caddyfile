@@ -24,11 +24,14 @@ http://100.104.82.53:8080 {
 
 # IP-based path-routed listener — UNCHANGED, kept as rollback path.
 http://:80 {
-    handle_path /dashboard/* {
-        reverse_proxy homeai-build-dashboard:8090
-    }
+    # SEC 2026-06-16: /dashboard is owner-internal and must not be served
+    # unauthenticated even on the Tailscale-only :80 listener. Bounce browsers
+    # to the Authelia-gated HTTPS FQDN instead of proxying straight through.
     handle /dashboard {
-        redir /dashboard/ permanent
+        redir https://jolybox.tailc27dff.ts.net/dashboard/ permanent
+    }
+    handle /dashboard/* {
+        redir https://jolybox.tailc27dff.ts.net{uri} permanent
     }
     handle /pub {
         rewrite * /pub
@@ -37,15 +40,18 @@ http://:80 {
     handle /pub/* {
         reverse_proxy homeai-build-dashboard:8090
     }
+    # SEC 2026-06-16: forensics exposes dead-letter payloads, error messages and
+    # trace IDs — internal-only. UI redirects to the gated HTTPS FQDN; the API is
+    # hard-403'd here (no redirect, so programmatic callers fail loudly instead of
+    # leaking on plain HTTP).
     handle /forensics {
-        rewrite * /forensics
-        reverse_proxy homeai-build-dashboard:8090
+        redir https://jolybox.tailc27dff.ts.net/forensics permanent
     }
     handle /forensics/* {
-        reverse_proxy homeai-build-dashboard:8090
+        redir https://jolybox.tailc27dff.ts.net{uri} permanent
     }
     handle /api/forensics/* {
-        reverse_proxy homeai-build-dashboard:8090
+        respond "forbidden on this listener — use https://jolybox.tailc27dff.ts.net" 403
     }
     handle /api/pub/* {
         reverse_proxy homeai-build-dashboard:8090

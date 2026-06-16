@@ -102,8 +102,11 @@ DEFAULT_THRESHOLDS = {
 # TOTAL spend crosses a high ceiling (well above the £3 soft cap), cloud calls are
 # refused so a tight loop / prompt injection can't burn unbounded money. Escalations
 # degrade gracefully (keep the free local result); direct cloud tasks get a 429.
-# FAIL-OPEN: any error in the check ALLOWS the call — a breaker bug must never take
-# the inference pipeline down. Cached ~15s to avoid a query per request.
+# FAIL-CLOSED (Jo, 2026-06-16): any error in the check REFUSES cloud calls. Money
+# safety is prioritised over availability — a transient breaker/DB error pauses cloud
+# spend (the escalation path keeps the free local result; CLAUDE_DIRECT tasks get a
+# 429) rather than leaving an unbounded-spend window open while the breaker is blind.
+# Cached ~15s to avoid a query per request.
 HARD_DAILY_CAP_GBP = float(os.environ.get("HARD_DAILY_CAP_GBP", "6.0"))
 _budget_cache = {"day": None, "spent": 0.0, "at": 0.0}
 
@@ -121,8 +124,12 @@ async def _over_hard_budget(pool) -> bool:
         spent = float(spent or 0.0)
         _budget_cache.update(day=today, spent=spent, at=now)
         return spent >= HARD_DAILY_CAP_GBP
-    except Exception:
-        return False  # fail open — never block a real call due to a breaker bug
+    except Exception as e:
+        # FAIL-CLOSED (Jo, 2026-06-16): treat a breaker/DB error as over-budget so a
+        # blind breaker can't allow runaway spend. Logged loudly so the bug is visible
+        # rather than silently swallowed (the old fail-open path hid breaker bugs).
+        print(f"[llm-router] budget breaker error -> failing CLOSED (cloud paused): {e}")
+        return True
 
 
 class RouteRequest(BaseModel):

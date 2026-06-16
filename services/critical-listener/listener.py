@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 import urllib.parse
 import urllib.request
 from collections import OrderedDict
@@ -21,6 +22,35 @@ DB_DSN    = os.environ["DATABASE_URL"]
 VAULT_TOKEN = os.environ["VAULT_TOKEN"]
 VAULT_ADDR  = os.environ.get("VAULT_ADDR", "http://vault:8200")
 DEDUP_CAP = 256
+
+# Per-kind throttle (U84): the row_id dedup below only catches the SAME exception
+# row being notified twice. A storm of DISTINCT rows of the same KIND (e.g. a
+# WatchdogN8nErrors flood) still spams Telegram. Throttle by kind — fire the first
+# immediately, suppress repeats within the window, and tell the next allowed
+# message how many were dropped. Set NOTIFY_THROTTLE_SECONDS=0 to disable.
+NOTIFY_THROTTLE_SECONDS = int(os.environ.get("NOTIFY_THROTTLE_SECONDS", "600"))
+_last_sent: "OrderedDict[str, float]" = OrderedDict()
+_suppressed: "dict[str, int]" = {}
+
+
+def notify_throttle(kind: str) -> "tuple[bool, int]":
+    """Return (should_send, suppressed_count) for an alert of *kind*.
+
+    suppressed_count is the number of same-kind alerts dropped since the last
+    send, reported only on the message we let through after the window elapses."""
+    if NOTIFY_THROTTLE_SECONDS <= 0:
+        return True, 0
+    now = time.monotonic()
+    last = _last_sent.get(kind)
+    if last is not None and (now - last) < NOTIFY_THROTTLE_SECONDS:
+        _suppressed[kind] = _suppressed.get(kind, 0) + 1
+        return False, 0
+    n = _suppressed.pop(kind, 0)
+    _last_sent[kind] = now
+    _last_sent.move_to_end(kind)
+    if len(_last_sent) > DEDUP_CAP:
+        _last_sent.popitem(last=False)
+    return True, n
 
 
 def vault_get(path: str) -> dict:
@@ -87,8 +117,17 @@ async def main() -> None:
                     seen[row_id] = None
                     if len(seen) > DEDUP_CAP:
                         seen.popitem(last=False)
+                kind = p.get("kind") or "exception"
+                send, suppressed = notify_throttle(kind)
+                if not send:
+                    print(f"[throttle] suppressed exc={row_id} kind={kind} "
+                          f"(within {NOTIFY_THROTTLE_SECONDS}s window)", flush=True)
+                    continue
                 msg = format_message(p)
-                print(f"[fire] exc={row_id} kind={p.get('kind')}", flush=True)
+                if suppressed:
+                    msg += (f"\n_(+{suppressed} more '{kind}' suppressed in the "
+                            f"last {NOTIFY_THROTTLE_SECONDS // 60}m)_")
+                print(f"[fire] exc={row_id} kind={kind}", flush=True)
                 tg_send(msg)
 
         except Exception as e:
