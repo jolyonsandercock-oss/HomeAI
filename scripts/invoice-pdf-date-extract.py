@@ -120,6 +120,30 @@ def extract_invoice_date(text):
         if d: return d, 'fallback:first-token'
     return None, None
 
+OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'gemma4-doc:latest')
+def ollama(prompt):
+    body = json.dumps({"model": OLLAMA_MODEL, "prompt": prompt, "stream": False,
+                       "options": {"temperature": 0}}).encode()
+    for host in ('http://ollama:11434', 'http://homeai-ollama:11434'):
+        try:
+            req = urllib.request.Request(host + '/api/generate', data=body,
+                                         headers={'Content-Type': 'application/json'})
+            return json.loads(urllib.request.urlopen(req, timeout=120).read()).get('response', '')
+        except Exception:
+            continue
+    return ''
+
+def gemma_invoice_date(text):
+    """LOCAL model fallback (gemma4-doc on the W7800) — reads the whole invoice text
+    contextually, unlike the garbage-prone first-token regex. Returns (date, 'gemma4-doc')."""
+    prompt = ("Extract the INVOICE DATE (the date the invoice was issued, NOT the due date) "
+              "from this UK invoice text. UK dates are DD/MM/YYYY. "
+              "Reply with ONLY the date as YYYY-MM-DD and nothing else.\n\n---\n" + (text or '')[:2500])
+    out = ollama(prompt)
+    m = re.search(r'(\d{4})-(\d{2})-(\d{2})', out or '')
+    if not m: return None, 'gemma4-doc'
+    return _mk(int(m.group(1)), int(m.group(2)), int(m.group(3))), 'gemma4-doc'
+
 async def main():
     mode = os.environ.get('MODE', 'dry')
     ids_arg = os.environ.get('IDS', 'review')
@@ -132,6 +156,9 @@ async def main():
         where = "i.source='email_ocr' AND i.requires_human=true"
     elif ids_arg == 'all':
         where = "i.source='email_ocr'"
+    elif ids_arg == 'recent':
+        hours = int(os.environ.get('HOURS', '26'))   # forward-only sweep window (idempotent, overlap-tolerant)
+        where = f"i.source='email_ocr' AND i.created_at > now() - interval '{hours} hours'"
     else:
         idlist = ','.join(str(int(x)) for x in ids_arg.split(','))
         where = f"i.id IN ({idlist})"
@@ -156,6 +183,12 @@ async def main():
         pdf_date, label = extract_invoice_date(text)
         # confidence gate: trusted label AND inside the plausibility window
         trusted = bool(pdf_date) and label in TRUSTED_LABELS and MIN_DATE <= pdf_date <= MAX_DATE
+        if not trusted and os.environ.get('GEMMA', '1') == '1':
+            # LOCAL model fallback (gemma4-doc on the W7800) — reads the whole invoice
+            # contextually; beats the garbage-prone first-token regex. No cloud, no egress.
+            g_date, g_label = gemma_invoice_date(text)
+            if g_date and MIN_DATE <= g_date <= MAX_DATE:
+                pdf_date, label, trusted = g_date, g_label, True
         if not pdf_date or not (MIN_DATE <= pdf_date <= MAX_DATE):
             unparsed += 1
             print(f"  #{r['id']:>6} {r['supplier_name'][:24]:24} — UNRELIABLE (date={pdf_date} [{label}]) -> flag")
@@ -164,6 +197,9 @@ async def main():
         if pdf_date == r['cur_date']:
             matched += 1
             print(f"  #{r['id']:>6} {r['supplier_name'][:24]:24} cur={r['cur_date']} pdf={pdf_date} [{label}]  OK")
+            # trusted (label or gemma) confirmation -> clear a stale review flag
+            if mode == 'apply' and trusted:
+                await c.execute("UPDATE invoices SET requires_human=false WHERE id=$1 AND requires_human=true", r['id'])
             continue
         if not trusted:   # changed but low-confidence (fallback token) -> never auto-apply, flag
             changed_lowconf += 1
