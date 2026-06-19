@@ -24,7 +24,7 @@ GF = 'http://google-fetch:8011'
 PDFPLUMBER = 'http://homeai-pdfplumber:8003/extract-pdf'
 OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'gemma4-doc:latest')
 VT = os.environ['VAULT_TOKEN']
-SUPPLIER_RE = r'austell|j ?& ?r|jr food|forest|dole|kingfisher|bidfresh|bidfood'
+SUPPLIER_RE = r'austell|j ?& ?r|jr food|forest|dole|kingfisher|bidfresh|bidfood|westcountry|totalproduce|total produce|tintagel brewing'
 
 def vault(p):
     r = urllib.request.Request(f'http://vault:8200/v1/secret/data/{p}', headers={'X-Vault-Token': VT})
@@ -76,6 +76,10 @@ SUPPLIER_PROFILES = [
     (r'dole', 'kitchen', "Dole Foodservice (produce, pub kitchen)."),
     (r'kingfisher', 'kitchen', "Kingfisher Brixham (fresh fish/seafood, pub kitchen). Often priced per Kg."),
     (r'bidfresh|bidfood', 'kitchen', "Bidfresh/Bidfood (foodservice, pub kitchen)."),
+    (r'westcountry', 'kitchen', "Westcountry Fruit Sales (fresh produce, pub kitchen)."),
+    (r'totalproduce|total produce', 'kitchen', "Total Produce (fresh produce, pub kitchen)."),
+    (r'tintagel brewing', 'bar', "Tintagel Brewing Co (local beer/ale → bar)."),
+    # Adam Moralee & Oana Stirban are Forest Produce staff (@forestproduce.com) — matched by 'forest'.
 ]
 def profile_for(vendor_name):
     for pat, dept, hint in SUPPLIER_PROFILES:
