@@ -373,6 +373,62 @@ def check_db() -> None:
                 f"{n} {desc}")
 
 
+def check_bank_integrity() -> None:
+    """Bank-ledger data-integrity invariants (added 2026-06-19 after the
+    natwest_15_validated_v1 collapse: an uncommitted reload stamped every
+    statement's transactions to the period end-date AND flipped ~5.4k signs).
+
+    INV-DB-COLLAPSE  no account/year may average >15 txns per distinct day —
+                     real daily activity tops out ~10/day; a high ratio means
+                     dates were collapsed to statement-end stamps. Catches
+                     SEVERE collapse (acct15 was 158-230/day); mild collapse
+                     (a few/day onto monthly stamps) is not ratio-detectable. [FAIL]
+    INV-DB-DUP       content-duplicate excess (same acct+date+amount+desc)
+                     must stay near baseline; a jump = a bad bulk import
+                     that didn't content-dedup (see feedback memory).  [WARN]
+    """
+    import subprocess
+    DUP_BASELINE = 10  # post-acct15-rebuild excess is ~5; alert well above noise
+
+    def q(sql):
+        try:
+            out = subprocess.run(
+                ["docker", "exec", "homeai-postgres", "psql", "-U", "postgres",
+                 "-d", "homeai", "-tA", "-c", sql],
+                capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return out.stdout if out.returncode == 0 else None
+
+    collapse = q(
+        "SELECT bank_account_id, extract(year from transaction_date)::int, "
+        "count(*), count(distinct transaction_date) "
+        "FROM bank_transactions GROUP BY 1,2 "
+        "HAVING count(distinct transaction_date) >= 5 "
+        "AND count(*)::numeric / count(distinct transaction_date) > 15 "
+        "ORDER BY 1,2;")
+    if collapse is None:
+        add("WARN", "INV-DB-COLLAPSE", "db",
+            "homeai-postgres unreachable — collapse check skipped")
+        return
+    for line in (l for l in collapse.strip().splitlines() if l.strip()):
+        acct, yr, n, days = line.split("|")
+        add("FAIL", "INV-DB-COLLAPSE", f"db:bank_transactions acct={acct}",
+            f"{yr}: {n} txns on only {days} distinct days "
+            f"(~{int(n)//max(int(days),1)}/day) — dates likely collapsed to statement-end")
+
+    dup = q(
+        "SELECT COALESCE(sum(c-1),0) FROM (SELECT count(*) c FROM bank_transactions "
+        "GROUP BY bank_account_id,transaction_date,amount,description "
+        "HAVING count(*)>1) t;")
+    if dup is not None:
+        excess = int(dup.strip() or 0)
+        if excess > DUP_BASELINE:
+            add("WARN", "INV-DB-DUP", "db:bank_transactions",
+                f"{excess} content-duplicate rows (baseline ~{DUP_BASELINE}); "
+                f"a jump means a bulk import skipped content-dedup")
+
+
 # ── report ────────────────────────────────────────────────────────────
 BASELINE = ROOT / "scripts" / ".audit-baseline.txt"
 
@@ -388,6 +444,7 @@ def _collect():
     check_python()
     check_frontend()
     check_db()
+    check_bank_integrity()
     order = {"FAIL": 0, "WARN": 1}
     findings.sort(key=lambda f: (order.get(f[0], 9), f[1], f[2]))
 

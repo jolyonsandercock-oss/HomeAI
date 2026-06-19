@@ -15,7 +15,7 @@ set -euo pipefail
 
 RESET="${1:-}"
 
-docker exec homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 <<SQL
+docker exec -i homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 <<SQL
 \set ON_ERROR_STOP on
 
 -- Per AGENTS.md SQL discipline:
