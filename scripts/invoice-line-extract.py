@@ -60,13 +60,36 @@ def pdf_text(acct, mid):
     except Exception as e:
         return None, f'pdfplumber:{e}'
 
-LINE_PROMPT = (
-    "You are extracting LINE ITEMS from a UK supplier invoice. Return ONLY a JSON array, "
-    "no prose. Each element: {\"code\":string, \"description\":string, \"qty\":number, "
-    "\"unit\":string, \"unit_price\":number, \"line_net\":number, \"category\":string}. "
-    "'unit' is the pack size (e.g. '1x900g','50LTR','') and 'category' is the section header "
-    "(e.g. FROZEN, CHILLED, AMBIENT, NON FOOD) or ''. Include ONLY product line items — "
-    "EXCLUDE VAT analysis, subtotals, totals, delivery lines, addresses. Numbers plain (no symbols).\n\n---\n")
+# Per-supplier layout knowledge: department + what to expect where. Improves accuracy
+# and primes the model on each supplier's columns/format (see feedback_cafe_vendor_truth).
+SUPPLIER_PROFILES = [
+    (r'austell', 'bar',
+     "St Austell Brewery (DRINKS, all 'bar' dept). Columns: Code, Description, Quantity, "
+     "Gross Price, Discount, Net Price, EPR, Line Value, VAT%. line_net = the 'Line Value' column "
+     "(NOT Gross/Net unit price). Items are kegs (50LTR), cases (6x75cl/24x...), wine."),
+    (r'j ?& ?r|jr food', None,   # dept resolved from TOM106/MAL125 code
+     "J&R Foodservice (grocery). Lines are grouped under section headers FROZEN/CHILLED/AMBIENT/"
+     "NON FOOD — put that header in 'category'. Columns: Code, Description (trailing dots), Qty, "
+     "Unit (pack like 1x2.5kg), Unit Price, Value, VAT code. line_net = the 'Value' column. "
+     "A description may wrap onto the next line — join it."),
+    (r'forest', 'kitchen', "Forest Produce (fresh produce, pub kitchen). Often priced by weight/each."),
+    (r'dole', 'kitchen', "Dole Foodservice (produce, pub kitchen)."),
+    (r'kingfisher', 'kitchen', "Kingfisher Brixham (fresh fish/seafood, pub kitchen). Often priced per Kg."),
+    (r'bidfresh|bidfood', 'kitchen', "Bidfresh/Bidfood (foodservice, pub kitchen)."),
+]
+def profile_for(vendor_name):
+    for pat, dept, hint in SUPPLIER_PROFILES:
+        if re.search(pat, vendor_name or '', re.I): return dept, hint
+    return None, ''
+
+LINE_PROMPT_BASE = (
+    "You are extracting LINE ITEMS from a UK supplier invoice. Return ONLY a JSON object "
+    "{\"lines\":[...]}, no prose. Each line: {\"code\":string, \"description\":string, "
+    "\"qty\":number, \"unit\":string, \"unit_price\":number, \"line_net\":number, \"category\":string}. "
+    "line_net is the line VALUE (the extended amount for that row), NOT the unit price. "
+    "Include EVERY product row across ALL pages; the invoice may be multi-page — IGNORE repeated "
+    "column headers, page numbers, 'continued', addresses, and the VAT/totals summary block. "
+    "Numbers plain (no symbols).")
 
 def ollama(prompt):
     body = json.dumps({"model": OLLAMA_MODEL, "prompt": prompt, "stream": False,
@@ -105,8 +128,24 @@ def parse_lines(resp):
                     'category': str(it.get('category', '') or '')[:40]})
     return out
 
+# Canonical purchase departments (the vendor_invoice_lines CHECK set) aligned to the
+# till's SALES departments. Synonyms (Jo, 2026-06-19): bar=drink sales; kitchen=food
+# sales=restaurant; cafe=sandwich bar=swirl. hot drinks/rooms/overhead as below.
+CANON_DEPTS = {'bar', 'kitchen', 'rooms', 'cafe', 'overhead'}
+DEPT_SYNONYMS = {
+    'drink sales': 'bar', 'drinks': 'bar', 'bar': 'bar', 'hot drinks': 'bar',
+    'food sales': 'kitchen', 'food': 'kitchen', 'restaurant': 'kitchen', 'kitchen int': 'kitchen', 'kitchen': 'kitchen',
+    'sandwich bar': 'cafe', 'swirl': 'cafe', 'cafe soft drinks': 'cafe', 'cafe ice cream': 'cafe', 'cafe': 'cafe',
+    'rooms': 'rooms', 'accommodation': 'rooms', 'overhead': 'overhead',
+}
+def norm_dept(d):
+    if not d: return None
+    d = d.strip().lower()
+    return DEPT_SYNONYMS.get(d, d if d in CANON_DEPTS else None)
+
 def jr_department(text):
-    if re.search(r'\bTOM106\b', text): return 'pub'
+    # J&R delivery code is authoritative: TOM106 = pub kitchen, MAL125 = Swirl cafe
+    if re.search(r'\bTOM106\b', text): return 'kitchen'
     if re.search(r'\bMAL125\b', text): return 'cafe'
     return None
 
@@ -153,10 +192,13 @@ async def main():
         text, err = pdf_text(acct, r['source_email_id'])
         if not text:
             noped += 1; print(f"  inbox#{r['id']} {r['vendor_name'][:22]:22} — no PDF ({err})", flush=True); continue
-        lines = parse_lines(ollama(LINE_PROMPT + text[:6000]))
+        prof_dept, hint = profile_for(r['vendor_name'])
+        prompt = LINE_PROMPT_BASE + (f"\n\nSupplier layout note: {hint}" if hint else '') + "\n\n---\n" + text[:6000]
+        lines = parse_lines(ollama(prompt))
         if not lines:
-            nolines += 1; print(f"  inbox#{r['id']} {r['vendor_name'][:22]:22} — gemma returned 0 lines", flush=True); continue
-        dept = jr_department(text) if re.search(r'j ?& ?r|jr food', r['vendor_name'], re.I) else (r['site'] if r['site'] in ('pub', 'cafe') else None)
+            nolines += 1; print(f"  inbox#{r['id']} {r['vendor_name'][:22]:22} — model returned 0 lines", flush=True); continue
+        is_jr = bool(re.search(r'j ?& ?r|jr food', r['vendor_name'], re.I))
+        dept = norm_dept(jr_department(text) if is_jr else prof_dept)
         foot = sum(l['line_net'] for l in lines if l['line_net'] is not None)
         net = parse_net_total(text) or (float(r['net_amount']) if r['net_amount'] is not None else (float(r['gross_amount']) if r['gross_amount'] else None))
         conf = 0.95 if (net and abs(foot - net) <= max(0.05, net * 0.02)) else (0.6 if net else 0.5)
@@ -170,9 +212,9 @@ async def main():
                     await c.execute("""INSERT INTO vendor_invoice_lines
                         (invoice_id,line_no,description,qty,unit,unit_price,line_net,category_hint,
                          department,extracted_by,extraction_confidence,raw_payload,realm)
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'gemma4-doc',$10,$11::jsonb,$12)""",
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$13,$10,$11::jsonb,$12)""",
                         r['id'], i, l['description'], l['qty'], l['unit'], l['unit_price'], l['line_net'],
-                        l['category'] or None, dept, conf, json.dumps(l), r['realm'] or 'work')
+                        l['category'] or None, dept, conf, json.dumps(l), r['realm'] or 'work', OLLAMA_MODEL)
         done += 1
     print(f"\n  extracted={done} skipped(have lines)={skipped} no-pdf={noped} no-lines={nolines} cross-foot-off={badfoot}"
           + ("  (DRY)" if mode != 'apply' else "  (APPLIED)"), flush=True)
