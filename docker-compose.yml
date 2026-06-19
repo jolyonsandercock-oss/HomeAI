@@ -152,7 +152,7 @@ services:
     restart: unless-stopped
 
   ollama:
-    image: ollama/ollama:0.22.1-rocm
+    image: ollama/ollama:0.30.10-rocm
     # 8g was a 12GB-3060-era CPU-spill cap. ollama is cgroup-aware: the mmap'd
     # GGUF page-cache counts against memory.current, so a 47GB 72B model saturates
     # a small limit and ollama's pre-load check fails ("model request too large,
@@ -173,7 +173,11 @@ services:
       OLLAMA_KEEP_ALIVE: "5m"
       OLLAMA_NUM_PARALLEL: "2"
       OLLAMA_KV_CACHE_TYPE: "q8_0"
-      OLLAMA_FLASH_ATTENTION: "0"
+      # 0.30.10's llama.cpp REQUIRES flash attention for KV-cache quantization
+      # (q8_0); with it off, every model load crashes ("V cache quantization
+      # requires flash_attn"). Was "0" on 0.22.1 where the combo was allowed.
+      # flash_attn is supported on gfx1100/RDNA3 and also cuts KV memory. 2026-06-19.
+      OLLAMA_FLASH_ATTENTION: "1"
     ports: ["127.0.0.1:11434:11434", "100.104.82.53:11434:11434"]
     # AMD ROCm GPU passthrough — enabled 2026-06-18 for the NVIDIA 3060 → AMD
     # 48GB Navi 31 (gfx1100, W7900-class) swap. Replaced the nvidia CDI device
