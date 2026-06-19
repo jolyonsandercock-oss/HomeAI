@@ -14,7 +14,17 @@ set -uo pipefail
 OLLAMA=homeai-ollama
 PGc(){ docker exec -i homeai-postgres psql -U postgres -d homeai -tAc "$1" 2>/dev/null; }
 ts(){ date '+%H:%M:%S'; }
-gpu(){ nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader 2>/dev/null | tr -d ' ' || echo "n/a"; }
+# AMD W7800 (post-2026-06-18 NVIDIA→AMD swap): read VRAM from amdgpu sysfs.
+# nvidia-smi no longer exists; mirror its "used,total" MiB output format.
+gpu(){
+  local u t d
+  for d in /sys/class/drm/card*/device; do
+    [ -r "$d/mem_info_vram_used" ] || continue
+    u=$(cat "$d/mem_info_vram_used" 2>/dev/null); t=$(cat "$d/mem_info_vram_total" 2>/dev/null)
+    [ -n "$u" ] && [ -n "$t" ] && { awk -v u="$u" -v t="$t" 'BEGIN{printf "%dMiB,%dMiB",u/1048576,t/1048576}'; return; }
+  done
+  echo "n/a"
+}
 
 pause_mode(){
   echo "[$(ts)] GPU before : $(gpu)"
