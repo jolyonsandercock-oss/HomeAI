@@ -209,7 +209,12 @@ async def main():
         prompt = LINE_PROMPT_BASE + (f"\n\nSupplier layout note: {hint}" if hint else '') + "\n\n---\n" + text[:6000]
         lines = parse_lines(ollama(prompt))
         if not lines:
-            nolines += 1; print(f"  inbox#{r['id']} {r['vendor_name'][:22]:22} — model returned 0 lines", flush=True); continue
+            nolines += 1; print(f"  inbox#{r['id']} {r['vendor_name'][:22]:22} — model returned 0 lines (flagged)", flush=True)
+            if mode == 'apply':
+                # flag (don't silently drop) so a retry/bigger-model/vision pass can find these:
+                #   WHERE notes LIKE '%line-extract:0-lines%'
+                await c.execute("UPDATE vendor_invoice_inbox SET notes = left(COALESCE(notes,'')||' [line-extract:0-lines '||current_date::text||']',500) WHERE id=$1 AND COALESCE(notes,'') NOT LIKE '%line-extract:0-lines%'", r['id'])
+            continue
         is_jr = bool(re.search(r'j ?& ?r|jr food', r['vendor_name'], re.I))
         dept = norm_dept(jr_department(text) if is_jr else prof_dept)
         foot = sum(l['line_net'] for l in lines if l['line_net'] is not None)
