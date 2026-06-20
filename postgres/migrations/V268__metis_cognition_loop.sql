@@ -100,7 +100,7 @@ END $$;
 -- GAP: uncategorised invoices grouped by vendor_domain, ranked Σnet; suggested
 -- category = majority category of that vendor's already-categorised siblings.
 CREATE OR REPLACE FUNCTION cognition.fn_detect_categorise_gaps()
-RETURNS SETOF cognition.detection LANGUAGE sql STABLE AS $$
+RETURNS SETOF cognition.detection LANGUAGE sql STABLE SECURITY DEFINER SET search_path = cognition, public AS $$
   WITH uncat AS (
     SELECT vendor_domain,
            sum(COALESCE(net_amount, gross_amount, 0)) AS impact,
@@ -133,7 +133,7 @@ $$;
 
 -- CONTRADICTION: one vendor_domain mapped to >=2 categories.
 CREATE OR REPLACE FUNCTION cognition.fn_detect_categorise_contradictions()
-RETURNS SETOF cognition.detection LANGUAGE sql STABLE AS $$
+RETURNS SETOF cognition.detection LANGUAGE sql STABLE SECURITY DEFINER SET search_path = cognition, public AS $$
   WITH multi AS (
     SELECT vendor_domain,
            count(DISTINCT vendor_category) AS ncat,
@@ -158,7 +158,7 @@ $$;
 -- CORRECTION: a human re-categorisation in invoice_feedback that hasn't yet
 -- produced a proposal. (ai_proposal lifecycle: pending = applied_at & rejected_at NULL.)
 CREATE OR REPLACE FUNCTION cognition.fn_detect_categorise_corrections()
-RETURNS SETOF cognition.detection LANGUAGE sql STABLE AS $$
+RETURNS SETOF cognition.detection LANGUAGE sql STABLE SECURITY DEFINER SET search_path = cognition, public AS $$
   SELECT 'correction', v.vendor_domain, 'rule_insert',
          jsonb_build_object('domain_pattern', v.vendor_domain, 'from_feedback_id', f.id,
                             'feedback_text', f.feedback_text),
@@ -174,7 +174,7 @@ $$;
 
 -- OVER-BROAD / DEAD: rules that never matched anything in p_dead_days days.
 CREATE OR REPLACE FUNCTION cognition.fn_detect_categorise_overbroad(p_dead_days int DEFAULT 90)
-RETURNS SETOF cognition.detection LANGUAGE sql STABLE AS $$
+RETURNS SETOF cognition.detection LANGUAGE sql STABLE SECURITY DEFINER SET search_path = cognition, public AS $$
   SELECT 'dead', r.domain_pattern, 'rule_retire',
          jsonb_build_object('rule_id', r.id, 'domain_pattern', r.domain_pattern, 'category', r.category),
          jsonb_build_object('restore', to_jsonb(r)),         -- revert = re-insert the row
