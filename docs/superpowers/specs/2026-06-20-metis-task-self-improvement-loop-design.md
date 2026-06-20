@@ -187,6 +187,29 @@ policies + GUCs, per the realm-in-every-table rule.
 
 ---
 
+## 6a. Concurrent work & HARD file boundaries (read before implementing)
+
+A parallel session (2026-06-20, `session_013Riqf…`) is **actively building the invoice
+pipeline**. Metis **observes these as read-only producers and MUST NOT modify them**:
+
+| Asset (owned by the other work) | What it is | Metis's relationship |
+|---|---|---|
+| `scripts/invoice-line-extract.py` → **`classify_doc()`** | the **is-invoice gate** — deterministic *text-only, no-model* triage that gates out statements/remittances/chasers (commit `0a698c3`) | Metis Task #2 **observes** its statement/invoice verdicts and proposes *additions to its patterns / `invoice_noise_*`*; it does **not** reimplement or edit `classify_doc()` |
+| `scripts/invoice-line-extract.py` → **`learned_example()`** | the **layout-learning loop** — high-conf (cross-foot ≥0.92) extractions auto-prime the same supplier's prompt (commit `38fec2b`); a *closed, safe, auto* loop (no rules written, no human gate needed) | Metis **complements, never replaces** it: the line-extraction adopter (P5) only adds OBSERVE/MEASURE telemetry around it (does learned-priming actually lift accuracy?), and **does not touch the file** |
+| `scripts/u-invoice-line-sweep.sh`, `scripts/wire-invoice-pipeline-vision-gemma4.py`, `scripts/u-invoice-categorise-sweep.sh`, `scripts/invoice-pdf-date-extract.py` | live extraction / categorisation hot paths (recently or in-flight modified) | **read-only**; Metis adds a *separate* `improve-*.sh` companion, never edits these |
+
+**Rule of engagement:** Metis only ever (a) reads these producers' outputs from the DB, and
+(b) writes to its **own** `cognition.*` tables + the gated apply-targets
+(`vendor_category_rules`, `invoice_noise_*`, `ai.thresholds`). New Metis code lives in
+**new files** (`scripts/metis-*.sh`, `scripts/metis/`), never inside the invoice-pipeline
+files above. This keeps the two streams merge-clean.
+
+**Note on extraction model:** the pipeline is on **gemma4-doc** (`think:false`), reverted
+from qwen2.5:72b (commit `0a698c3`). Any Metis text referencing the extractor must say
+gemma4, not qwen — and Metis does not change model choice.
+
+---
+
 ## 7. Review surfaces (no review bottleneck)
 
 - **Telegram digest** (act): nightly, top-N pending proposals ranked by `impact_gbp`,
@@ -223,8 +246,8 @@ rate** ↓ and **escalation rate** ↓.
 1. **P1 — generic spine:** create `cognition.task_runs|proposals|proposal_rejections|benchmark_labels`; the shared digest + dashboard widget + benchmark gate + MEASURE step.
 2. **P2 — categorisation adopter:** `observe/detect/apply/revert` for categorisation; seed `benchmark_labels` from the current top categorised vendors; run shadow (propose-only, no auto-approve) for ~1 week.
 3. **P3 — enable auto-approve** for the provably-safe class once the benchmark + shadow week show zero bad applies.
-4. **P4 — is-invoice adopter:** its `detect/apply`, coordinated read-only with the concurrent classifier work.
-5. **P5 — template:** document the 3-hook contract; counterparty resolution + line extraction adopt.
+4. **P4 — is-invoice adopter:** observe **`classify_doc()`** verdicts read-only (§6a); `detect/apply` proposes `invoice_noise_*` / threshold refinements only. **Gated on the parallel invoice-filter session settling** — do not start P4 while `invoice-line-extract.py` is in active flux.
+5. **P5 — line-extraction adopter (telemetry only):** wrap the existing **`learned_example()`** layout-learning loop with OBSERVE/MEASURE (does priming lift cross-foot pass-rate?). **Add no logic to `invoice-line-extract.py`**; read its outputs, write `cognition.task_runs`. Then document the 3-hook contract; counterparty resolution adopts.
 
 ---
 
