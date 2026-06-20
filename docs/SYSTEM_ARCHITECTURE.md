@@ -8,13 +8,26 @@
 
 ## 0. The single most important architectural fact
 
-**The n8n event-router path is largely DEAD. The live system is (a) the Gmail-Ingest webhook + google-fetch poller, and (b) a fleet of cron-driven "sweeps"/scrapes that deliberately run OFF the n8n event path.**
+> ⚠️ **CORRECTED 2026-06-20 (measured from the live n8n execution log).** The earlier claim here —
+> *"the n8n event path is largely DEAD"* — was **FALSE**. n8n is the live core. See
+> [[n8n-decision-for-gpt55-review]] for the full measured state + the retirement decision brief.
 
-- `master-router.json`, `email-pipeline.json` (P1), `invoice-pipeline.json` (P2), `bank-csv-import.json` → **active=false**.
-- Live n8n: `gmail-ingest.json` (webhook, the real email→DB path), `gmail-poll-driver-v1` (sched → google-fetch), `epos-pipeline-v1` (P5), `caterbook-pipeline-v1` (P6), `report-ingestion` (P9) — all self-contained, Master-Router-independent.
-- `claim_event_batch()` (migration V250) excludes `document.received` + `child.event.detected` → attachment events pile up `pending` forever (the **V250 quarantine**). This is *why* the new pdfplumber sweeps were built off-path.
+**The system is a genuine HYBRID: (A) an n8n event bus handles the email/document/invoice flow, and
+(B) ~66 cron "sweeps" pull every other source directly into the DB, bypassing the event bus.**
 
-When adding ingestion, default to a **cron sweep off the event path**, not an n8n event consumer.
+- **n8n is heavily load-bearing**, NOT dead. Measured runs/24h (2026-06-20): **Master Router 2,880** (≈every
+  30s, 2,832 ok / 48 err — it claims queued events and dispatches them), **Gmail Ingest 323** (the real
+  email→DB webhook path), **Invoice Pipeline P2 54** (active — *not* `active=false`), P5 EPoS / P6 Caterbook
+  / P9 Report-Ingestion ~96 each, Telegram bot 1,440. **Alerting is 100% n8n**: Alertmanager →
+  `http://homeai-n8n:5678/webhook/prom-alert`.
+- Idle/not-firing n8n workflows: Bank CSV Import, Cleanup (weekly), Image Audit, **Partition Maintenance
+  (0 runs — future monthly partitions at risk; July exists, check August)**.
+- `events` today: 11,188 processed · **0 pending** · 1,146 **failed** (822 `document.received`, newest
+  2026-06-04 — the V250 attachment-quarantine residue, now in *failed* not *pending*; 55 `email.received`
+  failing today). The `ops.pipeline_runs` health registry exists but has **0 rows** (never wired).
+
+When adding **scraped/pulled** ingestion, default to a cron sweep. The **event bus itself is n8n-run** —
+do not assume it's retired. Whether to migrate it off n8n is an open decision (see the brief above).
 
 ---
 
