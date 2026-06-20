@@ -225,7 +225,13 @@ async def main():
                     await c.execute("""INSERT INTO vendor_invoice_lines
                         (invoice_id,line_no,description,qty,unit,unit_price,line_net,category_hint,
                          department,extracted_by,extraction_confidence,raw_payload,realm)
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$13,$10,$11::jsonb,$12)""",
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$13,$10,$11::jsonb,$12)
+                        ON CONFLICT (invoice_id,line_no) DO UPDATE SET
+                          description=EXCLUDED.description, qty=EXCLUDED.qty, unit=EXCLUDED.unit,
+                          unit_price=EXCLUDED.unit_price, line_net=EXCLUDED.line_net,
+                          category_hint=EXCLUDED.category_hint, department=EXCLUDED.department,
+                          extracted_by=EXCLUDED.extracted_by, extraction_confidence=EXCLUDED.extraction_confidence,
+                          raw_payload=EXCLUDED.raw_payload""",
                         r['id'], i, l['description'], l['qty'], l['unit'], l['unit_price'], l['line_net'],
                         l['category'] or None, dept, conf, json.dumps(l), r['realm'] or 'work', OLLAMA_MODEL)
         done += 1
