@@ -14,6 +14,6 @@ VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println
 {
   echo "=== $(date -Is) invoice LINE sweep (YEAR=$YEAR) ==="
   docker exec -i -e VAULT_TOKEN="$VT" -e MODE=apply -e IDS=targets -e YEAR="$YEAR" -e LIMIT=600 \
-    -e OLLAMA_MODEL=qwen2.5:72b homeai-bot-responder python3 < "$SCRIPT"
+    -e OLLAMA_MODEL=gemma4-doc:latest homeai-bot-responder python3 < "$SCRIPT"
   echo "=== $(date -Is) done (rc=$?) ==="
 } >> "$LOG" 2>&1

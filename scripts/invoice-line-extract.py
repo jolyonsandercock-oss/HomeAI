@@ -106,6 +106,7 @@ LINE_PROMPT_BASE = (
 
 def ollama(prompt):
     body = json.dumps({"model": OLLAMA_MODEL, "prompt": prompt, "stream": False,
+                       "think": False,  # gemma4 is a thinking model -> empty output without this
                        "format": "json", "options": {"temperature": 0}}).encode()
     for host in ('http://ollama:11434', 'http://homeai-ollama:11434'):
         try:
@@ -155,6 +156,29 @@ def norm_dept(d):
     if not d: return None
     d = d.strip().lower()
     return DEPT_SYNONYMS.get(d, d if d in CANON_DEPTS else None)
+
+def classify_doc(text):
+    """Cheap TEXT-ONLY triage (microseconds, no model): is this an itemised invoice
+    worth the heavy extraction? Statements / remittances / chasers have NO product
+    line-item table (they list invoice refs + a running balance) — gate the LLM out.
+    Returns (doc_type, looks_like_invoice)."""
+    t = (text or '').lower()
+    # product-table = qty/quantity near a price/value column, or explicit unit/net price.
+    has_table = bool(re.search(r'\b(qty|quantity)\b.{0,30}\b(price|value|amount|each)\b', t)) \
+                or bool(re.search(r'unit price|net price|line value|goods total', t))
+    # NON-INVOICE signals (checked first; a genuine invoice won't trip these without a table)
+    if re.search(r'remittance', t): return 'remittance', False
+    if re.search(r's\s*t\s*a\s*t\s*e\s*m\s*e\s*n\s*t', t) and not has_table: return 'statement', False   # 'S T A T E M E N T'
+    if re.search(r'statement of account|aged (debt|balance|creditor)|balance brought forward|amount overdue|in arrears', t):
+        return 'statement', False
+    if re.search(r'\binvoice no\b.{0,40}\bbalance\b', t, re.S) and not has_table: return 'statement', False  # ledger-style
+    if re.search(r'\bcurrent\b.{0,20}\b30\b.{0,20}\b60\b.{0,20}\b90\b', t): return 'statement', False  # aged columns
+    if re.search(r'\b(final notice|payment reminder|reminder notice|overdue|please remit)\b', t) and not has_table:
+        return 'chaser', False
+    # INVOICE signals
+    if has_table: return 'invoice', True
+    if re.search(r'\binvoice\b', t) and len(re.findall(r'\d+\.\d{2}', text or '')) >= 3: return 'invoice?', True
+    return 'other', False
 
 def jr_department(text):
     # J&R delivery code is authoritative: TOM106 = pub kitchen, MAL125 = Swirl cafe
@@ -231,7 +255,7 @@ async def main():
         net_amount, gross_amount FROM vendor_invoice_inbox WHERE {where} AND source_email_id IS NOT NULL
         ORDER BY invoice_date DESC NULLS LAST LIMIT {limit}""")
     print(f"== invoice-line-extract MODE={mode} candidates={len(rows)} ==", flush=True)
-    done = skipped = noped = nolines = badfoot = 0
+    done = skipped = noped = nolines = badfoot = triaged = 0
     for r in rows:
         if not force and await c.fetchval("SELECT 1 FROM vendor_invoice_lines WHERE invoice_id=$1 LIMIT 1", r['id']):
             skipped += 1; continue
@@ -239,6 +263,17 @@ async def main():
         text, err = pdf_text(acct, r['source_email_id'])
         if not text:
             noped += 1; print(f"  inbox#{r['id']} {r['vendor_name'][:22]:22} — no PDF ({err})", flush=True); continue
+        # IS-INVOICE GATE (cheap, no model): skip statements/chasers/remittances/marketing.
+        doc_type, looks_invoice = classify_doc(text)
+        if not looks_invoice:
+            triaged += 1
+            print(f"  inbox#{r['id']} {r['vendor_name'][:22]:22} — TRIAGED {doc_type} (no heavy model)", flush=True)
+            if mode == 'apply':
+                await c.execute("""UPDATE vendor_invoice_inbox
+                    SET is_statement = (is_statement OR $2 IN ('statement','remittance')),
+                        notes = left(COALESCE(notes,'')||' [triage:'||$2||']',500)
+                    WHERE id=$1 AND COALESCE(notes,'') NOT LIKE '%triage:%'""", r['id'], doc_type)
+            continue
         prof_dept, hint = profile_for(r['vendor_name'])
         # LAYOUT LEARNING: prime with this supplier's most recent cross-footed extraction
         # (the system teaches itself each supplier's shape instead of re-prototyping).
@@ -283,7 +318,7 @@ async def main():
                         r['id'], i, l['description'], l['qty'], l['unit'], l['unit_price'], l['line_net'],
                         l['category'] or None, dept, conf, json.dumps(l), r['realm'] or 'work', OLLAMA_MODEL)
         done += 1
-    print(f"\n  extracted={done} skipped(have lines)={skipped} no-pdf={noped} no-lines={nolines} cross-foot-off={badfoot}"
+    print(f"\n  extracted={done} skipped(have lines)={skipped} no-pdf={noped} no-lines={nolines} cross-foot-off={badfoot} triaged-nonINVOICE={triaged}"
           + ("  (DRY)" if mode != 'apply' else "  (APPLIED)"), flush=True)
     await c.close()
 
