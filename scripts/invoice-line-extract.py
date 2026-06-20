@@ -177,6 +177,40 @@ def parse_net_total(text):
             except Exception: pass
     return None
 
+def _vendor_key(vendor_name):
+    """Stable supplier identity from the display name (works for ALL vendors, incl.
+    platform-forwarded ones where vendor_domain is the platform's not the supplier's)."""
+    return re.sub(r'[^a-z0-9]', '', (vendor_name or '').split('<')[0].lower())[:10]
+
+async def learned_example(c, vendor_name, vendor_domain, exclude_id):
+    """Layout-learning memory: return the line-set of the most recent high-confidence
+    (cross-footed >=0.92) invoice from the SAME supplier as a few-shot exemplar. Matched
+    by normalized vendor NAME (correct even for intuit/xero/sage-forwarded invoices),
+    with vendor_domain as a fallback. Each clean extraction teaches the supplier's future
+    invoices — the system learns each layout once instead of re-prototyping every time."""
+    # Hybrid supplier key: vendor_domain for normal vendors (groups same-supplier variants,
+    # avoids generic-email-name collisions); vendor NAME only when the domain is an accounting
+    # PLATFORM (intuit/xero/sage) or missing — so platform-forwarded invoices (RCC Roofing via
+    # intuit) learn from themselves, not from unrelated vendors sharing the platform domain.
+    if vendor_domain and len(vendor_domain) >= 4 and not re.search(r'intuit|xero|sage|quickbooks', vendor_domain, re.I):
+        cond, arg = ("v.vendor_domain = $1", vendor_domain)
+    else:
+        key = _vendor_key(vendor_name)
+        if len(key) < 5:
+            return None
+        cond, arg = ("regexp_replace(lower(split_part(v.vendor_name,'<',1)),'[^a-z0-9]','','g') LIKE $1 || '%'", key)
+    row = await c.fetchrow(f"""
+        SELECT json_agg(json_build_object('description',description,'qty',qty,'unit',unit,
+               'unit_price',unit_price,'line_net',line_net) ORDER BY line_no) AS lines
+        FROM vendor_invoice_lines
+        WHERE invoice_id = (
+          SELECT l2.invoice_id FROM vendor_invoice_lines l2
+          JOIN vendor_invoice_inbox v ON v.id = l2.invoice_id
+          WHERE {cond} AND l2.extraction_confidence >= 0.92 AND l2.invoice_id <> $2
+          ORDER BY l2.invoice_id DESC LIMIT 1)""", arg, exclude_id)
+    return row['lines'] if row and row['lines'] else None
+
+
 async def main():
     mode = os.environ.get('MODE', 'dry')
     ids = os.environ.get('IDS', 'targets')
@@ -193,7 +227,7 @@ async def main():
         where = f"id IN ({','.join(str(int(x)) for x in ids.split(','))})"
     else:
         where = f"vendor_name ~* '{ids}' AND (invoice_date >= '{year}-01-01' OR received_at >= '{year}-01-01')"
-    rows = await c.fetch(f"""SELECT id, vendor_name, account, site, realm, source_email_id, invoice_date,
+    rows = await c.fetch(f"""SELECT id, vendor_name, vendor_domain, account, site, realm, source_email_id, invoice_date,
         net_amount, gross_amount FROM vendor_invoice_inbox WHERE {where} AND source_email_id IS NOT NULL
         ORDER BY invoice_date DESC NULLS LAST LIMIT {limit}""")
     print(f"== invoice-line-extract MODE={mode} candidates={len(rows)} ==", flush=True)
@@ -206,7 +240,16 @@ async def main():
         if not text:
             noped += 1; print(f"  inbox#{r['id']} {r['vendor_name'][:22]:22} — no PDF ({err})", flush=True); continue
         prof_dept, hint = profile_for(r['vendor_name'])
-        prompt = LINE_PROMPT_BASE + (f"\n\nSupplier layout note: {hint}" if hint else '') + "\n\n---\n" + text[:6000]
+        # LAYOUT LEARNING: prime with this supplier's most recent cross-footed extraction
+        # (the system teaches itself each supplier's shape instead of re-prototyping).
+        example = await learned_example(c, r['vendor_name'], r['vendor_domain'], r['id'])
+        if example:
+            primed = (f"\n\nLEARNED EXAMPLE — invoices from this supplier have previously extracted as the "
+                      f"following line shape; match it EXACTLY (same columns, same granularity, one row per product):\n"
+                      f"{json.dumps(example)[:1800]}")
+        else:
+            primed = (f"\n\nSupplier layout note: {hint}" if hint else '')
+        prompt = LINE_PROMPT_BASE + primed + "\n\n---\n" + text[:6000]
         lines = parse_lines(ollama(prompt))
         if not lines:
             nolines += 1; print(f"  inbox#{r['id']} {r['vendor_name'][:22]:22} — model returned 0 lines (flagged)", flush=True)
