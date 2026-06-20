@@ -13,7 +13,12 @@ SELECT 'invoice.categorise',
     'uncategorised',  count(*) FILTER (WHERE category_canonical IS NULL AND is_statement=false AND status NOT IN ('duplicate','ignored')),
     'coverage_pct',   round(100.0 * count(*) FILTER (WHERE category_canonical IS NOT NULL AND is_statement=false AND status NOT IN ('duplicate','ignored'))
                             / NULLIF(count(*) FILTER (WHERE is_statement=false AND status NOT IN ('duplicate','ignored')),0), 1),
-    'mismatch_over_1k', 0
+    'mismatch_over_1k', 0,
+    'lines_extracted', (SELECT count(DISTINCT invoice_id) FROM vendor_invoice_lines),
+    'lines_pending',   (SELECT count(*) FROM vendor_invoice_inbox v
+                          WHERE v.is_statement=false AND v.status NOT IN ('duplicate','ignored')
+                            AND v.pdf_fetched_at IS NOT NULL
+                            AND NOT EXISTS (SELECT 1 FROM vendor_invoice_lines l WHERE l.invoice_id=v.id))
   ),
   'work'
 FROM vendor_invoice_inbox;
