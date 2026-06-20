@@ -22,7 +22,15 @@ Goal: every pipeline's health is visible; silent failures become alerts; build t
 
 ## PHASE 2 — Fix the now-visible broken/silent feeds — P1
 (The registry will make these scream; fix in priority order.)
-- **2.1 u95 harvester** — verify/restore (invoice capture path); confirm it's the live capture or formally supersede with the gmail-ingest path.
+- **2.0 google-fetch DNS (ROOT CAUSE, READY TO APPLY) — the #1 lever.** google-fetch hits intermittent Docker-DNS "Temporary failure in name resolution" to googleapis.com, silently stalling ALL invoice/attachment fetches → u95 broken, u125 PDF-fetch 8d stale, line backfill dropping ~183/batch. **Fix:** add a `dns:` block to the `google-fetch` service in docker-compose.yml (right after `networks: [ai-internal, ai-egress]`), mirroring n8n's working config:
+  ```yaml
+      dns:
+        - 127.0.0.11   # Docker embedded resolver first
+        - 1.1.1.1
+        - 8.8.8.8
+  ```
+  Then `docker compose up -d google-fetch` (recreate), verify a few `/attachment` fetches succeed without DNS errors, re-anchor `scripts/.audit-baseline.txt` if compose line-drift trips it. **DO WHEN google-fetch IS IDLE** (not while the line backfill is using it). Mitigation already shipped: retry-with-backoff in the extractors so transient blips no longer drop invoices.
+- **2.1 u95 harvester** — verify/restore (invoice capture path); confirm it's the live capture or formally supersede with the gmail-ingest path. Likely recovers once 2.0 is done.
 - **2.2 NatWest sweep** — verify the content-dedup guard is safe, then **schedule it** (cron) — currently unscheduled.
 - **2.3 Dojo feed** — DECISION NEEDED: build the `api.caterbook`-style Dojo API scraper, or resume CSV drops. Starved since ~06-15.
 - **2.4 Line extractor** — flag J&R "0 lines" for review instead of silent drop (my code; cheap).
