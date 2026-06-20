@@ -40,8 +40,16 @@ def vault(path):
                                  headers={'X-Vault-Token': VAULT_TOKEN})
     return json.loads(urllib.request.urlopen(req, timeout=5).read())['data']['data']
 
-def gf(path):
-    return json.loads(urllib.request.urlopen(f'{GF}{path}', timeout=30).read())
+def gf(path, tries=4):
+    # retry transient google-fetch Docker-DNS failures (Temporary failure in name resolution)
+    import time as _t
+    last = None
+    for i in range(tries):
+        try:
+            return json.loads(urllib.request.urlopen(f'{GF}{path}', timeout=40).read())
+        except Exception as e:
+            last = e; _t.sleep(1.5 * (i + 1))
+    raise last
 
 def fetch_pdf_text(account, mid):
     """Return (filename, text) for the first PDF attachment, or (None, reason)."""

@@ -30,8 +30,17 @@ def vault(p):
     r = urllib.request.Request(f'http://vault:8200/v1/secret/data/{p}', headers={'X-Vault-Token': VT})
     return json.loads(urllib.request.urlopen(r, timeout=5).read())['data']['data']
 
-def gf(p):
-    return json.loads(urllib.request.urlopen(f'{GF}{p}', timeout=30).read())
+def gf(p, tries=4):
+    # google-fetch hits intermittent Docker-DNS "Temporary failure in name resolution"
+    # to googleapis.com — retry with backoff so a transient blip doesn't drop the invoice.
+    import time as _t
+    last = None
+    for i in range(tries):
+        try:
+            return json.loads(urllib.request.urlopen(f'{GF}{p}', timeout=40).read())
+        except Exception as e:
+            last = e; _t.sleep(1.5 * (i + 1))
+    raise last
 
 def pdf_text(acct, mid):
     try:
