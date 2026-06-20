@@ -18,14 +18,14 @@ INSERT INTO cognition.proposals
 SELECT 'invoice.categorise','overbroad', p.entity_ref,'rule_narrow',
        jsonb_build_object('domain_pattern',p.entity_ref,'reason','applied rule caused >£1k multi-category'),
        '{}'::jsonb,
-       (SELECT sum(COALESCE(v.gross_amount,0)) FROM vendor_invoice_inbox v WHERE v.vendor_domain=p.entity_ref),
+       (SELECT sum(COALESCE(v.net_amount, v.gross_amount, 0)) FROM vendor_invoice_inbox v WHERE v.vendor_domain=p.entity_ref),
        'pending', p.id,'work'
 FROM cognition.proposals p
 WHERE p.task_id='invoice.categorise' AND p.status='applied' AND p.action_kind='rule_insert'
   AND EXISTS (SELECT 1 FROM vendor_invoice_inbox v WHERE v.vendor_domain=p.entity_ref
               GROUP BY v.vendor_domain
               HAVING count(DISTINCT v.vendor_category) >= 2
-                 AND sum(COALESCE(v.gross_amount,0)) > 1000)
+                 AND sum(COALESCE(v.net_amount, v.gross_amount, 0)) > 1000)
 ON CONFLICT (task_id,detector,entity_ref,action_kind) DO NOTHING;
 SQL
 echo "metis-measure: effects recorded, correctives raised"

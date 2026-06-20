@@ -19,7 +19,7 @@ BODY=$(metis_psql_value "
     format('• £%s  %s → %s  (%s)', to_char(impact_gbp,'FM999G999G990'), entity_ref,
            COALESCE(action_payload->>'category', action_kind), detector), E'\n'
     ORDER BY impact_gbp DESC), '(none)')
-  FROM (SELECT * FROM cognition.proposals WHERE status='pending' LIMIT $N) q;" | grep -v '^SET$')
+  FROM (SELECT * FROM cognition.proposals WHERE status='pending' ORDER BY impact_gbp DESC LIMIT $N) q;" | grep -v '^SET$')
 
 PENDING=$(metis_psql_value "SET app.current_realm='owner'; SELECT count(*) FROM cognition.proposals WHERE status='pending';" | grep -v '^SET$')
 
