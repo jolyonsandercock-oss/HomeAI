@@ -60,6 +60,13 @@ Goal: every pipeline's health is visible; silent failures become alerts; build t
 - `epos_daily` empty, `v_uncategorised_summary` misnamed — **document as dead**, optional drop later.
 - gemma4 `think:false` — **verify** our extractors are safe, document the convention.
 
+## Concurrent work + live state (2026-06-20, for Metis / future sessions)
+Two Claude instances active. This branch's invoice/finance/ops work is **LIVE** (not shadow):
+- **DONE + LIVE:** Phase 0 (pipeline registry + freshness watchdog), Phase 3.1 categorisation (79%, platform-domain-aware), Phase 3.2 labour view (26.92%), Phase 3.3 costs summary (`mart.v_costs_summary_daily`, COGS provisional), invoice **date + line extractors** (pdfplumber → **gemma4-doc with think:false** — NOT qwen72b), **is-invoice gate** (classify_doc), **layout-learning loop**, crontab hygiene, NatWest schedule.
+- **Metis note:** its "categorisation pilot (shadow)" overlaps Phase 3.1 — treat the LIVE `vendor_category_rules` + the categorise sweep as the baseline; don't re-derive. Hard file boundary already set by Metis vs invoice-filter files — keep it.
+- **IN-FLIGHT:** line-item backfill (`logs/invoice-line-backfill-gemma.log`, gemma4-doc + gate + learning). Idempotent (skips invoices that have lines); if it dies, the **07:40 cron `u-invoice-line-sweep`** completes it. Safe to leave or stop.
+- **Reversibility:** `public._backup_*` tables (categorise/platform/atr20/invoice-dates) — drop once verified.
+
 ## Prioritised execution order
 1. **Phase 0** (registry + freshness) — keystone, additive, also the n8n-retirement evidence.
 2. **Phase 3.1 categorisation** — biggest business value; GPU-free rules backfill; unblocks the costs summary.
