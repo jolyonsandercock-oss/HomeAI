@@ -109,12 +109,14 @@ RETURNS SETOF cognition.detection LANGUAGE sql STABLE SECURITY DEFINER SET searc
     FROM vendor_invoice_inbox
     WHERE category_canonical IS NULL AND is_statement = false
       AND status NOT IN ('duplicate','ignored')
+      AND vendor_domain !~* '(gmail\.com|googlemail\.com|hotmail\.|outlook\.com|yahoo\.|ymail\.com|icloud\.com|aol\.com|live\.com|btinternet\.com|sky\.com|msn\.com|me\.com|mac\.com)'
+      AND vendor_domain !~* '(intuit|xero|sage|quickbooks)'
     GROUP BY vendor_domain
   ),
   majority AS (
     SELECT vendor_domain, vendor_category AS cat,
-           row_number() OVER (PARTITION BY vendor_domain
-                              ORDER BY count(*) DESC) AS rn
+           row_number() OVER (PARTITION BY vendor_domain ORDER BY count(*) DESC) AS rn,
+           count(*) - COALESCE(lead(count(*)) OVER (PARTITION BY vendor_domain ORDER BY count(*) DESC), 0) AS margin
     FROM vendor_invoice_inbox
     WHERE vendor_category IS NOT NULL AND is_statement = false
     GROUP BY vendor_domain, vendor_category
@@ -127,8 +129,7 @@ RETURNS SETOF cognition.detection LANGUAGE sql STABLE SECURITY DEFINER SET searc
          u.impact, 0.85, 'deterministic',
          jsonb_build_object('will_categorise', u.n, 'gbp', u.impact),
          'work'
-  FROM uncat u JOIN majority m ON m.vendor_domain = u.vendor_domain AND m.rn = 1
-  WHERE m.cat IS NOT NULL;
+  FROM uncat u JOIN majority m ON m.vendor_domain = u.vendor_domain AND m.rn = 1 AND m.cat IS NOT NULL AND m.margin > 0;
 $$;
 
 -- CONTRADICTION: one vendor_domain mapped to >=2 categories.
@@ -142,6 +143,8 @@ RETURNS SETOF cognition.detection LANGUAGE sql STABLE SECURITY DEFINER SET searc
     FROM vendor_invoice_inbox
     WHERE vendor_category IS NOT NULL AND is_statement = false
       AND status NOT IN ('duplicate','ignored')
+      AND vendor_domain !~* '(intuit|xero|sage|quickbooks)'
+      AND vendor_domain !~* '(gmail\.com|googlemail\.com|hotmail\.|outlook\.com|yahoo\.|ymail\.com|icloud\.com|aol\.com|live\.com|btinternet\.com|sky\.com|msn\.com|me\.com|mac\.com)'
     GROUP BY vendor_domain
     HAVING count(DISTINCT vendor_category) >= 2
   )
