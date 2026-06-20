@@ -20,10 +20,10 @@ docker exec -i -e PGPASSWORD="$PG_PW" homeai-postgres psql -U postgres -d homeai
 UPDATE vendor_invoice_inbox v
 SET vendor_category = (
   SELECT r.category FROM vendor_category_rules r
-  WHERE v.vendor_domain ~* r.domain_pattern OR v.vendor_name ~* r.domain_pattern
+  WHERE CASE WHEN v.vendor_domain ~* '(intuit|xero|sage|quickbooks)' THEN v.vendor_name ~* r.domain_pattern ELSE (v.vendor_domain ~* r.domain_pattern OR v.vendor_name ~* r.domain_pattern) END
   ORDER BY r.priority ASC, length(r.domain_pattern) DESC LIMIT 1)
 WHERE v.category_canonical IS NULL AND v.is_statement=false AND v.status NOT IN ('duplicate','ignored')
-  AND EXISTS (SELECT 1 FROM vendor_category_rules r WHERE v.vendor_domain ~* r.domain_pattern OR v.vendor_name ~* r.domain_pattern);
+  AND EXISTS (SELECT 1 FROM vendor_category_rules r WHERE CASE WHEN v.vendor_domain ~* '(intuit|xero|sage|quickbooks)' THEN v.vendor_name ~* r.domain_pattern ELSE (v.vendor_domain ~* r.domain_pattern OR v.vendor_name ~* r.domain_pattern) END);
 -- J&R cafe split
 UPDATE vendor_invoice_inbox SET vendor_category='cafe_stock'
 WHERE category_canonical='dry_purchase' AND site='cafe' AND vendor_name ~* 'j ?& ?r|jr food';
