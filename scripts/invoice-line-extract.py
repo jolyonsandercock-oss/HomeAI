@@ -251,8 +251,13 @@ async def main():
         where = f"id IN ({','.join(str(int(x)) for x in ids.split(','))})"
     else:
         where = f"vendor_name ~* '{ids}' AND (invoice_date >= '{year}-01-01' OR received_at >= '{year}-01-01')"
+    # Exclude invoices that already have lines so the LIMIT window reaches PENDING ones
+    # (without this the window fills with already-extracted rows that the loop below skips,
+    # so a repeat run drains nothing). FORCE=1 bypasses to allow re-extraction.
+    not_done = "" if force else "AND NOT EXISTS (SELECT 1 FROM vendor_invoice_lines l WHERE l.invoice_id = vendor_invoice_inbox.id)"
     rows = await c.fetch(f"""SELECT id, vendor_name, vendor_domain, account, site, realm, source_email_id, invoice_date,
         net_amount, gross_amount FROM vendor_invoice_inbox WHERE {where} AND source_email_id IS NOT NULL
+        {not_done}
         ORDER BY invoice_date DESC NULLS LAST LIMIT {limit}""")
     print(f"== invoice-line-extract MODE={mode} candidates={len(rows)} ==", flush=True)
     done = skipped = noped = nolines = badfoot = triaged = 0
