@@ -72,3 +72,12 @@
 23 * * * * /home_ai/scripts/u50-apply-feedback.sh >> /home_ai/logs/u50-apply-feedback.log 2>&1
 */15 * * * * /home_ai/scripts/u62-calendar-sync.sh >> /home_ai/logs/u62-calendar-sync.log 2>&1
 */15 * * * * /home_ai/scripts/u33-rejection-digest.sh >> /home_ai/logs/u33-rejection-digest.log 2>&1
+
+10 7 * * * bash /home_ai/scripts/u-invoice-pdf-date-sweep.sh 26 >> /home_ai/logs/u-invoice-pdf-date-sweep.cron.log 2>&1
+25 7 * * * bash /home_ai/scripts/u-natwest-inbox-sweep.sh >> /home_ai/logs/u-natwest-inbox-sweep.cron.log 2>&1
+30 3 25 * * docker exec homeai-postgres psql -U postgres -d homeai -c "SELECT ops.record_pipeline_run('partition_maintenance', 'ok', now(), NULL, (SELECT partition_name FROM ensure_next_event_partition()));" >> /home_ai/logs/partition-maintenance.log 2>&1
+30 6 * * * bash /home_ai/scripts/u-invoice-categorise-sweep.sh >/dev/null 2>&1
+40 7 * * * bash /home_ai/scripts/u-invoice-line-sweep.sh 2026 >> /home_ai/logs/u-invoice-line-sweep.cron.log 2>&1
+45 6 * * * cd /home_ai && bash scripts/ops-run.sh metis_nightly -- bash scripts/metis-nightly.sh >> /home_ai/logs/metis-nightly.log 2>&1
+5 */3 * * * bash /home_ai/scripts/u-pipeline-freshness-watchdog.sh >/dev/null 2>&1
+50 7 * * * cd /home_ai && bash scripts/u-drinks-classify-sweep.sh >> /home_ai/logs/drinks-classify.log 2>&1
