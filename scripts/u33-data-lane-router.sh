@@ -41,6 +41,11 @@ for p in (NATWEST_DIR, DOJO_DIR, UNKNOWN_DIR):
 # When a trusted sender forwards a Dojo-shaped CSV, route to dojo-inbox
 # where u135-dojo-inbox-sweep picks it up automatically.
 DOJO_FILENAME_RE = re.compile(r"transactions[_-].*all[_-]locations.*\.csv$", re.I)
+# A NatWest CSV export forwarded by Jo arrives from gmail (not natwest.com), so the
+# strict-domain match never fires. Recognise it by CSV-shape + a bank-statement hint
+# in the filename or subject (natwest / nwolb / statement / transactions / a
+# sortcode-account number pattern).
+NATWEST_FILENAME_RE = re.compile(r"(natwest|nwolb|\bstatement\b|\btransactions?\b|\d{6}[ _-]?\d{6,8})", re.I)
 TRUSTED_SENDERS = {"jolyon.sandercock@gmail.com"}
 
 
@@ -188,6 +193,18 @@ async def main():
                 out = DOJO_DIR / f"{mid}__{fname}"
                 out.write_bytes(blob)
                 actions.append(f"dojo-csv saved → {out}")
+                continue
+
+            # NatWest CSV forwarded by a trusted sender (Jo) → natwest-inbox.
+            # The strict-domain branch above only fires for mail straight from NatWest;
+            # a forward comes from Jo's gmail, so match on CSV-shape + a statement hint.
+            if (sender_email in TRUSTED_SENDERS
+                    and (mime in CSV_MIMES or fname.lower().endswith(".csv"))
+                    and not DOJO_FILENAME_RE.search(fname)
+                    and (NATWEST_FILENAME_RE.search(fname) or NATWEST_FILENAME_RE.search(subject))):
+                out = NATWEST_DIR / f"{mid}__{fname}"
+                out.write_bytes(blob)
+                actions.append(f"natwest-csv (forwarded by {sender_email}) saved → {out}")
                 continue
 
             if vendor_hit and (mime in PDF_MIMES or fname.lower().endswith(".pdf")):
