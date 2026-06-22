@@ -255,3 +255,4 @@ async def main():
 
 asyncio.run(main())
 PYEOF
+echo "$(date -Is) u33-data-lane-router heartbeat"  # liveness → cron log (work logged only when rows present)

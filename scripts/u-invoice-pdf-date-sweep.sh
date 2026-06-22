@@ -25,3 +25,4 @@ VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println
     homeai-bot-responder python3 < "$SCRIPT"
   echo "=== $(date -Is) done (rc=$?) ==="
 } >> "$LOG" 2>&1
+echo "$(date -Is) u-invoice-pdf-date-sweep heartbeat"  # liveness → cron log (real work logged in $LOG)

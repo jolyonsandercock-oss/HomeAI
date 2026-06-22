@@ -142,6 +142,7 @@ esac
 
 if diff -u "$BASE" "$SNAP" > /tmp/hermes-sentinel.diff 2>&1; then
   echo "$(date -Is) OK" >> "$LOG"
+  echo "$(date -Is) hermes-sentinel heartbeat (clean)"  # liveness → cron log for cron-health-check
   exit 0
 fi
 
