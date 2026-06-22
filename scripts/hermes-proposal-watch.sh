@@ -9,6 +9,7 @@ SEEN_FILE="/home_ai/logs/hermes-proposal-seen.txt"
 LOG="/home_ai/logs/hermes-proposal-watch.log"
 
 touch "$SEEN_FILE"
+echo "$(date -Is) hermes-proposal-watch heartbeat" >> "$LOG"  # liveness → watched log; event-driven watcher is silent when no new proposals
 
 new=()
 while IFS= read -r -d '' f; do
