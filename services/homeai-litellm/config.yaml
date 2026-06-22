@@ -76,6 +76,17 @@ model_list:
       api_key: os.environ/ANTHROPIC_API_KEY
       max_tokens: 1024
 
+  # ---- Local multimodal (W7800/ROCm via Ollama) — added 2026-06-19 ----
+  # Gemma 4 QAT 31B, Unsloth dynamic UD-Q4_K_XL. Local = no secret/api_key.
+  # NOTE: the global presidio_gate callback still applies to this entry; for
+  # local vision extraction redaction is counterproductive — scope it out
+  # during pipeline integration (left to operator, not changed here).
+  - model_name: gemma4-qat31b
+    litellm_params:
+      model: ollama_chat/gemma4-qat31b
+      api_base: http://homeai-ollama:11434
+      max_tokens: 2048
+
 # Logging + telemetry
 litellm_settings:
   # Drop telemetry to LiteLLM's own external endpoint; we log to ai_usage

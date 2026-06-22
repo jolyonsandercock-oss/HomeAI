@@ -3,6 +3,13 @@
 # target-supplier invoices into vendor_invoice_lines (pdfplumber + local qwen2.5:72b,
 # cross-foot gated). The extractor skips invoices that already have lines, so this
 # is forward-only by construction — only genuinely new invoices cost GPU time.
+
+# flock protection — don't run if a batch chunk is already extracting
+exec 200>/tmp/invoice-line-backfill.lock
+if ! flock -n 200; then
+    echo "$(date -Is) SKIPPED — another extraction is running" | tee -a /home_ai/logs/u-invoice-line-sweep.cron.log
+    exit 0
+fi
 # Off the n8n event path. Runs after tonight's backfill, so no GPU contention.
 #
 #   u-invoice-line-sweep.sh [year]   # default 2026

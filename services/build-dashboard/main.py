@@ -2726,6 +2726,23 @@ async def api_tasks_list(status: str = Query("open,in_progress,snoozed")):
     return {"n": len(rows), "rows": [_isoify(dict(r)) for r in rows]}
 
 
+@app.get("/api/validation-checks")
+async def api_validation_checks():
+    """Invoices flagged by extraction validation (anomaly / requires_human) —
+    surfaced on the Tasks page for human review. db_all runs in the owner realm
+    so it sees flagged rows across all entities/realms."""
+    rows = await db_all("""
+        SELECT entity_id, realm, supplier_name, invoice_number, invoice_date,
+               gross_amount, currency, confidence_score, anomaly_reason,
+               source, status, created_at
+          FROM invoices
+         WHERE requires_human IS TRUE OR anomaly_reason IS NOT NULL
+         ORDER BY created_at DESC
+         LIMIT 500
+    """)
+    return {"n": len(rows), "rows": [_isoify(dict(r)) for r in rows]}
+
+
 @app.post("/api/tasks/create")
 async def api_tasks_create(payload: dict = Body(...)):
     title = (payload.get("title") or "").strip()

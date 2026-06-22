@@ -68,6 +68,14 @@
     <div id="tasks-table"></div>
   </section>
 
+  <section class="glass rounded-xl p-3 md:p-4 mt-4">
+    <h2 class="text-lg font-medium mb-2 px-1">Validation checks
+      <span class="muted text-sm" id="vc-count"></span>
+    </h2>
+    <p class="muted text-xs mb-2 px-1">Invoices flagged by extraction validation (anomaly / requires review).</p>
+    <div id="validation-table"></div>
+  </section>
+
 </div>
 
 <script>
@@ -149,6 +157,37 @@ function tasksPage() {
     },
   };
 }
+
+// Validation checks — self-contained (independent of the tasks Alpine component).
+(async function loadValidationChecks() {
+  try {
+    const r = await fetch('/api/validation-checks');
+    const d = await r.json();
+    const c = document.getElementById('vc-count');
+    if (c) c.textContent = `(${d.n || 0})`;
+    new Tabulator('#validation-table', {
+      data: d.rows || [],
+      layout: 'fitDataStretch',
+      pagination: true, paginationSize: 25,
+      initialSort: [{ column: 'created_at', dir: 'desc' }],
+      placeholder: 'No validation checks outstanding.',
+      columns: [
+        { title:'Entity', field:'entity_id', width:70 },
+        { title:'Realm', field:'realm', width:80 },
+        { title:'Supplier', field:'supplier_name', widthGrow:2 },
+        { title:'Invoice #', field:'invoice_number', width:130 },
+        { title:'Date', field:'invoice_date', width:110, formatter: c => (c.getValue()||'').slice(0,10) },
+        { title:'Gross', field:'gross_amount', width:100, hozAlign:'right',
+          formatter: c => { const v=c.getValue(); return v==null?'':'£'+Number(v).toFixed(2); } },
+        { title:'Conf', field:'confidence_score', width:70, hozAlign:'right',
+          formatter: c => { const v=c.getValue(); return v==null?'':Number(v).toFixed(2); } },
+        { title:'Validation flag', field:'anomaly_reason', widthGrow:2,
+          formatter: c => `<span class="text-amber-300">${c.getValue() || ''}</span>` },
+        { title:'Status', field:'status', width:90 },
+      ],
+    });
+  } catch (e) { console.error('validation-checks load failed', e); }
+})();
 </script>
 </body>
 </html>
