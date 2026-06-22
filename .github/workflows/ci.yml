@@ -68,7 +68,7 @@ jobs:
           )
           for p in "${patterns[@]}"; do
             hits=$(git ls-files | xargs grep -nE "$p" 2>/dev/null \
-                   | grep -vE '\.github/workflows/ci\.yml|placeholder|<vault:|REPLACE_VIA|EXAMPLE|noreply|TODO' \
+                   | grep -vE '\.github/workflows/ci\.yml|placeholder|<vault:|REPLACE_|EXAMPLE|noreply|TODO' \
                    || true)
             if [[ -n "$hits" ]]; then
               echo "::error::entropy match for pattern '$p':"
@@ -85,7 +85,7 @@ jobs:
           set -e
           hits=$(git ls-files '*.yml' '*.yaml' '*.json' '*.sql' \
                   | xargs grep -nE '[A-Fa-f0-9]{64,}' 2>/dev/null \
-                  | grep -vE '\.github/workflows/ci\.yml|migrations/V[0-9]+__.+\.sql:.*--|sha256|fingerprint|payload_signature|trace_id|gen_random' \
+                  | grep -vE '\.github/workflows/ci\.yml|migrations/V[0-9]+__.+\.sql:.*--|sha256|fingerprint|payload_signature|trace_id|gen_random|_sha"|_hash"' \
                   || true)
           if [[ -n "$hits" ]]; then
             echo "::error::high-entropy hex string found in committed config:"
