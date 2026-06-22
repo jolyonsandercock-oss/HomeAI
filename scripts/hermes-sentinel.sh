@@ -152,7 +152,7 @@ fi
 } >> "$LOG"
 
 summary=$(grep -E '^[+-]' /tmp/hermes-sentinel.diff | grep -vE '^(\+\+\+|---)' | head -15)
-PATH="$HOME/.hermes/bin:$PATH" hermes send -q -t telegram \
+PATH="$HOME/.local/bin:$HOME/.hermes/bin:$PATH" hermes send -q -t telegram \
   "🛡️ HERMES SENTINEL: state drift detected. If you did not make this change, investigate before letting Hermes run further tasks.
 
 ${summary}

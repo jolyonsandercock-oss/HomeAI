@@ -6,23 +6,34 @@
  "config": {
   "approvals": {
    "cron_mode": "deny",
-   "destructive_slash_confirm": true,
+   "destructive_slash_confirm": false,
    "mcp_reload_confirm": true,
    "mode": "manual",
    "timeout": 60
   },
   "command_allowlist": [
-   "shell command via -c/-lc flag",
-   "execute_code",
    "script execution via heredoc",
-   "script execution via -e/-c flag"
+   "execute_code",
+   "delete in root path",
+   "script execution via -e/-c flag",
+   "shell command via -c/-lc flag",
+   "docker restart/stop/kill (container lifecycle)"
   ],
   "delegation": {
    "model": "deepseek-v4-flash",
    "provider": "deepseek",
    "subagent_auto_approve": false
   },
-  "fallback_providers": "[\"nous\"]",
+  "fallback_providers": [
+   {
+    "model": "deepseek-v4-pro",
+    "provider": "deepseek"
+   },
+   {
+    "model": "gpt-5.5",
+    "provider": "openai-api"
+   }
+  ],
   "hooks": {},
   "hooks_auto_accept": false,
   "mcp_servers": {
@@ -32,16 +43,16 @@
    }
   },
   "model": {
-   "base_url": "",
-   "default": "deepseek-v4-flash",
-   "provider": "deepseek"
+   "base_url": "http://localhost:11434/v1",
+   "default": "gemma4-qat31b:latest",
+   "provider": "ollama"
   },
   "prefill_messages_file": "",
   "quick_commands": {},
   "security": {
    "acked_advisories": [],
    "allow_lazy_installs": false,
-   "allow_private_urls": true,
+   "allow_private_urls": false,
    "redact_secrets": true,
    "tirith_enabled": true,
    "tirith_fail_open": true,
@@ -81,18 +92,16 @@
  ],
  "hooks_sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "kanban_open": [],
- "memory_sha": "64381c96a89d7706d3af85609c6ae2fa9fb939b5d73a5b6e042e45a13e5f3196",
+ "memory_sha": "7bade12caeb8bfd670f5dabb88d7e4948c0d53b87e3dc57e13231b6864728953",
  "providers": {
   "anthropic": 1,
   "deepseek": 2,
   "nous": 1,
   "openai-api": 1
  },
- "skills_count": 535,
- "skills_sha": "1d25d1bc845d76a2e0e50f974f07b29206da6bf60d068ffc63eb442144fa2777",
- "soul_sha": "558e157435ba2108bdc99beb45878ae30b2ce65371c3574f5bfbd08821fe9b66",
- "user_listeners": [
-  "100.104.82.53:8091"
- ],
- "user_profile_sha": "aca8a908962eb6ecb6764cc3a6f92b9cbc7809b36f902e07a01e8bd17267d311"
+ "skills_count": 574,
+ "skills_sha": "49454ec36cae482b6a17fbe22c729c41718ab4aa9718030ad26856cff9a4fcf0",
+ "soul_sha": "9e6acde6357e4d8851ae2f384d5dada6218c1f54b27fcc87ee954da9b6618055",
+ "user_listeners": [],
+ "user_profile_sha": "81c56929b91fef2d0bea11b7d11c984e5347446faf6e27f49727ceecda9869be"
 }

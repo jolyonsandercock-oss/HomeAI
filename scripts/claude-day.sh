@@ -26,7 +26,7 @@ if [ "${1:-}" = "--inner" ]; then
     echo "$(date -Is) claude exited rc=$rc — restart #$fails" >>"$LOG"
     if [ "$fails" -ge 3 ]; then
       echo "$(date -Is) 3 rapid failures — giving up" >>"$LOG"
-      PATH="$HOME/.hermes/bin:$PATH" hermes send -q -t telegram \
+      PATH="$HOME/.local/bin:$HOME/.hermes/bin:$PATH" hermes send -q -t telegram \
         "claude-day: session crashed 3x in 10min, gave up. Attach: tmux attach -t $SESH" \
         2>>"$LOG" || true
       break

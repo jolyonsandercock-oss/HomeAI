@@ -26,7 +26,7 @@ for f in "${new[@]}"; do
 done
 msg+=$'\nReview: /home_ai/.hermes/'
 
-PATH="$HOME/.hermes/bin:$PATH" hermes send -q -t telegram "$msg" 2>>"$LOG" && {
+PATH="$HOME/.local/bin:$HOME/.hermes/bin:$PATH" hermes send -q -t telegram "$msg" 2>>"$LOG" && {
     printf '%s\n' "${new[@]}" >> "$SEEN_FILE"
     echo "$(date -Is) notified: ${new[*]}" >> "$LOG"
 } || echo "$(date -Is) WARN telegram failed for: ${new[*]}" >> "$LOG"
