@@ -30,7 +30,7 @@
 **Interfaces:**
 - Produces: `cognition.agent_findings` gains `severity text`, `status text`, `fingerprint text`, `last_seen_at timestamptz`, and a partial unique index on `fingerprint`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```bash
 # tests/auditor/test_01_migration.sh
@@ -41,12 +41,12 @@ cols=$($PSQL "select string_agg(column_name,',' order by column_name) from infor
 echo PASS
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bash tests/auditor/test_01_migration.sh`
 Expected: FAIL (columns absent).
 
-- [ ] **Step 3: Write the migration**
+- [x] **Step 3: Write the migration**
 
 ```sql
 -- postgres/migrations/V276__agent_findings_audit_cols.sql
@@ -60,12 +60,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS agent_findings_fingerprint_uq
   ON cognition.agent_findings (fingerprint) WHERE fingerprint IS NOT NULL;
 ```
 
-- [ ] **Step 4: Apply + verify**
+- [x] **Step 4: Apply + verify**
 
 Run: `docker exec -i homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 < postgres/migrations/V276__agent_findings_audit_cols.sql && bash tests/auditor/test_01_migration.sh`
 Expected: `PASS`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add postgres/migrations/V276__agent_findings_audit_cols.sql tests/auditor/test_01_migration.sh
@@ -85,7 +85,7 @@ git commit -m "feat(auditor): V276 agent_findings audit columns"
   - `Finding(check_id:str, lens:str, severity:str, title:str, detail:str, value:str='')` dataclass; property `fingerprint -> 'auditor_'+check_id`; property `status -> 'firing' if severity in {'warn','fail'} else 'resolved'`.
   - `psql(sql:str) -> list[list[str]]` (rows split on `\x1f`); `psql_scalar(sql:str) -> str|None`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/auditor/test_02_finding.py
@@ -101,12 +101,12 @@ def test_psql_scalar_live():
     assert psql_scalar("select 1") == '1'
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/auditor/test_02_finding.py -v`
 Expected: FAIL (`ModuleNotFoundError: scripts.auditor.finding`).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # scripts/auditor/finding.py
@@ -152,12 +152,12 @@ def psql_scalar(sql: str):
 
 Create empty `scripts/auditor/__init__.py`. Add `tests/__init__.py` and `tests/auditor/__init__.py` if the repo's pytest needs package dirs (check `tests/` layout first; match it).
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest tests/auditor/test_02_finding.py -v`
 Expected: PASS (both tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/auditor/__init__.py scripts/auditor/finding.py tests/auditor/test_02_finding.py
@@ -176,7 +176,7 @@ git commit -m "feat(auditor): Finding model + psql helpers"
 - Consumes: `Finding` (Task 2).
 - Produces: `persist(findings:list[Finding]) -> None` — upserts each into `cognition.agent_findings` by `fingerprint`; `resolve_stale(seen_check_ids:list[str]) -> None` — sets `status='resolved'` for auditor findings whose fingerprint is not in this run.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/auditor/test_03_persist.py
@@ -196,12 +196,12 @@ def test_upsert_and_resolve():
     psql_scalar("delete from cognition.agent_findings where fingerprint='auditor_selftest_x'")  # cleanup
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/auditor/test_03_persist.py -v`
 Expected: FAIL (`ModuleNotFoundError: scripts.auditor.persist`).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # scripts/auditor/persist.py
@@ -236,12 +236,12 @@ def resolve_stale(seen_check_ids):
                AND fingerprint NOT IN ({seen});""")
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest tests/auditor/test_03_persist.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/auditor/persist.py tests/auditor/test_03_persist.py
@@ -260,7 +260,7 @@ git commit -m "feat(auditor): persist + auto-resolve findings"
 - Consumes: `Finding`, `psql`, `psql_scalar` (Task 2).
 - Produces: `INTEGRITY_CHECKS: list[callable]` — each `() -> Finding`. Check ids: `revenue_reconciliation, bank_freshness, bank_dedup, invoice_categorisation, invoice_uncategorised_gbp, events_overflow, dead_letters, pipeline_freshness`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/auditor/test_04_integrity.py
@@ -278,12 +278,12 @@ def test_all_return_findings():
     assert len(ids) == len(INTEGRITY_CHECKS)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/auditor/test_04_integrity.py -v`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # scripts/auditor/checks_integrity.py
@@ -363,14 +363,18 @@ INTEGRITY_CHECKS = [
 ]
 ```
 
-> **Implementer note:** before running, confirm the exact V275 recon view name (`grep -l '' postgres/migrations/V275__*.sql` then read it) and the `ops.check_freshness()` return columns; adjust the two SQLs if the names differ. Both checks already degrade safely (`fail`/`info`) rather than crash.
+> **Implementer note (RESOLVED 2026-06-23 against live DB):** three corrections vs the draft above —
+> 1. Recon view is `ops.v_revenue_reconciliation` (not `mart.*`); status enum is `'reconciled'|'DRIFT'`, so `<> 'reconciled'` is correct.
+> 2. `ops.check_freshness()` returns `(name, newest, sla_hours, age_hours, status)` with **no `is_stale` column**; status is `'ok'|'STALE'` → predicate is `where status <> 'ok'`.
+> 3. `live_state()->'invoices'` has **no `uncategorised_gbp_ytd` key** (only `categorisation_coverage_pct`, `lines_backlog_extractable`, `lines_backlog_raw_DO_NOT_USE`); `check_invoice_uncategorised_gbp` derives the figure directly from `vendor_invoice_inbox` (gross of YTD rows where `category_canonical is null`, `is_statement=false`, status not duplicate/ignored) — £197,711.42 at implementation.
+> Shipped code reflects all three; both DB-dependent checks still degrade safely rather than crash.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest tests/auditor/test_04_integrity.py -v`
 Expected: PASS (8 findings, correct lens/severity).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/auditor/checks_integrity.py tests/auditor/test_04_integrity.py
