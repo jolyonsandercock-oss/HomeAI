@@ -218,13 +218,15 @@ def persist(findings):
           INSERT INTO cognition.agent_findings
             (agent, kind, subject, detail, verified, evidence, realm,
              severity, status, fingerprint, created_at, last_seen_at)
-          VALUES ('system-auditor', '{_q(f.check_id)}', '{_q(f.title)}', '{_q(f.detail)}',
+          VALUES ('system-auditor', 'finding', '{_q(f.title)}', '{_q(f.detail)}',
                   true, '{_q(f.value)}', 'owner', '{f.severity}', '{f.status}',
                   '{f.fingerprint}', now(), now())
-          ON CONFLICT (fingerprint) DO UPDATE SET
+          ON CONFLICT (fingerprint) WHERE fingerprint IS NOT NULL DO UPDATE SET
             subject=EXCLUDED.subject, detail=EXCLUDED.detail, evidence=EXCLUDED.evidence,
             severity=EXCLUDED.severity, status=EXCLUDED.status, last_seen_at=now();
         """)
+    # NOTE: kind is a CHECK-constrained enum (fact|decision|finding|correction|proposal),
+    # NOT a free-text slot — check_id lives in fingerprint ('auditor_'+check_id), recoverable.
 
 
 def resolve_stale(seen_check_ids):
@@ -658,7 +660,7 @@ git commit -m "feat(auditor): orchestrator with error isolation + dry-run"
 
 **Interfaces:**
 - Consumes: `Finding`, `lib/claude_call.py` (`claude_messages(body, *, max_retries=8)`), `psql`.
-- Produces: `plain_digest(findings) -> str` (deterministic, severity-sorted HTML); `build_digest(findings) -> str` (tries `claude_call`, falls back to `plain_digest`; persists to `cognition.agent_findings` as `kind='digest'`).
+- Produces: `plain_digest(findings) -> str` (deterministic, severity-sorted HTML); `build_digest(findings) -> str` (tries `claude_call`, falls back to `plain_digest`; persists to `cognition.agent_findings` as `kind='finding'` with `fingerprint='auditor_digest'` — `kind` is CHECK-constrained, so the digest is identified by its fingerprint, not by `kind`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -717,10 +719,11 @@ def build_digest(findings) -> str:
     except Exception:
         pass  # deterministic fallback already in `body`
     q = body.replace("'", "''")
+    # kind='finding' (CHECK-constrained enum); the digest is identified by fingerprint='auditor_digest'.
     psql(f"""INSERT INTO cognition.agent_findings
              (agent, kind, subject, detail, verified, realm, severity, status, fingerprint, created_at, last_seen_at)
-             VALUES ('system-auditor','digest','Daily audit digest','{q}',true,'owner','info','firing','auditor_digest',now(),now())
-             ON CONFLICT (fingerprint) DO UPDATE SET detail=EXCLUDED.detail, last_seen_at=now();""")
+             VALUES ('system-auditor','finding','Daily audit digest','{q}',true,'owner','info','firing','auditor_digest',now(),now())
+             ON CONFLICT (fingerprint) WHERE fingerprint IS NOT NULL DO UPDATE SET detail=EXCLUDED.detail, last_seen_at=now();""")
     return body
 ```
 
@@ -814,7 +817,7 @@ In `scripts/u109-daily-reality.py` `main()` (after `conn` is opened, before the 
         "and last_seen_at > now() - interval '20 hours'")
     audit_n = await conn.fetchval(
         "select count(*) from cognition.agent_findings where agent='system-auditor' "
-        "and status='firing' and kind<>'digest'")
+        "and status='firing' and fingerprint<>'auditor_digest'")
     out.append(section('System audit', audit_n,
                        audit or '<p style="color:#888">No fresh audit data (auditor did not run).</p>'))
 ```
