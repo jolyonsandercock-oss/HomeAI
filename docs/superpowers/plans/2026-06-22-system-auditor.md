@@ -570,7 +570,7 @@ git commit -m "feat(auditor): best-effort realm/GUC/n8n-cron checks"
 - Consumes: `INTEGRITY_CHECKS`, `ARCHITECTURE_CHECKS`, `persist`, `resolve_stale`, `Finding`, `psql`.
 - Produces: `run(write:bool, llm:bool) -> list[Finding]`; CLI flags `--no-write`, `--no-llm`. Records `ops.record_pipeline_run('system_auditor', ...)`. Emits a stdout heartbeat.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/auditor/test_07_orchestrator.py
@@ -592,12 +592,12 @@ def test_one_bad_check_does_not_abort():
     assert any(f.check_id == 'boom' and f.severity == 'fail' for f in findings)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/auditor/test_07_orchestrator.py -v`
 Expected: FAIL (file missing).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 #!/usr/bin/env python3
@@ -646,12 +646,12 @@ if __name__ == '__main__':
 
 > **Implementer note:** run from repo root so `scripts.auditor.*` imports resolve (`cd /home_ai && python3 -m scripts.u-system-auditor` or add repo root to `sys.path`). Confirm `ops.record_pipeline_run` arg order from V269 before wiring (Task 4 note pattern).
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest tests/auditor/test_07_orchestrator.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/u-system-auditor.py tests/auditor/test_07_orchestrator.py
