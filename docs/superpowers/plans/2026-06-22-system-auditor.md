@@ -393,7 +393,7 @@ git commit -m "feat(auditor): integrity checks"
 - Consumes: `Finding`, `psql`, `psql_scalar`; host `git`, `audit-invariants.py`, `crontab`.
 - Produces: `ARCHITECTURE_CHECKS: list[callable]`. Check ids: `invariants, taxonomy_vocabulary, untracked_load_bearing`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/auditor/test_05_architecture.py
@@ -407,12 +407,12 @@ def test_all_return_findings():
         assert f.lens == 'architecture' and f.severity in ('ok','info','warn','fail')
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/auditor/test_05_architecture.py -v`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # scripts/auditor/checks_architecture.py
@@ -460,12 +460,12 @@ def check_untracked_load_bearing():
 ARCHITECTURE_CHECKS = [check_invariants, check_taxonomy_vocabulary, check_untracked_load_bearing]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest tests/auditor/test_05_architecture.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/auditor/checks_architecture.py tests/auditor/test_05_architecture.py
