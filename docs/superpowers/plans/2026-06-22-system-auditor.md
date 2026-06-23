@@ -670,7 +670,7 @@ git commit -m "feat(auditor): orchestrator with error isolation + dry-run"
 - Consumes: `Finding`, `lib/claude_call.py` (`claude_messages(body, *, max_retries=8)`), `psql`.
 - Produces: `plain_digest(findings) -> str` (deterministic, severity-sorted HTML); `build_digest(findings) -> str` (tries `claude_call`, falls back to `plain_digest`; persists to `cognition.agent_findings` as `kind='finding'` with `fingerprint='auditor_digest'` — `kind` is CHECK-constrained, so the digest is identified by its fingerprint, not by `kind`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/auditor/test_08_digest.py
@@ -685,12 +685,12 @@ def test_plain_digest_sorted_and_safe():
     assert '<' in out  # html
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/auditor/test_08_digest.py -v`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```python
 # scripts/auditor/digest.py
@@ -735,12 +735,14 @@ def build_digest(findings) -> str:
     return body
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+> **Implementer note (2026-06-23):** the plan's draft test indexed `'OK thing'`, but `plain_digest` deliberately excludes `ok`-severity findings (the all-green branch proves intent), so the ok finding is never in the output. Test corrected to assert fail-before-warn ordering + `'OK thing' not in out`, plus an all-green case. Implementation kept as drafted. `claude_messages` returns `model_dump()` (plain dict) so `resp["content"][0]["text"]` is correct; INSERT/ON CONFLICT verified against the V276 partial index in a rolled-back txn.
+
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest tests/auditor/test_08_digest.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/auditor/digest.py tests/auditor/test_08_digest.py
