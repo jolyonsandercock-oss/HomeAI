@@ -45,4 +45,40 @@ def check_untracked_load_bearing():
                    str(len(missing)))
 
 
+def check_realm_coverage():
+    # Best-effort v1: count rows with NULL realm in the canonical realm-scoped tables.
+    nulls = int(psql_scalar("""select coalesce(sum(c),0) from (
+                  select count(*) c from vendor_invoice_inbox where realm is null
+                  union all select count(*) from bank_transactions where realm is null) x""") or 0)
+    return Finding('realm_coverage', 'architecture', 'warn' if nulls else 'ok',
+                   'Realm coverage', f'{nulls} row(s) missing realm in invoice/bank tables', str(nulls))
+
+
+def check_guc_drift():
+    # The SET-ROLE-drops-GUC-defaults gotcha: the entity GUC default must exist on the role.
+    n = int(psql_scalar("""select count(*) from pg_db_role_setting s
+                           join pg_roles r on r.oid=s.setrole
+                           where r.rolname='hermes_ro'
+                             and array_to_string(s.setconfig,',') ~ 'app.current_entity'""") or 0)
+    return Finding('guc_drift', 'architecture', 'warn' if n == 0 else 'ok',
+                   'RLS GUC defaults', 'hermes_ro entity GUC default present' if n else
+                   'hermes_ro missing app.current_entity default (RLS may return 0 rows)', str(n))
+
+
+def check_n8n_cron_reconciliation():
+    # Meta-risk: runners (n8n active + cron) with no pipeline_registry entry.
+    try:
+        reg = int(psql_scalar("select count(*) from ops.pipeline_registry where enabled") or 0)
+        runs = int(psql_scalar("select count(*) from ops.pipeline_runs where finished_at > now()-interval '48 hours'") or 0)
+    except RuntimeError:
+        return Finding('n8n_cron_reconciliation', 'architecture', 'info',
+                       'n8n/cron reconciliation', 'pipeline registry unavailable', 'n/a')
+    gap = reg == 0
+    return Finding('n8n_cron_reconciliation', 'architecture', 'warn' if gap else 'info',
+                   'n8n/cron reconciliation',
+                   f'{reg} registered pipelines, {runs} runs in 48h'
+                   + (' — registry EMPTY (drift unmeasured)' if gap else ''), f'{reg}/{runs}')
+
+
 ARCHITECTURE_CHECKS = [check_invariants, check_taxonomy_vocabulary, check_untracked_load_bearing]
+ARCHITECTURE_CHECKS += [check_realm_coverage, check_guc_drift, check_n8n_cron_reconciliation]

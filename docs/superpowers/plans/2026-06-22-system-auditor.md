@@ -483,7 +483,7 @@ git commit -m "feat(auditor): architecture checks (invariants, taxonomy, untrack
 **Interfaces:**
 - Produces: appends `realm_coverage, guc_drift, n8n_cron_reconciliation` to `ARCHITECTURE_CHECKS`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/auditor/test_06_hard_checks.py
@@ -494,12 +494,12 @@ def test_hard_checks_present_and_safe():
     assert {'realm_coverage', 'guc_drift', 'n8n_cron_reconciliation'} <= ids
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/auditor/test_06_hard_checks.py -v`
 Expected: FAIL (ids absent).
 
-- [ ] **Step 3: Write the implementation** (append to `checks_architecture.py`)
+- [x] **Step 3: Write the implementation** (append to `checks_architecture.py`)
 
 ```python
 def check_realm_coverage():
@@ -540,14 +540,18 @@ def check_n8n_cron_reconciliation():
 ARCHITECTURE_CHECKS += [check_realm_coverage, check_guc_drift, check_n8n_cron_reconciliation]
 ```
 
-> **Implementer note:** confirm `ops.pipeline_registry`/`ops.pipeline_runs` column names and the `hermes_ro` role name before running; each check already degrades to `info` if objects are absent.
+> **Implementer note (RESOLVED 2026-06-23 against live DB):**
+> - `vendor_invoice_inbox.realm` + `bank_transactions.realm` both exist; 0 NULLs → `realm_coverage` = ok.
+> - `hermes_ro` role exists with an `app.current_entity` GUC default → `guc_drift` = ok.
+> - `ops.pipeline_registry` (cols incl. `enabled`) + `ops.pipeline_runs` (cols incl. `finished_at`,`status`) both exist and are **populated: 22 enabled pipelines, 58 runs in 48h** → `n8n_cron_reconciliation` = info (NOT the empty-registry warn the meta-risk anticipated; the "0-row registry" condition no longer holds).
+> - Test reconciliation: Task 6 appends to the same `ARCHITECTURE_CHECKS` list, so Task 5's test was relaxed from `==` to subset (`<=`); both files now assert presence, not exact membership.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m pytest tests/auditor/test_06_hard_checks.py tests/auditor/test_05_architecture.py -v`
 Expected: PASS (both files).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/auditor/checks_architecture.py tests/auditor/test_06_hard_checks.py
