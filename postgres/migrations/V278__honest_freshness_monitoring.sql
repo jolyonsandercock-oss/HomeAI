@@ -32,3 +32,7 @@ UPDATE ops.pipeline_registry
 UPDATE ops.pipeline_registry SET freshness_sla_hours = 720  WHERE name = 'natwest_inbox_sweep';  -- 30d
 UPDATE ops.pipeline_registry SET freshness_sla_hours = 720  WHERE name = 'dojo_inbox_sweep';     -- 30d
 UPDATE ops.pipeline_registry SET freshness_sla_hours = 1080 WHERE name = 'bank_transactions_any';-- 45d (monthly statements)
+
+-- invoice line extraction runs DAILY (07:40), so a 6h SLA (inherited from u125's hourly
+-- cadence) always trips by evening. 30h = daily + buffer.
+UPDATE ops.pipeline_registry SET freshness_sla_hours = 30 WHERE name = 'invoice_pdf_attach_fetch';
