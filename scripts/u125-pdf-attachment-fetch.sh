@@ -19,7 +19,7 @@ set -uo pipefail
 VAULT_TOKEN=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 mkdir -p /home_ai/data/invoice-pdfs
 
-docker exec -i -e VAULT_TOKEN="$VAULT_TOKEN" -e BATCH="${BATCH:-100}" homeai-bot-responder python3 -u <<'PYEOF'
+docker exec -i -e VAULT_TOKEN="$VAULT_TOKEN" -e BATCH="${BATCH:-100}" homeai-playwright python3 -u <<'PYEOF'
 import os, json, asyncio, base64, urllib.request, urllib.error
 import asyncpg
 
@@ -57,9 +57,12 @@ async def fetch_attachment(account, message_id, attachment_id):
             f"http://google-fetch:8011/attachment/{account}/{message_id}/{attachment_id}",
             timeout=30)
         body = json.loads(r.read())
-        # Gmail base64-url-encodes the body
-        return base64.urlsafe_b64decode(body["data"] + "==")
-    except Exception:
+        # google-fetch returns URL-safe base64 in 'data_b64url' (NOT 'data' — the old
+        # key broke every fetch silently from ~2026-06-11 when the endpoint changed).
+        b = body["data_b64url"]
+        return base64.urlsafe_b64decode(b + "=" * (-len(b) % 4))
+    except Exception as e:
+        print(f"  fetch_attachment error: {type(e).__name__} {str(e)[:80]}")
         return None
 
 
@@ -73,6 +76,9 @@ async def main():
           FROM vendor_invoice_inbox
          WHERE status = 'new'
            AND (NOT has_pdf OR pdf_local_path IS NULL)
+           AND COALESCE(extraction_method,'') NOT IN
+               ('no-pdf-attached','non-pdf-attached','message-deleted-on-gmail')  -- skip already-classed-unfetchable
+           AND pdf_fetch_error IS NULL        -- skip rows that already errored (revisit separately)
            AND source_email_id IS NOT NULL
            AND account IS NOT NULL
            AND account IN ('jo','bot','pounana','admin','info')
@@ -117,6 +123,9 @@ async def main():
         body = await fetch_attachment(acct, msg_id, pdf["attachment_id"])
         if not body:
             stats["fetch_failed"] += 1
+            await conn.execute(
+                "UPDATE vendor_invoice_inbox SET pdf_fetch_error='attachment-fetch-empty' WHERE id=$1",
+                inv_id)
             await asyncio.sleep(0.5)
             continue
         pdf_path = f"{PDF_DIR}/{inv_id}.pdf"
