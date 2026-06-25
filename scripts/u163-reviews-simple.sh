@@ -62,3 +62,7 @@ echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Run complete" >> "$LOG"
 # u278 (2026-06-11): Google Business Profile reviews — parsed from notification
 # emails by a python companion (HTML-safe). Same 3-hourly cadence.
 docker exec -i homeai-bot-responder python3 - < /home_ai/scripts/u278-google-reviews.py >> "$LOG" 2>&1
+
+# u279 (2026-06-25): Expedia review notifications — placeholder per notification
+# (Expedia email is notification-only; full review lives in Partner Central).
+docker exec -i homeai-bot-responder python3 - < /home_ai/scripts/u279-expedia-reviews.py >> "$LOG" 2>&1

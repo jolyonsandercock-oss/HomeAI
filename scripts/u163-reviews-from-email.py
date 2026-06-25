@@ -33,7 +33,10 @@ ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 DAYS_BACK         = int(os.environ.get("DAYS_BACK", "180"))
 
 GMAIL_QUERIES = [
-    # (account, query, source_hint)
+    # (account, query, source_hint) — hint, when set, deterministically tags the source.
+    # Expedia first so its hint wins over the generic "new review" admin query below
+    # ("You have a new review" also matches that generic query).
+    ("admin",   'newer_than:{d}d from:noreply@expediapartnercentral.com subject:"You have a new review"', "expedia"),
     ("admin",   'newer_than:{d}d (subject:"left a review" OR subject:"new review")',     None),
     ("info",    'newer_than:{d}d (from:tripadvisor.com OR from:tripadvisor.co.uk)',      "tripadvisor"),
     ("pounana", 'newer_than:{d}d (from:tripadvisor.com OR from:tripadvisor.co.uk)',      "tripadvisor"),
@@ -83,7 +86,7 @@ Body (first 3000 chars):
 
 Extract JSON with these fields (use null when unknown):
 {{
-  "source": "tripadvisor" | "google",
+  "source": "tripadvisor" | "google" | "expedia",
   "location": "malthouse" | "sandwich" | null,
   "reviewer_name": string | null,
   "rating": integer 1-5 | null,
@@ -135,19 +138,32 @@ Return ONLY the JSON, no preamble.
         return None
 
 
-async def upsert_review(conn, msg_id: str, account: str, extracted: dict, raw_subject: str):
-    if not extracted or not extracted.get("is_review_notification"):
+async def upsert_review(conn, msg_id: str, account: str, extracted: dict, raw_subject: str, source_hint=None):
+    extracted = extracted or {}
+    # A source_hint means we matched via an explicit per-source query, so trust it's a
+    # review notification even if Haiku was unsure (Expedia mail is CSS-heavy, hard to parse).
+    if not source_hint and not extracted.get("is_review_notification"):
         return "skip"
-    source = extracted.get("source")
-    if source not in ("tripadvisor", "google"):
+    source = source_hint or extracted.get("source")
+    if source not in ("tripadvisor", "google", "expedia"):
         return "skip_source"
     location = extracted.get("location") or "malthouse"
     if location not in ("malthouse", "sandwich"):
         location = "malthouse"
 
-    # review_id = stable hash of (source + reviewer + subject) so dedupe works
-    seed = f"{source}|{extracted.get('reviewer_name','?')}|{raw_subject[:80]}"
+    # review_id = stable hash. Expedia's subject is ALWAYS "You have a new review", so
+    # include msg_id for expedia to avoid same-subject collisions. Keep the original seed
+    # for other sources so their existing dedup keys (and rows) are unchanged.
+    if source == "expedia":
+        seed = f"expedia|{msg_id}|{extracted.get('reviewer_name','?')}|{raw_subject[:80]}"
+    else:
+        seed = f"{source}|{extracted.get('reviewer_name','?')}|{raw_subject[:80]}"
     review_id = hashlib.sha1(seed.encode()).hexdigest()[:32]
+
+    # Never silently drop an Expedia review if Haiku couldn't extract the body.
+    body_val = extracted.get("body_text")
+    if source == "expedia" and not body_val:
+        body_val = "Expedia review notification — open Partner Central to view details"
 
     await conn.execute("SET app.current_entity = 'all'")
     await conn.execute("SELECT home_ai.set_realm('work')")
@@ -161,7 +177,7 @@ async def upsert_review(conn, msg_id: str, account: str, extracted: dict, raw_su
              body   = COALESCE(EXCLUDED.body, guest_reviews.body),
              scraped_at = NOW()""",
         review_id, source, location, extracted.get("rating"),
-        extracted.get("reviewer_name"), extracted.get("body_text"),
+        extracted.get("reviewer_name"), body_val,
         extracted.get("review_url"),
         json.dumps({"gmail_msg_id": msg_id, "account": account,
                     "subject": raw_subject, "extracted": extracted})
@@ -216,7 +232,7 @@ async def main():
                 summary["errors"] += 1
                 continue
 
-            outcome = await upsert_review(conn, mid, account, extracted, body["subject"])
+            outcome = await upsert_review(conn, mid, account, extracted, body["subject"], source_hint)
             summary[outcome] = summary.get(outcome, 0) + 1
             print(f"  {mid}  {body['subject'][:70]} → {outcome}")
 
