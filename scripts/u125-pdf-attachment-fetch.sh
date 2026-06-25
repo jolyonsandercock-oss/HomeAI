@@ -136,13 +136,9 @@ async def main():
                SET has_pdf=true, pdf_local_path=$2
              WHERE id=$1
         """, inv_id, pdf_path)
-        # Also seed email_attachments row so we don't double-fetch
-        await conn.execute("""
-            INSERT INTO email_attachments
-              (email_id, filename, mime_type, processed, realm)
-            VALUES ($1, $2, $3, true, 'work')
-            ON CONFLICT DO NOTHING
-        """, msg_id, pdf.get("filename"), pdf.get("mime_type"))
+        # (removed a broken email_attachments INSERT here: it bound the gmail message-id
+        #  string into the integer email_id column — pre-existing bug. The has_pdf flag
+        #  already prevents re-fetch via the candidate query, so the row was redundant.)
         stats["pdf_saved"] += 1
         if (i + 1) % 25 == 0:
             print(f"  progress: {i+1}/{len(rows)}  saved={stats['pdf_saved']}  "
