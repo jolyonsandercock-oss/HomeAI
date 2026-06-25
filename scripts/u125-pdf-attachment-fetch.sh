@@ -133,7 +133,7 @@ async def main():
             f.write(body)
         await conn.execute("""
             UPDATE vendor_invoice_inbox
-               SET has_pdf=true, pdf_local_path=$2
+               SET has_pdf=true, pdf_local_path=$2, pdf_fetched_at=now()
              WHERE id=$1
         """, inv_id, pdf_path)
         # (removed a broken email_attachments INSERT here: it bound the gmail message-id
