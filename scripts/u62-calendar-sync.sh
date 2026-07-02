@@ -11,8 +11,10 @@ WINDOW_PAST_DAYS="${WINDOW_PAST_DAYS:-30}"
 WINDOW_FUTURE_DAYS="${WINDOW_FUTURE_DAYS:-180}"
 
 # Map account → realm. (Matches the U9 google identity layout.)
+# NOTE: 'family' is a dead realm value since the V164/V165 FAMILY→PERSONAL
+# pivot (2026-05-19) — calendar_events_realm_check no longer permits it.
 declare -A ACCT_REALM=(
-    [jo]=family
+    [jo]=personal
     [admin]=work
     [info]=work
     [pounana]=work
@@ -33,7 +35,9 @@ VAULT_TOKEN = os.environ["VAULT_TOKEN"]
 WINDOW_PAST   = int(os.environ.get("WINDOW_PAST_DAYS",   30))
 WINDOW_FUTURE = int(os.environ.get("WINDOW_FUTURE_DAYS", 180))
 
-ACCT_REALM = {"jo":"family","admin":"work","info":"work","pounana":"work","bot":"owner"}
+# 'family' retired by the V164/V165 realm pivot (2026-05-19) — calendar_events_realm_check
+# only accepts owner/work/personal/shared now. jo's personal Google Calendar -> 'personal'.
+ACCT_REALM = {"jo":"personal","admin":"work","info":"work","pounana":"work","bot":"owner"}
 
 async def vault_read(client, path):
     r = await client.get(f"{VAULT_ADDR}/v1/secret/data/{path}",
@@ -151,7 +155,7 @@ async def main():
             events = await fetch_calendar(client, acct, tok)
             n_ok = 0
             for ev in events:
-                if await upsert(conn, acct, ACCT_REALM.get(acct, "family"), ev):
+                if await upsert(conn, acct, ACCT_REALM.get(acct, "personal"), ev):
                     n_ok += 1
             print(f"  [{acct}] {n_ok} events upserted (window -{WINDOW_PAST}d..+{WINDOW_FUTURE}d)")
 
