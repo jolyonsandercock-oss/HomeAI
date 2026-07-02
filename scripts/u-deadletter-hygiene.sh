@@ -53,7 +53,7 @@ WITH reaped AS (
   RETURNING 1)
 SELECT count(*) FROM reaped;
 -- 4. pipeline_runs retention (heartbeats are high-volume now)
-DELETE FROM ops.pipeline_runs WHERE finished_at < now() - interval '30 days';
+DELETE FROM ops.pipeline_runs WHERE finished_at < now() - interval '45 days';
 SQL
 )"
 echo "deadletter-hygiene: phantom-resolved=$PHANTOM re-driven=$REDRIVEN reaped=$REAPED"

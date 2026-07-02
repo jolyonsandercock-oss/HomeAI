@@ -47,7 +47,14 @@ def main():
         if not mlog:
             continue
         logpath = mlog.group(1)
-        mscript = re.search(r"([\w.-]+\.(?:sh|py))", line)
+        # Jobs wrapped by ops-run.sh (crontab rewrite, ~55 jobs) look like:
+        #   ... bash scripts/ops-run.sh <name> -- <real command> ...
+        # Derive the job name from the REAL command after `--`, not the
+        # wrapper script itself, so per-job fingerprints keep refreshing
+        # instead of every wrapped job collapsing onto "ops_run_sh".
+        wrapped = re.search(r"ops-run\.sh\s+\S+\s+--\s+(.*)$", line)
+        search_in = wrapped.group(1) if wrapped else line
+        mscript = re.search(r"([\w.-]+\.(?:sh|py))", search_in)
         job = mscript.group(1) if mscript else os.path.basename(logpath)
         if SKIP.search(job):
             continue
@@ -61,10 +68,16 @@ def main():
         else:
             ok.append(job)
 
+    db_error = False
+
     def psql(sql):
-        subprocess.run(["docker", "exec", "-i", "homeai-postgres", "psql", "-U", "postgres",
-                        "-d", "homeai", "-v", "ON_ERROR_STOP=1", "-c", sql],
-                       capture_output=True, text=True)
+        nonlocal db_error
+        r = subprocess.run(["docker", "exec", "-i", "homeai-postgres", "psql", "-U", "postgres",
+                            "-d", "homeai", "-v", "ON_ERROR_STOP=1", "-c", sql],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            db_error = True
+            print(f"  DB ERROR: {r.stderr.strip()}", file=sys.stderr)
 
     # Raise/refresh stale alerts (stable fingerprint per job -> dedups + auto-resolves)
     for job, why, _ in stale:
@@ -88,7 +101,12 @@ def main():
     print(f"cron-health: {len(ok)} fresh, {len(stale)} stale")
     for job, why, _ in stale:
         print(f"  STALE {job}: {why}")
-    sys.exit(1 if stale else 0)
+    # Stale jobs are reported via system_alerts (the signal), not the process
+    # exit code — otherwise this reporter's own ops-run heartbeat records
+    # status='failed' whenever ANY other job is stale, conflating "reporter
+    # ran fine" with "something else it found is stale". Only fail loudly for
+    # genuine internal errors (e.g. the DB was unreachable to record alerts).
+    sys.exit(1 if db_error else 0)
 
 
 if __name__ == "__main__":
