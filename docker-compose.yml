@@ -534,37 +534,6 @@ services:
       - vault
     restart: unless-stopped
 
-  garmin-service:
-    build: ./services/garmin
-    container_name: homeai-garmin
-    networks: [ai-internal, ai-services]
-    environment:
-      VAULT_ADDR: "http://vault:8200"
-      VAULT_TOKEN: "${VAULT_SERVICES_TOKEN}"
-    ports: ["8002:8002"]
-    profiles: ["phase2"]
-    restart: unless-stopped
-
-  markitdown-service:
-    build: ./services/markitdown
-    container_name: homeai-markitdown
-    networks: [ai-internal]
-    ports: ["8006:8006"]
-    profiles: ["phase3"]
-    restart: unless-stopped
-
-  vault-mcp:
-    build: ./services/vault-mcp
-    container_name: homeai-vault-mcp
-    networks: [ai-internal, ai-services]
-    volumes:
-      - /mnt/ssd/obsidian-vault:/vault:ro
-    environment:
-      VAULT_PATH: "/vault"
-    ports: ["8007:8007"]
-    profiles: ["phase3"]
-    restart: unless-stopped
-
   # homeai-playwright — browser-scraping service (U27 P5/P6).
   # ai-internal for vault; ai-egress for touchoffice.net + app.caterbook.net.
   # n8n hits the scrape endpoints via HTTP Request node on ai-internal.

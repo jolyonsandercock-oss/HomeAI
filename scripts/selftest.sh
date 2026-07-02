@@ -48,9 +48,10 @@ running() { docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null | command gre
 # Full-fleet coverage (was 11 hard-coded containers; a service could be down
 # and unmonitored just by not being on that list). Derive the container_name
 # list straight from compose so new services are covered automatically.
-# garmin-service/vault-mcp are compose-defined but never built/created (dead
-# config, not a live outage) — skip explicitly rather than false-FAIL every
-# run. Do NOT remove their compose stanzas here; that's separate hygiene work.
+# garmin-service/vault-mcp compose stanzas (dead config, never built/created)
+# were removed in the R5 hygiene sweep (2026-07-02), so this skip-list is now
+# a no-op safety net rather than a live workaround — left in place in case a
+# stale stanza reappears; safe to delete once confirmed no longer needed.
 SKIP_CONTAINERS='homeai-garmin|homeai-vault-mcp'
 for c in $(grep -oE 'container_name: (homeai-[a-z0-9-]+)' /home_ai/docker-compose.yml | awk '{print $2}' | sort -u); do
   [[ "$c" =~ ^($SKIP_CONTAINERS)$ ]] && continue
