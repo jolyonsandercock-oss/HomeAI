@@ -20,6 +20,7 @@ wa-bridge 8770
 homeai-mcp 8765
 paperless 8011
 ollama 11434
+build-dashboard 8090
 MAP
 # Caddy (80/443/5678/3000) is u273's job.
 
@@ -30,7 +31,7 @@ for port in "${!OWNER[@]}"; do
 done
 if [ "${#DEAD[@]}" -eq 0 ]; then echo "all publishes alive"; exit 0; fi
 echo "dead publishes -> recreating: ${DEAD[*]}"
-bash /home_ai/scripts/recreate-with-secrets.sh "${DEAD[@]}"
+bash /home_ai/scripts/recreate-with-secrets.sh "${DEAD[@]}" || echo "WARN: recreate returned $? — continuing to post-heal verification"
 sleep 15
 for port in "${!OWNER[@]}"; do
   code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://100.104.82.53:${port}/") || code=000
