@@ -58,3 +58,14 @@ template {
   {{ with secret "secret/data/telegram" }}{{ .Data.data.bot_token }}{{ end }}
   EOT
 }
+
+// DeepSeek API key (TD-007: routes Hermes's deepseek egress through the
+// LiteLLM gateway so it gets Presidio redaction + ai_usage logging instead
+// of hitting api.deepseek.com directly).
+template {
+  destination = "/run/secrets/deepseek-api-key"
+  perms       = 0444
+  contents    = <<-EOT
+  {{ with secret "secret/data/deepseek" }}{{ .Data.data.api_key }}{{ end }}
+  EOT
+}

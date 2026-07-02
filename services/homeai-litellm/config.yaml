@@ -76,6 +76,18 @@ model_list:
       api_key: os.environ/ANTHROPIC_API_KEY
       max_tokens: 1024
 
+  # ---- DeepSeek (TD-007) — Hermes egress via this gateway instead of a ----
+  # ---- direct api.deepseek.com call, so it gets Presidio + ai_usage. -----
+  # Wire model matches ~/.hermes/config.yaml's fallback_providers deepseek
+  # entry (deepseek-v4-pro is a first-class DeepSeek V4 model ID, not an
+  # alias — see hermes-agent/plugins/model-providers/deepseek/__init__.py).
+  - model_name: deepseek-v4-pro
+    litellm_params:
+      model: deepseek/deepseek-v4-pro
+      api_base: https://api.deepseek.com/v1
+      api_key: os.environ/DEEPSEEK_API_KEY
+      max_tokens: 4096
+
   # ---- Local multimodal (W7800/ROCm via Ollama) — added 2026-06-19 ----
   # Gemma 4 QAT 31B, Unsloth dynamic UD-Q4_K_XL. Local = no secret/api_key.
   # NOTE: the global presidio_gate callback still applies to this entry; for
@@ -95,7 +107,13 @@ litellm_settings:
   drop_params: true
   # Pre/post hooks — see proxy_config.py. Path must resolve to an INSTANCE,
   # not a class (LiteLLM uses pyimport(module.attr), not class instantiation).
-  callbacks: proxy_config.presidio_gate_instance
+  # NOTE (found 2026-07-03 while verifying TD-007): ai_usage_logger_instance
+  # was defined in proxy_config.py but never listed here, so NO route
+  # (including the pre-existing Anthropic ones) was writing to ai_usage.
+  # Fixed by making this a list.
+  callbacks:
+    - proxy_config.presidio_gate_instance
+    - proxy_config.ai_usage_logger_instance
 
 # General proxy settings
 general_settings:
