@@ -54,6 +54,7 @@
 50 6 * * * cd /home_ai && bash scripts/ops-run.sh invoice_harvester -- bash scripts/u95-harvest-cron.sh 3 >> /home_ai/logs/u95-harvest.log 2>&1
 7 16 * * * cd /home_ai && bash scripts/ops-run.sh rota_alert -- bash /home_ai/scripts/u280-rota-alert.sh >> /home_ai/logs/u280-rota-alert.log 2>&1
 @reboot bash /home_ai/scripts/u273-caddy-boot.sh >> /home_ai/logs/u273-caddy-boot.log 2>&1
+@reboot bash /home_ai/scripts/u273b-boot-recreate.sh >> /home_ai/logs/u273b-boot.log 2>&1
 */10 * * * * cd /home_ai && bash scripts/ops-run.sh resume_watchdog -- /home/joly/u250-resume-watchdog.sh
 10 7 * * * cd /home_ai && bash scripts/ops-run.sh invoice_date_sweep -- bash /home_ai/scripts/u-invoice-pdf-date-sweep.sh 26 >> /home_ai/logs/u-invoice-pdf-date-sweep.cron.log 2>&1
 40 7 * * * cd /home_ai && bash scripts/ops-run.sh invoice_line_sweep -- bash /home_ai/scripts/u-invoice-line-sweep.sh 2026 >> /home_ai/logs/u-invoice-line-sweep.cron.log 2>&1
