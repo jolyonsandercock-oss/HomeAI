@@ -26,33 +26,47 @@ repaired=(); skipped=(); EXCL='backup'
 HC=$(cat /home_ai/security/.hc-ping-url 2>/dev/null || true)
 hc(){ [ -n "$HC" ] && curl -fsS -m 10 "${HC}${1:-}" >/dev/null 2>&1 || true; }
 
-OUT=$(bash /home_ai/scripts/selftest.sh 2>&1); RC=$?
-
 # Deep probe: a wedged ollama answers /api/version but 503s generation for days
 # (2026-06-30..07-02 outage, undetected by selftest's [5] "ollama /api/version"
-# check because that endpoint stayed up throughout). Runs regardless of the
-# selftest RC above — that's the whole point, since a wedged ollama otherwise
-# looks like a clean pass. Only gated on basic liveness so we don't double-count
-# a fully-down container (selftest already catches that). 1-token probe against
-# the small already-loaded model, 60s budget: a slow-but-working ollama (cold
-# model load can take 30-60s) still returns 200 inside the budget and is NOT a
-# failure — only a hard failure (timeout/000 or 5xx) counts, so this can't
-# false-trigger the restart-loop cap below.
-if docker exec homeai-ollama ollama --version >/dev/null 2>&1; then
-  # NB: curl itself already writes '000' via -w on a hard connect failure (exit
-  # 28 etc); don't ALSO `|| echo 000` on top of that or a paused/unreachable
-  # ollama yields the concatenated junk value '000000' (verified live 2026-07-02
-  # pause test) — still non-"200" so detection still works, but the logged code
-  # is wrong. Default only the genuinely-empty case instead.
-  OLLAMA_GEN=$(curl -s -m 60 -o /dev/null -w '%{http_code}' http://127.0.0.1:11434/api/generate \
+# check because that endpoint stayed up throughout). 1-token probe against the
+# small already-loaded model, 60s budget: a slow-but-working ollama (cold model
+# load can take 30-60s) still returns 200 inside the budget and is NOT a
+# failure. Echoes the http code; empty output (curl couldn't even run) → 000.
+# NB: curl itself already writes '000' via -w on a hard connect failure (exit
+# 28 etc); don't `|| echo 000` on top of that or a paused/unreachable ollama
+# yields the concatenated junk value '000000' (verified live 2026-07-02 pause
+# test). Default only the genuinely-empty case instead.
+ollama_gen_probe(){
+  local code
+  code=$(curl -s -m 60 -o /dev/null -w '%{http_code}' http://127.0.0.1:11434/api/generate \
     -d '{"model":"qwen2.5:7b","prompt":"ok","stream":false,"options":{"num_predict":1}}' 2>/dev/null)
-  OLLAMA_GEN="${OLLAMA_GEN:-000}"
-  if [ "$OLLAMA_GEN" != "200" ]; then
-    OUT="${OUT}
+  echo "${code:-000}"
+}
+
+OUT=$(bash /home_ai/scripts/selftest.sh 2>&1); RC=$?
+
+# Run the deep probe regardless of the selftest RC above — that's the whole
+# point, since a wedged ollama otherwise looks like a clean pass. Only gated on
+# basic liveness so we don't double-count a fully-down container (selftest
+# already catches that). HARD failure = 000 (timeout/no connection) or 5xx
+# ONLY: that's the wedge signature. A 4xx (e.g. 404 model-not-found after a
+# model rename) means ollama is up and answering — restarting it can't fix
+# that, so it must NOT consume the 3/hr restart breaker; log it distinctly
+# for eyes instead.
+if docker exec homeai-ollama ollama --version >/dev/null 2>&1; then
+  OLLAMA_GEN=$(ollama_gen_probe)
+  case "$OLLAMA_GEN" in
+    200) : ;;
+    000|5??)
+      OUT="${OUT}
 FAILURES:
   - ollama: generate-probe failed (http $OLLAMA_GEN)"
-    RC=1
-  fi
+      RC=1
+      ;;
+    *)
+      echo "$(ts) WARN ollama generate-probe http $OLLAMA_GEN (non-repair: not a wedge; check model name/request)" >> "$LOG"
+      ;;
+  esac
 fi
 
 if [ "$RC" -eq 0 ]; then echo "$(ts) selftest OK" >> "$LOG"; hc; exit 0; fi
@@ -124,6 +138,21 @@ fi
 # ── re-check after repairs ──
 OUT2=$(bash /home_ai/scripts/selftest.sh 2>&1); RC2=$?
 FAILS2=$(printf '%s\n' "$OUT2" | sed -n '/^FAILURES:/,$p' | grep -E '^\s*- ' || true)
+# Re-run the deep generate-probe too: selftest alone can't see a generation-
+# level wedge (the 06-30..07-02 incident), so a docker-start "repair" that
+# brings the container back but leaves generation 503ing would otherwise pass
+# this re-check and exit 0 as healthy. Same hard-failure semantics as the
+# detection pass (000/5xx only); appended to FAILS2 so the CRIT filter below
+# applies its normal EXCL rules (paused/flapping ollama stays held, not paged).
+if docker exec homeai-ollama ollama --version >/dev/null 2>&1; then
+  OLLAMA_GEN2=$(ollama_gen_probe)
+  case "$OLLAMA_GEN2" in
+    000|5??)
+      FAILS2="${FAILS2:+$FAILS2
+}  - ollama: generate-probe still failing after repairs (http $OLLAMA_GEN2)"
+      ;;
+  esac
+fi
 # Known non-critical (won't page or trip the external DMS): stale nightly backup
 # (tracked separately — restic exits 3 on root-owned files). Everything else is
 # treated as a real failure.
