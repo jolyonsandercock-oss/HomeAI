@@ -68,3 +68,4 @@
 25 * * * * cd /home_ai && bash scripts/ops-run.sh deadletter_hygiene -- bash /home_ai/scripts/u-deadletter-hygiene.sh >> /home_ai/logs/deadletter-hygiene.log 2>&1
 40 8 * * * cd /home_ai && bash scripts/ops-run.sh revenue_recon -- bash /home_ai/scripts/u-revenue-recon-check.sh >> /home_ai/logs/revenue-recon.log 2>&1
 45 7 * * * cd /home_ai && bash scripts/ops-run.sh ops_digest -- bash scripts/u-ops-digest.sh >> /home_ai/logs/ops-digest.log 2>&1
+30 5 * * * cd /home_ai && bash scripts/ops-run.sh system_auditor -- env PYTHONPATH=/home_ai python3 scripts/u-system-auditor.py >> /home_ai/logs/system-auditor.log 2>&1
