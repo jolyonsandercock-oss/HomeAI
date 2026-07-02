@@ -18,7 +18,7 @@ VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println
 PW=$(docker exec -e VAULT_TOKEN="$VT" homeai-vault vault kv get -field=password secret/postgres 2>/dev/null)
 psqlc(){ docker exec -i -e PGPASSWORD="$PW" homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 -tAq "$@"; }
 
-read -r PHANTOM REDRIVEN <<<"$(psqlc <<'SQL' | tr '\n' ' '
+read -r PHANTOM REDRIVEN REAPED <<<"$(psqlc <<'SQL' | tr '\n' ' '
 SET app.current_entity='all'; SET app.current_realm='owner';
 -- 1. phantom-resolve: underlying event already processed
 WITH ph AS (
@@ -44,10 +44,20 @@ bump AS (
   WHERE id IN (SELECT id FROM rd)
   RETURNING 1)
 SELECT count(*) FROM bump;
+-- 3. stuck-processing reaper: claims stranded by restarts go back to pending
+WITH reaped AS (
+  UPDATE events SET status='pending', processing_started_at=NULL, processing_node_id=NULL,
+         retry_count=COALESCE(retry_count,0)+1
+  WHERE status='processing' AND processing_started_at < now() - interval '1 hour'
+    AND COALESCE(retry_count,0) < 3
+  RETURNING 1)
+SELECT count(*) FROM reaped;
+-- 4. pipeline_runs retention (heartbeats are high-volume now)
+DELETE FROM ops.pipeline_runs WHERE finished_at < now() - interval '30 days';
 SQL
 )"
-echo "deadletter-hygiene: phantom-resolved=$PHANTOM re-driven=$REDRIVEN"
-echo "OPS_ROWS=$((PHANTOM + REDRIVEN))"
+echo "deadletter-hygiene: phantom-resolved=$PHANTOM re-driven=$REDRIVEN reaped=$REAPED"
+echo "OPS_ROWS=$((PHANTOM + REDRIVEN + REAPED))"
 
 # heartbeat
 psqlc >/dev/null <<SQL
