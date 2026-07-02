@@ -45,17 +45,17 @@ echo "[1] Service health"
 check "docker daemon"       "docker ps -q | wc -l | tr -d ' '"
 # U226: docker inspect exits 0 even for exited containers; require state == running.
 running() { docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null | command grep -qx running && echo running; }
-check "homeai-postgres"     "running homeai-postgres"
-check "homeai-vault"        "running homeai-vault"
-check "homeai-n8n"          "running homeai-n8n"
-check "homeai-prometheus"   "running homeai-prometheus"
-check "homeai-alertmanager" "running homeai-alertmanager"
-check "homeai-grafana"      "running homeai-grafana"
-check "homeai-pdfplumber"   "running homeai-pdfplumber"
-check "homeai-markitdown"   "running homeai-markitdown"
-check "homeai-ollama"       "running homeai-ollama"
-check "homeai-blackbox-exporter" "running homeai-blackbox-exporter"
-check "homeai-build-dashboard"   "running homeai-build-dashboard"
+# Full-fleet coverage (was 11 hard-coded containers; a service could be down
+# and unmonitored just by not being on that list). Derive the container_name
+# list straight from compose so new services are covered automatically.
+# garmin-service/vault-mcp are compose-defined but never built/created (dead
+# config, not a live outage) — skip explicitly rather than false-FAIL every
+# run. Do NOT remove their compose stanzas here; that's separate hygiene work.
+SKIP_CONTAINERS='homeai-garmin|homeai-vault-mcp'
+for c in $(grep -oE 'container_name: (homeai-[a-z0-9-]+)' /home_ai/docker-compose.yml | awk '{print $2}' | sort -u); do
+  [[ "$c" =~ ^($SKIP_CONTAINERS)$ ]] && continue
+  check "$c" "running $c"
+done
 echo
 
 # ── Vault ──────────────────────────────────────────────────────

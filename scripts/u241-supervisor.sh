@@ -27,6 +27,34 @@ HC=$(cat /home_ai/security/.hc-ping-url 2>/dev/null || true)
 hc(){ [ -n "$HC" ] && curl -fsS -m 10 "${HC}${1:-}" >/dev/null 2>&1 || true; }
 
 OUT=$(bash /home_ai/scripts/selftest.sh 2>&1); RC=$?
+
+# Deep probe: a wedged ollama answers /api/version but 503s generation for days
+# (2026-06-30..07-02 outage, undetected by selftest's [5] "ollama /api/version"
+# check because that endpoint stayed up throughout). Runs regardless of the
+# selftest RC above — that's the whole point, since a wedged ollama otherwise
+# looks like a clean pass. Only gated on basic liveness so we don't double-count
+# a fully-down container (selftest already catches that). 1-token probe against
+# the small already-loaded model, 60s budget: a slow-but-working ollama (cold
+# model load can take 30-60s) still returns 200 inside the budget and is NOT a
+# failure — only a hard failure (timeout/000 or 5xx) counts, so this can't
+# false-trigger the restart-loop cap below.
+if docker exec homeai-ollama ollama --version >/dev/null 2>&1; then
+  # NB: curl itself already writes '000' via -w on a hard connect failure (exit
+  # 28 etc); don't ALSO `|| echo 000` on top of that or a paused/unreachable
+  # ollama yields the concatenated junk value '000000' (verified live 2026-07-02
+  # pause test) — still non-"200" so detection still works, but the logged code
+  # is wrong. Default only the genuinely-empty case instead.
+  OLLAMA_GEN=$(curl -s -m 60 -o /dev/null -w '%{http_code}' http://127.0.0.1:11434/api/generate \
+    -d '{"model":"qwen2.5:7b","prompt":"ok","stream":false,"options":{"num_predict":1}}' 2>/dev/null)
+  OLLAMA_GEN="${OLLAMA_GEN:-000}"
+  if [ "$OLLAMA_GEN" != "200" ]; then
+    OUT="${OUT}
+FAILURES:
+  - ollama: generate-probe failed (http $OLLAMA_GEN)"
+    RC=1
+  fi
+fi
+
 if [ "$RC" -eq 0 ]; then echo "$(ts) selftest OK" >> "$LOG"; hc; exit 0; fi
 FAILS=$(printf '%s\n' "$OUT" | sed -n '/^FAILURES:/,$p' | grep -E '^\s*- ' || true)
 
