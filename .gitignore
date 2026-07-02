@@ -22,6 +22,10 @@
 *.gpg
 /security/.vault-*
 
+# Encrypted credential-backup archive (n8n cred-*.bak etc.) — never commit,
+# even though the contents are openssl-encrypted. R5 hygiene sweep 2026-07-02.
+/security/cred-archive/
+
 # Service configs with bootstrapped live secrets — never commit.
 # Each file contains hex secret_key / encryption_key / jwt_secret values
 # generated at deployment. Rebuild from templates instead.
