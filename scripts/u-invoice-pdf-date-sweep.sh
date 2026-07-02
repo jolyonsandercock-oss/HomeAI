@@ -14,15 +14,18 @@
 #
 #   u-invoice-pdf-date-sweep.sh [hours]   # default 26h window (overlap-tolerant)
 set -euo pipefail
+echo "$(date -Is) u-invoice-pdf-date-sweep heartbeat (started)"  # liveness → cron log; emitted before the block so a failure inside it still leaves a heartbeat for cron-health
 SCRIPT=/home_ai/scripts/invoice-pdf-date-extract.py
 LOGDIR=/home_ai/logs; mkdir -p "$LOGDIR"; LOG="$LOGDIR/invoice-pdf-date-sweep.log"
 HOURS="${1:-26}"
 VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 {
   echo "=== $(date -Is) invoice PDF-date sweep (HOURS=$HOURS) ==="
+  # Capture the real exit code via && / || — under set -e, a plain command here
+  # would abort the brace group before the "done" line (or the exit below) ever ran.
   docker exec -i -e VAULT_TOKEN="$VT" -e MODE=apply -e IDS=recent -e HOURS="$HOURS" \
     -e OLLAMA_MODEL=gemma4-doc:latest -e PYTHONUNBUFFERED=1 \
-    homeai-bot-responder python3 < "$SCRIPT"
-  echo "=== $(date -Is) done (rc=$?) ==="
+    homeai-bot-responder python3 < "$SCRIPT" && rc=0 || rc=$?
+  echo "=== $(date -Is) done (rc=$rc) ==="
 } >> "$LOG" 2>&1
-echo "$(date -Is) u-invoice-pdf-date-sweep heartbeat"  # liveness → cron log (real work logged in $LOG)
+exit $rc

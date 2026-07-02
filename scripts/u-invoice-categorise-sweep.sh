@@ -16,7 +16,10 @@ VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println
 PG_PW=$(docker exec -e VAULT_TOKEN="$VT" homeai-vault vault kv get -field=password secret/postgres 2>/dev/null)
 {
 echo "=== $(date -Is) invoice categorise sweep ==="
-docker exec -i -e PGPASSWORD="$PG_PW" homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 <<'SQL'
+# Capture the real exit code via && / || on the heredoc's own command line —
+# under set -e, a plain heredoc invocation here would abort the brace group
+# before the "done" line (or the exit below) ever ran.
+docker exec -i -e PGPASSWORD="$PG_PW" homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 <<'SQL' && rc=0 || rc=$?
 UPDATE vendor_invoice_inbox v
 SET vendor_category = (
   SELECT r.category FROM vendor_category_rules r
@@ -34,5 +37,6 @@ FROM vendor_invoice_inbox WHERE category_canonical IS NULL AND is_statement=fals
   AND (invoice_date>=current_date-120 OR received_at>=current_date-120)
 GROUP BY 1 HAVING sum(COALESCE(net_amount,gross_amount,0))>1000 ORDER BY 3 DESC LIMIT 10;
 SQL
-echo "=== $(date -Is) done (rc=$?) ==="
+echo "=== $(date -Is) done (rc=$rc) ==="
 } >> "$LOG" 2>&1
+exit $rc

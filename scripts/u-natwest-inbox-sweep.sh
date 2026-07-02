@@ -27,7 +27,27 @@ mapfile -t CSVS < <(find "$INBOX" -name '*.csv' -not -path "$ARCHIVE/*" 2>/dev/n
 [ "${#CSVS[@]}" -eq 0 ] && { echo "$(date -Is) no new NatWest CSVs"; exit 0; }
 
 docker exec homeai-bot-responder mkdir -p "$CTR_DIR"
-for f in "${CSVS[@]}"; do docker cp "$f" "homeai-bot-responder:$CTR_DIR/$(basename "$f")" 2>/dev/null; done
+# Per-item degrade: a single failed docker cp must not abort the whole sweep
+# (set -e would otherwise kill the loop on the first bad file) — but a
+# skipped file must ALSO be excluded from the archive loop below, or it gets
+# moved to processed/ without ever having been imported (data loss). Track
+# successes/failures explicitly rather than reusing CSVS for both purposes.
+COPIED=(); SKIPPED=()
+for f in "${CSVS[@]}"; do
+  if docker cp "$f" "homeai-bot-responder:$CTR_DIR/$(basename "$f")" 2>/dev/null; then
+    COPIED+=("$f")
+  else
+    SKIPPED+=("$f")
+    echo "$(date -Is) WARN docker cp failed, leaving in inbox for retry: $f" >&2
+  fi
+done
+if [ "${#SKIPPED[@]}" -gt 0 ]; then
+  echo "$(date -Is) ${#SKIPPED[@]} file(s) failed docker cp — left in inbox for retry: ${SKIPPED[*]}"
+fi
+if [ "${#COPIED[@]}" -eq 0 ]; then
+  echo "$(date -Is) no CSVs successfully copied — nothing to import"
+  exit 1
+fi
 
 if docker exec -i -e PG_DSN="$PG_DSN" -e CSV_DIR="$CTR_DIR" homeai-bot-responder python <<'PYEOF'
 import asyncio, asyncpg, os, csv, glob, hashlib
@@ -84,7 +104,14 @@ else
 fi
 docker exec homeai-bot-responder rm -rf "$CTR_DIR" 2>/dev/null || true
 if [ "$rc" -eq 0 ]; then
-  for f in "${CSVS[@]}"; do mv "$f" "$ARCHIVE/$(date +%Y%m%d-%H%M%S)-$(basename "$f")" 2>/dev/null || true; done
-  echo "$(date -Is) archived ${#CSVS[@]} file(s) → $ARCHIVE"
+  # Archive only files that were actually copied in (and thus imported) —
+  # never CSVS, which may include files skipped above.
+  for f in "${COPIED[@]}"; do mv "$f" "$ARCHIVE/$(date +%Y%m%d-%H%M%S)-$(basename "$f")" 2>/dev/null || true; done
+  echo "$(date -Is) archived ${#COPIED[@]} file(s) → $ARCHIVE"
+fi
+# Surface partial cp failures as a degraded (nonzero) run even if the import
+# itself succeeded, so cron-health flags it instead of silently retrying forever.
+if [ "${#SKIPPED[@]}" -gt 0 ] && [ "$rc" -eq 0 ]; then
+  rc=1
 fi
 exit $rc

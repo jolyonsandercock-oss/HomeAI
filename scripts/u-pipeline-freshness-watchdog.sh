@@ -10,7 +10,10 @@ VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println
 PG_PW=$(docker exec -e VAULT_TOKEN="$VT" homeai-vault vault kv get -field=password secret/postgres 2>/dev/null)
 {
 echo "=== $(date -Is) pipeline freshness watchdog ==="
-docker exec -i -e PGPASSWORD="$PG_PW" homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 <<'SQL'
+# Capture the real exit code via && / || on the heredoc's own command line —
+# under set -e, a plain heredoc invocation here would abort the brace group
+# before the "done" line (or the exit below) ever ran.
+docker exec -i -e PGPASSWORD="$PG_PW" homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 <<'SQL' && rc=0 || rc=$?
 CREATE TEMP TABLE _fresh AS SELECT * FROM ops.check_freshness();
 -- raise for newly-stale (one open exception per pipeline)
 INSERT INTO mart.exceptions (severity, kind, source, transaction_date, summary, detail, status, realm)
@@ -27,5 +30,6 @@ WHERE e.kind='pipeline_stale' AND e.status='open'
   AND NOT EXISTS (SELECT 1 FROM _fresh f WHERE f.name=e.source AND f.status<>'ok');
 SELECT name, status, age_hours, sla_hours FROM _fresh WHERE status<>'ok' ORDER BY status, name;
 SQL
-echo "=== $(date -Is) done (rc=$?) ==="
+echo "=== $(date -Is) done (rc=$rc) ==="
 } >> "$LOG" 2>&1
+exit $rc

@@ -21,7 +21,10 @@ YEAR="${1:-2026}"
 VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 {
   echo "=== $(date -Is) invoice LINE sweep (YEAR=$YEAR) ==="
+  # Capture the real exit code via && / || — under set -e, a plain command here
+  # would abort the brace group before the "done" line (or the exit below) ever ran.
   docker exec -i -e VAULT_TOKEN="$VT" -e MODE=apply -e IDS=targets -e YEAR="$YEAR" -e LIMIT=600 \
-    -e OLLAMA_MODEL=gemma4-doc:latest homeai-bot-responder python3 < "$SCRIPT"
-  echo "=== $(date -Is) done (rc=$?) ==="
+    -e OLLAMA_MODEL=gemma4-doc:latest homeai-bot-responder python3 < "$SCRIPT" && rc=0 || rc=$?
+  echo "=== $(date -Is) done (rc=$rc) ==="
 } >> "$LOG" 2>&1
+exit $rc
