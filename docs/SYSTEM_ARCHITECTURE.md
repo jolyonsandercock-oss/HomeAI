@@ -24,7 +24,9 @@
   (0 runs — future monthly partitions at risk; July exists, check August)**.
 - `events` today: 11,188 processed · **0 pending** · 1,146 **failed** (822 `document.received`, newest
   2026-06-04 — the V250 attachment-quarantine residue, now in *failed* not *pending*; 55 `email.received`
-  failing today). The `ops.pipeline_runs` health registry exists but has **0 rows** (never wired).
+  failing today). **CORRECTED 2026-07-02:** the `ops.pipeline_runs` health registry is now live — 60+
+  pipelines registered with heartbeat wrapping via `ops-run.sh` (the earlier "0 rows, never wired" claim
+  is stale).
 
 When adding **scraped/pulled** ingestion, default to a cron sweep. The **event bus itself is n8n-run** —
 do not assume it's retired. Whether to migrate it off n8n is an open decision (see the brief above).
@@ -63,21 +65,24 @@ Canonical: **bar, kitchen, rooms, cafe, overhead**. Synonyms: bar=drink sales(+h
 
 ## 2. Data ingestion pipelines
 
+> See `docs/superpowers/plans/2026-07-02-r0-close-the-loop.md` (R0) for the current pipeline-health
+> close-the-loop work (registry + heartbeat wrapping) referenced in the corrections below.
+
 | Pipeline | Trigger | Target | Health |
 |---|---|---|---|
 | Gmail poll→events | n8n sched → google-fetch `/poll-and-emit` | `events` (email.received + document.received) | ✅ load-bearing |
 | Email classify→invoice.detected | gmail-ingest webhook | emails, events | ✅ (downstream quarantined) |
-| **Invoice harvester u95** | cron `50 6` | vendor_invoice_inbox | ❌ **BROKEN** (503/container down) |
+| **Invoice harvester u95** | cron `50 6` | vendor_invoice_inbox | ✅ **HEALTHY** (corrected 2026-07-02 — earlier "503/container down" was stale) |
 | **Invoice date sweep** (NEW) | cron `10 7` u-invoice-pdf-date-sweep | invoices.invoice_date | ✅ pdfplumber→gemma4-doc |
 | **Invoice line sweep** (NEW) | cron `40 7` u-invoice-line-sweep | vendor_invoice_lines | ✅ pdfplumber→qwen2.5:72b, dept from J&R codes |
 | PDF attach fetch u125 | cron `5 *` | data/invoice-pdfs + email_attachments | ✅ |
 | Data-lane router u33 | cron `*/5` | natwest-inbox / dojo-inbox / vendor_invoice_inbox | ✅ feeder |
-| NatWest CSV sweep | (none) | bank_transactions | ⚠️ **UNSCHEDULED** (code sound) |
+| NatWest CSV sweep | cron `25 7 * * *` u-natwest-inbox-sweep | bank_transactions | ✅ **scheduled** (corrected 2026-07-02 — earlier "unscheduled" was stale) |
 | Bank balance-chain rebuild (NEW) | manual `--apply` | bank_transactions | ✅ remediation tool |
 | Dojo sweep u135 | cron `15 7` | dojo_transactions | ⚠️ **STARVED** (no CSVs since ~06-15) |
 | TouchOffice realtime/daily | cron `*/15`, `30 3`, `13 4` u274 | touchoffice_* | ✅ |
 | Workforce/Tanda u29/u47 | cron `0 7`, `20 2` | workforce_* | ✅ |
-| Caterbook u28/u286 + P6 | cron `30 7`, `37 5` | accommodation_bookings | ✅ |
+| Caterbook u28/u286 + P6 | cron `30 7`, `37 5` | accommodation_bookings | ✅ (P6 was **dead 2026-06-14→2026-07-02**, repaired 2026-07-02 via three patches — now green) |
 | Clover u78 | manual | clover_batches | ⚠️ manual-only |
 | Cap-on-Tap / YouLend | — | — | ❌ not ingested (display-only) |
 
