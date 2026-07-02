@@ -131,6 +131,7 @@ def extract_invoice_date(text):
 OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'gemma4-doc:latest')
 def ollama(prompt):
     body = json.dumps({"model": OLLAMA_MODEL, "prompt": prompt, "stream": False,
+                       "think": False,  # gemma4 is a thinking model -> empty output without this
                        "options": {"temperature": 0}}).encode()
     for host in ('http://ollama:11434', 'http://homeai-ollama:11434'):
         try:
