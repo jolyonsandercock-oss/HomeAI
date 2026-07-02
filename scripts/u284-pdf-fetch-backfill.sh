@@ -8,7 +8,7 @@
 # google-fetch is on ai-internal (host can't reach), so the HTTP happens inside
 # bot-responder and bytes stream out over docker exec stdout.
 # Idempotent: only rows with pdf_local_path IS NULL are selected. Gentle pace.
-set -uo pipefail
+set -euo pipefail
 OUT=/home_ai/storage/invoices/fetched
 mkdir -p "$OUT"
 LIMIT="${1:-1200}"
@@ -52,12 +52,12 @@ try:
 except Exception as e:
     print("ERR:" + str(e)[:80])
 PY
-)
+) || B64="ERR:docker-exec-failed"
   case "$B64" in
     NOPDF|NODATA|ERR:*|"")
       fail=$((fail+1))
       docker exec -i homeai-postgres psql -d homeai -U postgres -q -c "SET app.current_entity='all';
-        UPDATE vendor_invoice_inbox SET pdf_fetch_error='u284: ${B64:-empty}' WHERE id=$ID;" 2>/dev/null
+        UPDATE vendor_invoice_inbox SET pdf_fetch_error='u284: ${B64:-empty}' WHERE id=$ID;" 2>/dev/null || true
       echo "$(date -Is) [u284] [$i/$total] #$ID FAIL ${B64:-empty}"
       ;;
     *)
@@ -65,13 +65,13 @@ PY
       # gmail uses base64url
       if printf '%s' "$B64" | python3 -c "import sys,base64;sys.stdout.buffer.write(base64.urlsafe_b64decode(sys.stdin.read().strip()+'=='))" > "$F" 2>/dev/null && [ -s "$F" ]; then
         docker exec -i homeai-postgres psql -d homeai -U postgres -q -c "SET app.current_entity='all';
-          UPDATE vendor_invoice_inbox SET pdf_local_path='$F', pdf_fetched_at=now(), pdf_fetch_error=NULL WHERE id=$ID;" 2>/dev/null
+          UPDATE vendor_invoice_inbox SET pdf_local_path='$F', pdf_fetched_at=now(), pdf_fetch_error=NULL WHERE id=$ID;" 2>/dev/null || true
         ok=$((ok+1))
         echo "$(date -Is) [u284] [$i/$total] #$ID ok ($(stat -c%s "$F")b)"
       else
         rm -f "$F"; fail=$((fail+1))
         docker exec -i homeai-postgres psql -d homeai -U postgres -q -c "SET app.current_entity='all';
-          UPDATE vendor_invoice_inbox SET pdf_fetch_error='u284: b64-decode-fail' WHERE id=$ID;" 2>/dev/null
+          UPDATE vendor_invoice_inbox SET pdf_fetch_error='u284: b64-decode-fail' WHERE id=$ID;" 2>/dev/null || true
         echo "$(date -Is) [u284] [$i/$total] #$ID decode FAIL"
       fi
       ;;

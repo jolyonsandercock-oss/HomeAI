@@ -6,11 +6,11 @@
 # with same-DoW historical revenue to produce a one-line recommendation.
 # Surfaces as Telegram lines on the daily digest 07:30.
 
-set -uo pipefail
+set -euo pipefail
 LOG=/home_ai/logs/u196-oracles.log
 
 # Tintagel coordinates: 50.661 N, -4.752 W
-WEATHER=$(curl -s "https://api.open-meteo.com/v1/forecast?latitude=50.661&longitude=-4.752&daily=temperature_2m_max,precipitation_sum,weather_code&timezone=Europe%2FLondon&forecast_days=1" 2>/dev/null)
+WEATHER=$(curl -s "https://api.open-meteo.com/v1/forecast?latitude=50.661&longitude=-4.752&daily=temperature_2m_max,precipitation_sum,weather_code&timezone=Europe%2FLondon&forecast_days=1" 2>/dev/null) || WEATHER=""
 
 if [ -z "$WEATHER" ]; then
   echo "$(date -Iseconds)  weather fetch failed" >> "$LOG"
@@ -44,7 +44,7 @@ WITH dow_data AS (
    GROUP BY report_date
 )
 SELECT ROUND(AVG(daily)::numeric, 0) FROM dow_data;
-" | tr -d ' ')
+" | tr -d ' ') || BEER_AVG=""
 
 CAFE_AVG=$(docker exec homeai-postgres psql -U postgres -d homeai -tAc "
 WITH dow_data AS (
@@ -56,7 +56,7 @@ WITH dow_data AS (
    GROUP BY report_date
 )
 SELECT ROUND(AVG(daily)::numeric, 0) FROM dow_data;
-" | tr -d ' ')
+" | tr -d ' ') || CAFE_AVG=""
 
 # Heuristic: sunny + warm + dry = uplift; wet/cold = downlift
 MOOD="neutral"

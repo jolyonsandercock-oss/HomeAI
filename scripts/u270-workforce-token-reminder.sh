@@ -10,7 +10,7 @@
 # fires exactly once even though the cron expression ("57 8 11 6 *") would
 # otherwise recur annually.
 
-set -uo pipefail
+set -euo pipefail
 
 MARKER="u270-workforce-token-reminder"
 

@@ -12,7 +12,7 @@
 # criticals remain covered by Prometheus→notify-bridge + vault-watchdog. History:
 # `SELECT * FROM telegram_outbox WHERE source='heartbeat' ORDER BY id DESC LIMIT 10`.
 
-set -uo pipefail
+set -euo pipefail
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 
 docker exec -i -e VAULT_TOKEN="$VAULT_TOKEN" homeai-playwright python << 'PYEOF'

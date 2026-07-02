@@ -6,12 +6,12 @@
 # page should never be the alerting mechanism. Checks TOMORROW so there's time
 # to publish; alerts at most once per day (stamp file).
 # Cron: 16:07 daily (afternoon = time to fix before tomorrow).
-set -uo pipefail
+set -euo pipefail
 STAMP=/home_ai/logs/.u280-last-alert
 TOMORROW=$(date -d tomorrow +%Y-%m-%d)
 
 n=$(docker exec homeai-postgres psql -d homeai -U postgres -tAc \
-  "SET app.current_entity='1'; SELECT count(*) FROM workforce_shifts WHERE shift_date='$TOMORROW';" 2>/dev/null | tail -1)
+  "SET app.current_entity='1'; SELECT count(*) FROM workforce_shifts WHERE shift_date='$TOMORROW';" 2>/dev/null | tail -1) || n=""
 n=${n:-0}
 
 if [ "$n" -ge 3 ]; then

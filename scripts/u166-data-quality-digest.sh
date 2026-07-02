@@ -2,7 +2,7 @@
 # /home_ai/scripts/u166-data-quality-digest.sh
 # U166 — daily 06:00 Telegram digest of open data-quality issues.
 
-set -uo pipefail
+set -euo pipefail
 
 LOG=/home_ai/logs/u166-data-quality.log
 VAULT_TOKEN=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)

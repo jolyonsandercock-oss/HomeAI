@@ -12,7 +12,7 @@
 #
 # Arg 1 = lookback window (default '3 days'). Pass a wider window for a one-off
 # catch-up, e.g. `u236-marketing-sweep.sh '60 days'`.
-set -uo pipefail
+set -euo pipefail
 WINDOW="${1:-3 days}"
 
 docker exec -i homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 <<SQL

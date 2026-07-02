@@ -12,7 +12,7 @@
 #     after retries means upstream is broken — heartbeat picks this up).
 #   - Post-run sanity check: confirm yesterday's snapshot landed in DB.
 
-set -uo pipefail
+set -euo pipefail
 
 GMAIL_QUERY='newer_than:2d to:stay@malthousetintagel.com subject:"The Olde Malthouse Inn: Arrivals and Departures"'
 
@@ -22,6 +22,9 @@ echo "── caterbook daily $(date +%F\ %H:%M) ──"
 fetch_msgs() {
   local attempt
   for attempt in 1 2 3; do
+    # docker exec legitimately fails on a transient 5xx — that's exactly what
+    # this retry loop exists to absorb, so the assignment must not abort the
+    # script under set -e; capture the real exit code via && / || instead.
     out=$(docker exec homeai-playwright python -c "
 import urllib.request, json, urllib.parse, sys
 q = '$GMAIL_QUERY'
@@ -36,8 +39,8 @@ try:
 except Exception as e:
     sys.stderr.write(f'FETCH_ERR: {type(e).__name__}: {e}\n')
     sys.exit(1)
-" 2>&1)
-    if [ $? -eq 0 ]; then
+" 2>&1) && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ]; then
       printf '%s\n' "$out"
       return 0
     fi
@@ -60,6 +63,10 @@ fi
 idx=0; fail=0
 for mid in $msgs; do
   idx=$((idx + 1))
+  # A non-HTTPError failure (connection refused, timeout) is uncaught by the
+  # python and exits nonzero — must not abort the loop and lose remaining
+  # messages; the [[ "$res" == OK* ]] check below already classifies failures
+  # by content, so a bare || true here is enough.
   res=$(docker exec homeai-playwright python -c "
 import urllib.request, json, urllib.error
 req = urllib.request.Request('http://localhost:8001/ingest/caterbook?account=info&message_id=$mid', method='POST')
@@ -69,7 +76,7 @@ try:
     print(f\"OK  date={o['report_date']}  obs={o['observations_inserted']}/{o['observations_inserted']+o['observations_skipped']}  a/s/d={o['arrivals']}/{o['stayovers']}/{o['departures']}\")
 except urllib.error.HTTPError as e:
     print(f\"HTTP{e.code} {e.read().decode()[:200]}\")
-" 2>&1)
+" 2>&1) || true
   [[ "$res" == OK* ]] || fail=$((fail + 1))
   echo -e "$(date +%H:%M:%S)\t$idx\t$mid\t$res"
 done

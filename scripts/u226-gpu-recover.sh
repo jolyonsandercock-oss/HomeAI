@@ -16,7 +16,7 @@
 # Safe to run by hand or on a timer too. Exits 0 on no-op or success;
 # non-zero only if recreation itself failed.
 
-set -uo pipefail
+set -euo pipefail
 
 COMPOSE=/home_ai/docker-compose.yml
 GPU_SERVICES=(ollama build-dashboard)
@@ -101,7 +101,7 @@ done
 notify() {
   local msg="$1"
   local vault_tok
-  vault_tok=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep '^VAULT_TOKEN=' | cut -d= -f2-)
+  vault_tok=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep '^VAULT_TOKEN=' | cut -d= -f2-) || vault_tok=""
   [ -z "$vault_tok" ] && { log "notify: no VAULT_TOKEN — skipping telegram"; return 0; }
   docker exec -e VAULT_TOKEN="$vault_tok" -e MSG="$msg" homeai-bot-responder python3 -c "
 import os, json, urllib.request

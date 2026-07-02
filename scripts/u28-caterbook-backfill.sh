@@ -11,7 +11,7 @@
 #
 # Each ingest is ~1-2s. 141 emails ≈ 3-5 min.
 
-set -uo pipefail
+set -euo pipefail
 LIMIT=${1:-500}
 
 # Search the inbox for every matching email, sort oldest-first.
@@ -47,7 +47,7 @@ except urllib.error.HTTPError as e:
     print(f\"HTTP{e.code} {e.read().decode()[:200]}\")
 except Exception as e:
     print(f\"EXC {type(e).__name__}: {e}\")
-" 2>&1)
+" 2>&1) || result="EXC docker-exec-failed"
   if [[ "$result" == OK* ]]; then
     echo -e "$ts\t$idx/$total\t$mid\t$result"
   else

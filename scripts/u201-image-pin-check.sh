@@ -3,7 +3,7 @@
 # U201 — check docker-compose.yml for unpinned :latest tags.
 # Cron: monthly.
 
-set -uo pipefail
+set -euo pipefail
 LOG=/home_ai/logs/u201-pin-check.log
 
 UNPINNED=$(grep -nE "image: .+:latest" /home_ai/docker-compose.yml || true)

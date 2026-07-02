@@ -9,7 +9,7 @@
 #
 # Idempotent: idempotency_key = 'school_<gmail_msg_id>'.
 
-set -uo pipefail
+set -euo pipefail
 
 SCHOOL_DOMAINS=("stjosephscornwall.co.uk" "stbreock.org.uk" "wadebridgeprimary.co.uk")
 NEWER_THAN="${1:-90d}"
@@ -72,7 +72,7 @@ while IFS=$'\t' read -r mid from_addr subject internal_date; do
             \$\$$(echo "$subject" | tr "'" '_' | cut -c1-300)\$\$)
     ON CONFLICT (idempotency_key) DO NOTHING
     RETURNING 1;
-    COMMIT;" 2>&1 | tr -d '[:space:]')
+    COMMIT;" 2>&1 | tr -d '[:space:]') || true
   if [[ "$out" == "1" ]]; then
     inserted=$((inserted + 1))
   else

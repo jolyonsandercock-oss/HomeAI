@@ -16,7 +16,7 @@
 # Each day ~150s (both sites). 30d ≈ 75 min, 1100d ≈ 2 days. Output is a
 # tab-separated log line per (date, site) so progress is easy to grep / tail.
 
-set -uo pipefail
+set -euo pipefail
 START=${1:?START_DATE (YYYY-MM-DD) required}
 END=${2:?END_DATE (YYYY-MM-DD) required}
 DELAY=${3:-3}
@@ -52,7 +52,7 @@ except urllib.error.HTTPError as e:
     print(f'HTTP{e.code} {e.read().decode()[:200]}')
 except Exception as e:
     print(f'EXC {type(e).__name__}: {e}')
-" 2>&1)
+" 2>&1) || resp="EXC docker-exec-failed"
     echo -e "$ts\tday=$day_idx/$total_days\t$cur\t$site\t$resp"
   done
   sleep "$DELAY"

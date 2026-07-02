@@ -8,7 +8,7 @@
 #   ./scripts/u29-daily-digest.sh              # today
 #   ./scripts/u29-daily-digest.sh 2026-05-10   # backfill
 
-set -uo pipefail
+set -euo pipefail
 DATE="${1:-$(date '+%Y-%m-%d')}"
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 

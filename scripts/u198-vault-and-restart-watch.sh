@@ -3,7 +3,7 @@
 # U198 — Vault unexpected seal + container restart-storm watcher.
 # Cron: */30 * * * *
 
-set -uo pipefail
+set -euo pipefail
 LOG=/home_ai/logs/u198-watch.log
 STATE=/home_ai/data/u198-last-alert
 mkdir -p "$(dirname "$STATE")"
@@ -13,10 +13,10 @@ SEALED=$(docker exec homeai-vault vault status -format=json 2>/dev/null | python
 import sys, json
 try: print(json.load(sys.stdin).get('sealed', True))
 except: print('unknown')
-")
+") || SEALED="unknown"
 
 SYSTEM_STATE=$(docker exec homeai-postgres psql -U postgres -d homeai -tAc \
-  "SELECT value->>'state' FROM static_context WHERE key='system.state'" 2>/dev/null)
+  "SELECT value->>'state' FROM static_context WHERE key='system.state'" 2>/dev/null) || SYSTEM_STATE=""
 
 if [ "$SEALED" = "True" ] && [ "$SYSTEM_STATE" = "running" ]; then
   if [ "$(cat "$STATE.vault" 2>/dev/null)" != "sealed" ]; then
@@ -31,7 +31,7 @@ text = '🚨 VAULT SEALED — unexpected. System state=running. Run vault unseal
 req = urllib.request.Request(f\"https://api.telegram.org/bot{d['bot_token']}/sendMessage\",
     data=urllib.parse.urlencode({'chat_id': d['chat_id'], 'text': text}).encode())
 urllib.request.urlopen(req, timeout=10)
-"
+" || echo "$(date -Iseconds)  WARN: vault-sealed telegram send failed" >> "$LOG"
     echo "$(date -Iseconds)  ALERT vault sealed unexpectedly" >> "$LOG"
   fi
 else
@@ -44,9 +44,9 @@ fi
 SNAPSHOT_NOW=/home_ai/data/u198-restart-snapshot-now.txt
 SNAPSHOT_PRIOR=/home_ai/data/u198-restart-snapshot-prior.txt
 docker ps --format '{{.Names}}' | while read -r name; do
-  count=$(docker inspect "$name" --format '{{.RestartCount}}' 2>/dev/null)
+  count=$(docker inspect "$name" --format '{{.RestartCount}}' 2>/dev/null) || count=""
   printf '%s %s\n' "$name" "$count"
-done > "$SNAPSHOT_NOW"
+done > "$SNAPSHOT_NOW" || echo "$(date -Iseconds)  WARN: docker ps restart-count snapshot failed" >> "$LOG"
 
 if [ -f "$SNAPSHOT_PRIOR" ]; then
   # Compute diffs
@@ -68,7 +68,7 @@ for n, c in now.items():
 if flapping:
     for n, d in flapping:
         print(f'{n}: +{d} restarts in 30min')
-")
+") || STORM=""
   if [ -n "$STORM" ]; then
     if [ "$(cat "$STATE.storm" 2>/dev/null)" != "$STORM" ]; then
       echo "$STORM" > "$STATE.storm"
@@ -82,7 +82,7 @@ $STORM'''
 req = urllib.request.Request(f\"https://api.telegram.org/bot{d['bot_token']}/sendMessage\",
     data=urllib.parse.urlencode({'chat_id': d['chat_id'], 'text': text}).encode())
 urllib.request.urlopen(req, timeout=10)
-"
+" || echo "$(date -Iseconds)  WARN: restart-storm telegram send failed" >> "$LOG"
       echo "$(date -Iseconds)  ALERT $STORM" >> "$LOG"
     fi
   else
@@ -90,5 +90,5 @@ urllib.request.urlopen(req, timeout=10)
   fi
 fi
 
-cp "$SNAPSHOT_NOW" "$SNAPSHOT_PRIOR"
+cp "$SNAPSHOT_NOW" "$SNAPSHOT_PRIOR" || echo "$(date -Iseconds)  WARN: snapshot rotation failed" >> "$LOG"
 echo "$(date -Iseconds)  ok" >> "$LOG"

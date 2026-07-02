@@ -5,7 +5,7 @@
 # guest_phone on accommodation_bookings only — never overwrites.
 # Cron: 05:37 daily (after the 03:xx scrape window). Window: -7/+45 in cron
 # mode; first run used -30/+120.
-set -uo pipefail
+set -euo pipefail
 WINDOW_BACK="${1:-7}"
 WINDOW_FWD="${2:-45}"
 VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
@@ -27,4 +27,4 @@ done < <(docker exec -i -e VAULT_TOKEN="$VT" -e WINDOW_BACK="$WINDOW_BACK" -e WI
 echo "$(date -Is) [u286] applied $applied contact updates"
 docker exec -i homeai-postgres psql -d homeai -U postgres -tAc "SET app.current_entity='all';
 SELECT 'coverage: phones='||count(guest_phone)||'/'||count(*)||' emails='||count(guest_email)
-FROM accommodation_bookings WHERE checkin_date >= current_date - ${WINDOW_BACK};" 2>/dev/null | tail -1
+FROM accommodation_bookings WHERE checkin_date >= current_date - ${WINDOW_BACK};" 2>/dev/null | tail -1 || true

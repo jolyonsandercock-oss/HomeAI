@@ -27,12 +27,14 @@ for site in ['malthouse', 'sandwich']:
                 import time
                 time.sleep(10)
 print(json.dumps(results))
-" >> "$LOG" 2>&1
+" >> "$LOG" 2>&1 && SCRAPE_RC=0 || SCRAPE_RC=$?
 
-echo "  scrape done, exit=$?" >> "$LOG"
+echo "  scrape done, exit=$SCRAPE_RC" >> "$LOG"
 
-# Step 2: Run the bridge to epos_daily_reports
-docker exec homeai-bot-responder python3 /app/touchoffice-to-epos.py >> "$LOG" 2>&1
-echo "  bridge done, exit=$?" >> "$LOG"
+# Step 2: Run the bridge to epos_daily_reports (still attempt it even if the
+# scrape step reported an error for one site — the other site's data, or
+# already-ingested rows, may still be worth bridging).
+docker exec homeai-bot-responder python3 /app/touchoffice-to-epos.py >> "$LOG" 2>&1 && BRIDGE_RC=0 || BRIDGE_RC=$?
+echo "  bridge done, exit=$BRIDGE_RC" >> "$LOG"
 
 echo "$(date -Iseconds) — trigger complete" >> "$LOG"

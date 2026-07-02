@@ -13,7 +13,7 @@
 #   ./scripts/u27-touchoffice-daily.sh                # yesterday
 #   ./scripts/u27-touchoffice-daily.sh 2026-05-10     # specific date
 
-set -uo pipefail
+set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YEL='\033[0;33m'; NC='\033[0m'
 
 DATE=${1:-$(date -d 'yesterday' '+%Y-%m-%d')}
@@ -40,6 +40,9 @@ for site in "${SITES[@]}"; do
   attempt=0
   while :; do
     attempt=$((attempt+1))
+    # This is the exact transient-failure path the U207 retry loop exists to
+    # catch — a plain `resp=$(...); rc=$?` would let set -e abort the script
+    # on the very first failed attempt, before the retry logic below ever runs.
     resp=$(docker exec "$ENDPOINT_HOST" python -c "
 import urllib.request, json, urllib.error, sys
 req = urllib.request.Request('$url', method='POST')
@@ -49,8 +52,7 @@ try:
 except urllib.error.HTTPError as e:
     print(json.dumps({'_http': e.code, '_error': e.read().decode()[:600]}))
     sys.exit(2)
-")
-    rc=$?
+") && rc=0 || rc=$?
     # Retry on rc != 0 (HTTP error) OR success but body contains 'scrape failed'
     if [[ $rc -ne 0 ]] || echo "$resp" | grep -q 'scrape failed\|ERR_NAME_NOT_RESOLVED'; then
       if [[ $attempt -lt $MAX_ATTEMPTS ]]; then
@@ -71,7 +73,7 @@ for w in ('fixed_totals','department_sales','plu_sales'):
     s=ws.get(w,{})
     if s.get('success'): parts.append(f'{w}={s.get(\"inserted\",0)}/{s.get(\"scraped\",0)}')
     else: parts.append(f'{w}=FAIL({s.get(\"error\",\"?\")[:50]})')
-print('  '.join(parts) + f'  runtime={o.get(\"scrape_runtime_ms\",0)}ms')")
+print('  '.join(parts) + f'  runtime={o.get(\"scrape_runtime_ms\",0)}ms')") || summary="(summary parse failed — raw: ${resp:0:200})"
     echo -e "  ${GREEN}✓${NC} $summary"
   else
     echo -e "  ${RED}✗${NC} ingest failed: $resp"

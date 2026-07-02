@@ -22,7 +22,7 @@
 # Newest-first. ~21s/day. Safe alongside the */15 realtime scrape (its overlap
 # guard is scoped to CURRENT_DATE). Cron: nightly 04:13 — no-ops when complete
 # and permanently self-heals any future per-day scrape miss.
-set -uo pipefail
+set -euo pipefail
 HOST=homeai-playwright; PORT=8001
 
 DATES=$(docker exec -i homeai-postgres psql -d homeai -U postgres -tAc "
@@ -46,7 +46,7 @@ SELECT w.d::text FROM wanted w
    AND (SELECT count(*) FROM touchoffice_scrapes s2
          WHERE s2.site='head_office' AND s2.report_date = w.d
            AND s2.widget='department_sales') < 3
- ORDER BY w.d DESC;" | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+ ORDER BY w.d DESC;" | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' || true)
 
 total=$(printf '%s\n' "$DATES" | grep -c . || true)
 echo "$(date -Is) [u274] head_office backfill start: $total dates to do"

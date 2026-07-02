@@ -3,7 +3,7 @@
 # U167 — monthly DR drill: restore latest restic snapshot to a sandbox
 # postgres, validate row counts within 0.1% of prod, write findings.
 
-set -uo pipefail
+set -euo pipefail
 
 DRILL_DIR=/tmp/u167-restore-drill
 AUDIT_DIR=/home_ai/audits
@@ -11,9 +11,13 @@ mkdir -p "$DRILL_DIR" "$AUDIT_DIR"
 DATE_TAG=$(date +%Y-%m-%d-%H%M)
 REPORT="$AUDIT_DIR/u167-restore-drill-$DATE_TAG.md"
 
-VAULT_TOKEN=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
+VAULT_TOKEN=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-) || VAULT_TOKEN=""
 SANDBOX_PORT=5433
 SANDBOX_NAME=homeai-postgres-drill
+# set -e now aborts the script on the first failing step (pg_restore, docker cp, etc);
+# without this trap a mid-drill failure would leave the sandbox container + port 5433
+# bound forever instead of reaching the step-6 cleanup below.
+trap 'docker rm -f "$SANDBOX_NAME" >/dev/null 2>&1; rm -rf "$DRILL_DIR"' EXIT
 
 echo "# U167 — Restore drill ($DATE_TAG)" > "$REPORT"
 echo "" >> "$REPORT"
@@ -149,7 +153,7 @@ RTO: ${TOTAL}s'''
 req = urllib.request.Request(f\"https://api.telegram.org/bot{d['bot_token']}/sendMessage\",
     data=urllib.parse.urlencode({'chat_id': d['chat_id'], 'text': text}).encode())
 r = urllib.request.urlopen(req, timeout=10)
-"
+" || echo "  (drill-fail telegram alert failed to send)"
 fi
 
 echo "✓ report: $REPORT"

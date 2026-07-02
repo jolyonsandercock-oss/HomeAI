@@ -4,7 +4,7 @@
 # endpoint via curl timing. Stores in perf_audit table.
 # Cron: 0 5 * * 0 (Sun 05:00 after weekly backup)
 
-set -uo pipefail
+set -euo pipefail
 LOG=/home_ai/logs/u203-perf.log
 TS=$(date -Iseconds)
 
@@ -57,7 +57,8 @@ print(f'{p50:.2f} {p95:.2f} {max(ts):.2f} {n}')
   RUNS=$(echo "$STATS" | awk '{print $4}')
   docker exec homeai-postgres psql -U postgres -d homeai -c "
 INSERT INTO perf_audit (endpoint, p50_ms, p95_ms, max_ms, runs)
-VALUES ('$ep', $P50, $P95, $MAX, $RUNS);" >/dev/null 2>&1
+VALUES ('$ep', $P50, $P95, $MAX, $RUNS);" >/dev/null 2>&1 \
+    || echo "  WARN: perf_audit insert failed for $ep" >> "$LOG"
   printf '  %-50s p50=%6.0fms p95=%6.0fms max=%6.0fms\n' "$ep" "$P50" "$P95" "$MAX" >> "$LOG"
 done
 
@@ -77,4 +78,5 @@ VALUES (
     WHERE pa.audit_ts = (SELECT max(audit_ts) FROM perf_audit)
     ORDER BY p95_ms DESC',
   '{}', 'shared', true, NOW(), 'u203', 'u203'
-) ON CONFLICT (slug) DO UPDATE SET sql_template = EXCLUDED.sql_template, approved_at = NOW();" >/dev/null 2>&1
+) ON CONFLICT (slug) DO UPDATE SET sql_template = EXCLUDED.sql_template, approved_at = NOW();" >/dev/null 2>&1 \
+  || echo "$TS  WARN: query_whitelist slug registration failed" >> "$LOG"

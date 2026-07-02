@@ -9,10 +9,12 @@
 # Forward-only via resolver.invoice_watermark_id; idempotent (attributed / queued
 # rows are skipped). Safe to run frequently. Activated in review mode 2026-06-09.
 # Cron: every 30 min.
-set -uo pipefail
+set -euo pipefail
 
+# Preserve the diagnostic echo + exit-code logging on failure: a plain
+# `OUT=$(...)` under set -e would abort here before rc=$? / the echo ever ran,
+# losing the error text from the log that ops-run/cron-health rely on.
 OUT=$(docker exec -i homeai-postgres psql -U postgres -d homeai -tA \
-        -c "SELECT home_ai.resolve_new_invoices(500);" 2>&1)
-rc=$?
+        -c "SELECT home_ai.resolve_new_invoices(500);" 2>&1) && rc=0 || rc=$?
 echo "$(date -Is) rc=$rc $OUT"
 exit $rc

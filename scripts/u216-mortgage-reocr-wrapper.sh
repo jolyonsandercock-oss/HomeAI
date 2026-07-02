@@ -8,13 +8,13 @@
 #
 # Cron: 0 4 * * *  (04:00 daily — Anthropic API is least loaded overnight)
 
-set -uo pipefail
+set -euo pipefail
 LOG=/home_ai/logs/u216-mortgage-reocr.log
 ts() { date -Iseconds; }
 
-VAULT_TOKEN=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
-ANTHROPIC_API_KEY=$(docker exec -e VAULT_TOKEN="$VAULT_TOKEN" homeai-vault vault kv get -field=api_key secret/anthropic 2>/dev/null)
-PG_PASS=$(docker exec -e VAULT_TOKEN="$VAULT_TOKEN" homeai-vault vault kv get -field=password secret/postgres 2>/dev/null)
+VAULT_TOKEN=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-) || VAULT_TOKEN=""
+ANTHROPIC_API_KEY=$(docker exec -e VAULT_TOKEN="$VAULT_TOKEN" homeai-vault vault kv get -field=api_key secret/anthropic 2>/dev/null) || ANTHROPIC_API_KEY=""
+PG_PASS=$(docker exec -e VAULT_TOKEN="$VAULT_TOKEN" homeai-vault vault kv get -field=password secret/postgres 2>/dev/null) || PG_PASS=""
 PG_DSN="postgresql://postgres:${PG_PASS}@homeai-postgres:5432/homeai"
 
 if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$PG_PASS" ]; then

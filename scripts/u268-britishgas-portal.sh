@@ -2,7 +2,7 @@
 # u268-britishgas-portal.sh — scrape British Gas Business portal bills -> vendor_invoice_inbox.
 # Idempotent (ON CONFLICT on idempotency_key). Creds in Vault secret/britishgas.
 # Cron candidate: monthly (BG bills are monthly). Login is human-paced; single attempt.
-set -uo pipefail
+set -euo pipefail
 VT=$(docker inspect homeai-bot-responder --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 BG_USER=$(docker exec -e VAULT_TOKEN="$VT" homeai-vault vault kv get -field=username secret/britishgas)
 BG_PASS=$(docker exec -e VAULT_TOKEN="$VT" homeai-vault vault kv get -field=password secret/britishgas)
