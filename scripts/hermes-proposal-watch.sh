@@ -2,7 +2,7 @@
 # hermes-proposal-watch.sh — notify Jo on Telegram when Hermes drops a new
 # proposal file in /home_ai/.hermes/.  Only fires once per file; tracks seen
 # proposals in SEEN_FILE so restarts don't re-alert.
-set -uo pipefail
+set -euo pipefail
 
 PROPOSALS_DIR="/home_ai/.hermes"
 SEEN_FILE="/home_ai/logs/hermes-proposal-seen.txt"

@@ -1,7 +1,7 @@
 #!/bin/bash
 # scripts/metis-observe.sh — OBSERVE stage for invoice.categorise.
 # Writes one cognition.task_runs row. Cron: nightly, AFTER u-invoice-categorise-sweep.
-set -uo pipefail
+set -euo pipefail
 source "$(dirname "$0")/metis/common.sh"
 metis_psql <<SQL
 $METIS_GUC

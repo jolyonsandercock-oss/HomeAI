@@ -9,7 +9,7 @@
 #   u128-email-vs-xero-diff.sh --days 365     # widen window
 #   u128-email-vs-xero-diff.sh --detail       # full row list
 
-set -uo pipefail
+set -euo pipefail
 
 DAYS=100
 DETAIL=0

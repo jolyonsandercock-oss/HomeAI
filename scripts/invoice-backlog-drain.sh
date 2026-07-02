@@ -24,7 +24,7 @@
 # DRY RUN by default. Usage:
 #   bash scripts/invoice-backlog-drain.sh                 # dry run (counts only)
 #   bash scripts/invoice-backlog-drain.sh --execute [BATCH] [SLEEP_S] [MAX_BATCHES]
-set -uo pipefail
+set -euo pipefail
 EXECUTE=0; [ "${1:-}" = "--execute" ] && EXECUTE=1
 BATCH="${2:-200}"
 SLEEP="${3:-120}"        # seconds between batches — budget pacing

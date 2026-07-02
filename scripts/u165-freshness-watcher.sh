@@ -3,7 +3,7 @@
 # U165 — poll data_source_freshness; Telegram if any source 'stale' (>2x cadence).
 # Cron: */15 * * * *
 
-set -uo pipefail
+set -euo pipefail
 
 LOG=/home_ai/logs/u165-watcher.log
 STATE=/home_ai/data/u165-last-alert.json

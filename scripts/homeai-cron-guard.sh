@@ -13,7 +13,7 @@
 #       removed, so a freshly-added job isn't nuked before you commit it).
 # Discipline: when you add/change/remove a cron, update scripts/crontab.snapshot.txt
 # in the same commit. The snapshot is the source of truth.
-set -uo pipefail
+set -euo pipefail
 # byte-ordering for sort AND comm — without this, comm warns "not in sorted
 # order" and can miscompare cron lines (they contain */%- which collate
 # differently under locale-aware sort vs comm's expectation).
@@ -38,7 +38,7 @@ audit() { docker exec -i homeai-postgres psql -U postgres -d homeai \
   >/dev/null 2>&1 || true; }
 
 if [ -n "$missing" ]; then
-  n=$(printf '%s\n' "$missing" | grep -c .)
+  n=$(printf '%s\n' "$missing" | grep -c . || true)
   # restore by appending the snapshot's missing lines to the live crontab
   # (preserves any legitimate extras; idempotent — next run they're present)
   { cat "$live_raw"; printf '%s\n' "$missing"; } | crontab -u joly -
@@ -48,7 +48,7 @@ $missing"
 fi
 
 if [ -n "$extra" ]; then
-  n=$(printf '%s\n' "$extra" | grep -c .)
+  n=$(printf '%s\n' "$extra" | grep -c . || true)
   alert "⚠️ cron-guard: $n cron job(s) running but NOT in the snapshot — commit them to scripts/crontab.snapshot.txt so they're protected:
 $extra"
 fi

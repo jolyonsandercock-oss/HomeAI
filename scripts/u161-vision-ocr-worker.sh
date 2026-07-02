@@ -3,7 +3,7 @@
 # U161 — pick next pending vision-OCR job and process it via u151b logic.
 # Cron: */15 * * * *.
 
-set -uo pipefail
+set -euo pipefail
 
 VAULT_TOKEN=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 ANTHROPIC_KEY=$(docker exec -e VAULT_TOKEN="$VAULT_TOKEN" homeai-vault vault kv get -field=api_key secret/anthropic)

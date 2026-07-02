@@ -2,7 +2,7 @@
 # scripts/metis-apply.sh — enact human-APPROVED proposals only. Shadow-safe:
 # does nothing to 'pending'. rule_insert is auto-enacted; narrow/retire are flagged
 # for manual SQL in the shadow phase (logged, status left 'approved').
-set -uo pipefail
+set -euo pipefail
 source "$(dirname "$0")/metis/common.sh"
 metis_psql <<'SQL'
 SET app.current_entity='all'; SET app.current_realm='owner';

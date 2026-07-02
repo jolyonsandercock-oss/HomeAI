@@ -23,7 +23,7 @@
 # We also need: ocr_text (Paperless API), mime_type, sha256, document_type.
 # Pulls these from Paperless's own REST API.
 
-set -uo pipefail
+set -euo pipefail
 
 WEBHOOK_URL="${PAPERLESS_WEBHOOK_URL:-http://homeai-build-dashboard:8090/api/documents/ingest-from-paperless}"
 SECRET="${PAPERLESS_WEBHOOK_SECRET:-}"
@@ -48,13 +48,13 @@ SHA=""
 MIME="application/pdf"
 if [[ -n "$API_TOKEN" ]]; then
     META=$(curl -fsSL -H "Authorization: Token $API_TOKEN" "$API_ROOT/documents/$DOC_ID/" 2>/dev/null || echo "{}")
-    OCR_TEXT=$(echo "$META" | python3 -c "import sys,json;print((json.load(sys.stdin).get('content') or '')[:30000])")
-    DOC_TYPE_ID=$(echo "$META" | python3 -c "import sys,json;v=json.load(sys.stdin).get('document_type');print(v if v else '')")
+    OCR_TEXT=$(echo "$META" | python3 -c "import sys,json;print((json.load(sys.stdin).get('content') or '')[:30000])") || OCR_TEXT=""
+    DOC_TYPE_ID=$(echo "$META" | python3 -c "import sys,json;v=json.load(sys.stdin).get('document_type');print(v if v else '')") || DOC_TYPE_ID=""
     if [[ -n "$DOC_TYPE_ID" ]]; then
         DOC_TYPE=$(curl -fsSL -H "Authorization: Token $API_TOKEN" "$API_ROOT/document_types/$DOC_TYPE_ID/" 2>/dev/null \
-                   | python3 -c "import sys,json;print((json.load(sys.stdin).get('name') or '').lower())")
+                   | python3 -c "import sys,json;print((json.load(sys.stdin).get('name') or '').lower())") || DOC_TYPE=""
     fi
-    SHA=$(echo "$META" | python3 -c "import sys,json;print(json.load(sys.stdin).get('checksum') or '')")
+    SHA=$(echo "$META" | python3 -c "import sys,json;print(json.load(sys.stdin).get('checksum') or '')") || SHA=""
 fi
 
 # Build JSON payload using Python so quoting is safe.

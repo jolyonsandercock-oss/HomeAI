@@ -9,7 +9,7 @@
 # Manual fallback: Jo drops a Bills_*.csv from the Xero UI into
 # /home_ai/data/xero-inbox  → cron picks it up at 07:00 the next morning.
 
-set -uo pipefail
+set -euo pipefail
 
 mkdir -p /home_ai/logs /home_ai/data/xero-inbox/.processed
 

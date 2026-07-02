@@ -4,7 +4,7 @@
 # Launches in background and returns immediately.
 # Usage: bash trigger-touchoffice.sh
 
-set -uo pipefail
+set -euo pipefail
 LOG="/home_ai/logs/touchoffice-trigger.log"
 TODAY=$(date '+%Y-%m-%d')
 

@@ -3,7 +3,7 @@
 # Daily 09:00 — yesterday's gross revenue narrative to Jo's inbox.
 # Mirrors u109 format (HTML table + bold + colour pct).
 
-set -uo pipefail
+set -euo pipefail
 
 YESTERDAY=$(date -d 'yesterday' +%Y-%m-%d)
 TODAY=$(date +%Y-%m-%d)

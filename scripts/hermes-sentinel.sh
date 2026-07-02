@@ -18,7 +18,7 @@
 #   hermes-sentinel.sh            # check (cron mode; silent when clean)
 #   hermes-sentinel.sh --baseline # accept current state as the new baseline
 #   hermes-sentinel.sh --show     # print the current snapshot
-set -uo pipefail
+set -euo pipefail
 
 H="$HOME/.hermes"
 BASE="/home_ai/security/hermes-sentinel-baseline.json"
@@ -152,7 +152,7 @@ fi
   echo "---"
 } >> "$LOG"
 
-summary=$(grep -E '^[+-]' /tmp/hermes-sentinel.diff | grep -vE '^(\+\+\+|---)' | head -15)
+summary=$(grep -E '^[+-]' /tmp/hermes-sentinel.diff | grep -vE '^(\+\+\+|---)' | head -15) || true
 PATH="$HOME/.local/bin:$HOME/.hermes/bin:$PATH" hermes send -q -t telegram \
   "🛡️ HERMES SENTINEL: state drift detected. If you did not make this change, investigate before letting Hermes run further tasks.
 

@@ -19,7 +19,7 @@
 #   - Service account JSON is in Vault at secret/google/sa-malthouse
 #   - DWD must be authorised in Google Workspace Admin → Security → API controls
 
-set -uo pipefail
+set -euo pipefail
 ACTION="${1:-diagnose}"
 IDENTITY="${2:-}"
 

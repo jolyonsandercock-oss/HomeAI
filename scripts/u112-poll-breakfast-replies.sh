@@ -10,7 +10,7 @@
 #
 # Pre-flight: needs jolyboxbot Gmail refresh token healthy.
 
-set -uo pipefail
+set -euo pipefail
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 LIVE="${BREAKFAST_LIVE:-0}"
 

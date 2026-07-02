@@ -1,7 +1,7 @@
 #!/bin/bash
 # scripts/metis-digest.sh — nightly Telegram digest of top-N pending proposals by £.
 # Usage: metis-digest.sh [--dry-run] [N]
-set -uo pipefail
+set -euo pipefail
 source "$(dirname "$0")/metis/common.sh"
 
 DRY=0

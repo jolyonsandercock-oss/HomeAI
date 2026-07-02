@@ -4,7 +4,7 @@
 # Token NEVER echoed back. Validates by attempting a login through
 # the dext-importer Playwright container before saving.
 
-set -uo pipefail
+set -euo pipefail
 
 for c in homeai-critical-listener homeai-n8n homeai-google-fetch; do
   VAULT_TOKEN=$(docker inspect "$c" --format='{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep '^VAULT_TOKEN=' | cut -d= -f2-)

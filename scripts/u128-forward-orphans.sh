@@ -16,7 +16,7 @@
 #   --limit N     cap forwards per run (default 50)
 #   --days N      window of orphans to consider (default 90)
 
-set -uo pipefail
+set -euo pipefail
 
 DRY=0
 LIMIT=50
@@ -83,7 +83,8 @@ except Exception as e:
   if echo "$RESP" | grep -q '^OK 200'; then
     echo "  OK   → $LBL"
     docker exec homeai-postgres psql -U postgres -d homeai -tAc \
-      "UPDATE vendor_invoice_inbox SET forwarded_to_dext_at = now() WHERE id = $INBOX_ID" >/dev/null
+      "UPDATE vendor_invoice_inbox SET forwarded_to_dext_at = now() WHERE id = $INBOX_ID" >/dev/null \
+      || echo "  WARN: forwarded_to_dext_at update failed for inbox_id=$INBOX_ID (email WAS forwarded — may re-forward next run)"
     OK=$((OK+1))
   else
     echo "  FAIL → $LBL  :: ${RESP:0:160}"

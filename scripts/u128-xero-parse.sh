@@ -10,7 +10,7 @@
 # After upsert, links matching rows in vendor_invoice_inbox by
 # canonical(vendor_name) + invoice_date + amount-within-tolerance.
 
-set -uo pipefail
+set -euo pipefail
 
 INBOX_DIR="${INBOX_DIR:-/home_ai/data/xero-inbox}"
 ARCHIVE_DIR="$INBOX_DIR/.processed"

@@ -14,7 +14,7 @@
 # any new rows. Combine with the invoice-pipeline ingest, which will
 # call this on new rows as they appear.
 
-set -uo pipefail
+set -euo pipefail
 
 VAULT_TOKEN=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 mkdir -p /home_ai/data/invoice-pdfs

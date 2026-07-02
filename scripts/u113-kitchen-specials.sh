@@ -10,7 +10,7 @@
 # TEST mode locked. Set KITCHEN_LIVE=1 in /home_ai/.env to actually email
 # kitchen@malthousetintagel.com.
 
-set -uo pipefail
+set -euo pipefail
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 MODE="${1:-prompt}"  # 'prompt' = send 10am prompt; 'poll' = check for reply
 LIVE="${KITCHEN_LIVE:-0}"

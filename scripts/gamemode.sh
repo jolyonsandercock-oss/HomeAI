@@ -9,7 +9,7 @@
 # down and does NOT page (Repair E guard) — so it won't fight your game. resume
 # re-drives any email classifications that failed/queued while you were away and
 # runs the full self-test to confirm a clean return.
-set -uo pipefail
+set -euo pipefail
 
 OLLAMA=homeai-ollama
 PGc(){ docker exec -i homeai-postgres psql -U postgres -d homeai -tAc "$1" 2>/dev/null; }
@@ -70,7 +70,7 @@ resume_mode(){
   echo "[$(ts)] re-drove ${redrove:-0} queued/failed email event(s) for reclassification"
 
   echo "[$(ts)] running full self-test..."
-  out=$(bash /home_ai/scripts/selftest.sh 2>&1)
+  out=$(bash /home_ai/scripts/selftest.sh 2>&1) || true
   echo "$out" | grep -E '\[FAIL\]' || true
   echo "$out" | grep -E '── summary|PASS:|WARN:|FAIL:'
   echo "[$(ts)] GPU after  : $(gpu)"

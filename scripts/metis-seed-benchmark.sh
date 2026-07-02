@@ -1,6 +1,6 @@
 #!/bin/bash
 # scripts/metis-seed-benchmark.sh — freeze high-confidence vendor→category labels.
-set -uo pipefail
+set -euo pipefail
 source "$(dirname "$0")/metis/common.sh"
 metis_psql <<'SQL'
 SET app.current_entity='all'; SET app.current_realm='owner';

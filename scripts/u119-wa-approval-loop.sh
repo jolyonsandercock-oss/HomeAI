@@ -17,7 +17,7 @@
 #   reject 42 [reason]
 # These commands handled by the bot-responder's instruction queue.
 
-set -uo pipefail
+set -euo pipefail
 MODE="${1:-notify}"
 
 VAULT_TOKEN=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)

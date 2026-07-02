@@ -6,7 +6,7 @@
 #
 # Token is NEVER echoed back. Re-runnable.
 
-set -uo pipefail
+set -euo pipefail
 
 # ── Find a live Vault token ────────────────────────────────────────────────
 for c in homeai-critical-listener homeai-n8n homeai-google-fetch; do

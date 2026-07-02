@@ -12,7 +12,7 @@
 # All drafts land in wa_outbound_queue with status='pending_approval'.
 # Nothing ships without Jo's explicit approve <id>.
 
-set -uo pipefail
+set -euo pipefail
 MODE="${1:-help}"
 VAULT_TOKEN=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 

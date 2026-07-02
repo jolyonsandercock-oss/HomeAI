@@ -1,7 +1,7 @@
 #!/bin/bash
 # u124d-backup-freshness-check.sh — Telegrams if restic snapshot is stale.
 # Cron: 30 9 * * 1   (every Monday 09:30)
-set -uo pipefail
+set -euo pipefail
 LATEST=$(restic -p /home_ai/backups/.restic-pw -r /home_ai/backups/restic-local \
                 snapshots --json 2>/dev/null | python3 -c "
 import json, sys

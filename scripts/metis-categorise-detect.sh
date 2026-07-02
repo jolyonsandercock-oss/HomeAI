@@ -2,7 +2,7 @@
 # scripts/metis-categorise-detect.sh — DETECT→PROPOSE for invoice.categorise.
 # Runs the 4 deterministic detectors; inserts proposals; skips rejected signatures
 # and benchmark-conflicting category suggestions. Idempotent (ON CONFLICT).
-set -uo pipefail
+set -euo pipefail
 source "$(dirname "$0")/metis/common.sh"
 metis_psql <<'SQL'
 SET app.current_entity='all'; SET app.current_realm='owner';

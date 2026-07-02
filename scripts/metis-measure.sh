@@ -2,7 +2,7 @@
 # scripts/metis-measure.sh — MEASURE stage: record effect of applied rules and
 # auto-raise corrective proposals when an applied rule is implicated in a >£1k
 # multi-category contradiction. Recursive close of the loop.
-set -uo pipefail
+set -euo pipefail
 source "$(dirname "$0")/metis/common.sh"
 metis_psql <<'SQL'
 SET app.current_entity='all'; SET app.current_realm='owner';

@@ -1,7 +1,7 @@
 # scripts/metis-autoapprove.sh — narrow provably-safe auto-approval, then apply.
 # ENABLEMENT TOOL — run MANUALLY only after a clean shadow week (see metis-runbook.md
 # precondition gate: >=7 nightly runs, 0 reverted). NOT wired into cron by design.
-set -uo pipefail
+set -euo pipefail
 source "$(dirname "$0")/metis/common.sh"
 CEIL="${1:-250}"
 metis_psql <<SQL

@@ -8,7 +8,7 @@
 #
 # Token NEVER echoed back. Re-runnable.
 
-set -uo pipefail
+set -euo pipefail
 
 for c in homeai-critical-listener homeai-n8n homeai-google-fetch; do
   VAULT_TOKEN=$(docker inspect "$c" --format='{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \

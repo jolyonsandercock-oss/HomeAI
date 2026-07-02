@@ -6,7 +6,7 @@
 #
 # Cron: 8am daily.
 
-set -uo pipefail
+set -euo pipefail
 VAULT_TOKEN=$(docker inspect homeai-critical-listener --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 docker exec -i -e VAULT_TOKEN="$VAULT_TOKEN" homeai-bot-responder python3 -u <<'PYEOF'
 import os, json, urllib.request, asyncio, asyncpg

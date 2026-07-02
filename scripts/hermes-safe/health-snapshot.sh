@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # hermes-safe: read-only system health snapshot for Hermes briefs.
-set -uo pipefail
+set -euo pipefail
 echo "$(date -Is) health-snapshot" >> /home_ai/logs/hermes-safe.log
 
 echo "== Containers (not Up) =="
