@@ -2,7 +2,7 @@
 # u89-gen-migration-index.sh — generate docs/migrations.md from migrations/V*.sql.
 # Read-only. Output: docs/migrations.md
 
-set -uo pipefail
+set -euo pipefail
 mkdir -p /home_ai/docs
 OUT=/home_ai/docs/migrations.md
 
@@ -19,7 +19,7 @@ for f in postgres/migrations/V*.sql; do
     [[ -f "$f" ]] || continue
     base=$(basename "$f")
     # Version number
-    ver=$(echo "$base" | grep -oE '^V[0-9]+[a-z]?')
+    ver=$(echo "$base" | grep -oE '^V[0-9]+[a-z]?' || true)
     # Try to extract a one-line summary from the leading comment.
     # Migrations typically start with -- ====...= and then -- V## — <title>
     summary=$(awk '/^-- V[0-9]/ {sub(/^-- /, ""); print; exit}' "$f")
@@ -30,7 +30,7 @@ for f in postgres/migrations/V*.sql; do
     printf "| %s | %s | %s |\n" "$ver" "$base" "${summary:-(no summary)}"
 done
 
-count=$(ls postgres/migrations/V*.sql 2>/dev/null | wc -l)
+count=$(ls postgres/migrations/V*.sql 2>/dev/null | wc -l || true)
 echo ""
 echo "Total migrations: $count"
 } > "$OUT"

@@ -8,6 +8,6 @@
 # The hourly u35 cron extracts whatever this ingests.
 #
 # Usage: u95-harvest-cron.sh [days_back]   (default 3 for daily incremental)
-set -uo pipefail
+set -euo pipefail
 DAYS="${1:-3}"
 docker exec -i homeai-bot-responder python3 - "$DAYS" < /home_ai/scripts/u95-harvest-all-invoices.py

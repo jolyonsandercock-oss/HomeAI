@@ -2,7 +2,7 @@
 # u89-gen-schema-doc.sh — generate docs/schema.md from pg_catalog.
 # Read-only. Idempotent. Output: docs/schema.md
 
-set -uo pipefail
+set -euo pipefail
 mkdir -p /home_ai/docs
 OUT=/home_ai/docs/schema.md
 
@@ -49,7 +49,7 @@ while IFS='|' read -r tbl rls reltuples; do
     echo '|---|---|---|---|'
     docker exec homeai-postgres psql -U postgres -d homeai -At -F'|' </dev/null -c \
         "SELECT column_name, data_type, is_nullable, coalesce(column_default,'') FROM information_schema.columns WHERE table_schema='$schema' AND table_name='$name' ORDER BY ordinal_position;" 2>/dev/null \
-        | grep -v '^$\|^SET$' | head -50 | awk -F'|' '{printf "| %s | %s | %s | %s |\n", $1, $2, $3, $4}'
+        | grep -v '^$\|^SET$' | head -50 | awk -F'|' '{printf "| %s | %s | %s | %s |\n", $1, $2, $3, $4}' || true
     echo ""
     # Policies
     if [[ "$rls" == "t" ]]; then
@@ -57,7 +57,7 @@ while IFS='|' read -r tbl rls reltuples; do
         echo ""
         echo '```sql'
         docker exec homeai-postgres psql -U postgres -d homeai -At -F'|' </dev/null -c \
-            "SELECT polname, CASE polpermissive WHEN true THEN 'PERMISSIVE' ELSE 'RESTRICTIVE' END FROM pg_policy WHERE polrelid = '$tbl'::regclass;" 2>/dev/null | grep -v '^$\|^SET$'
+            "SELECT polname, CASE polpermissive WHEN true THEN 'PERMISSIVE' ELSE 'RESTRICTIVE' END FROM pg_policy WHERE polrelid = '$tbl'::regclass;" 2>/dev/null | grep -v '^$\|^SET$' || true
         echo '```'
         echo ""
     fi

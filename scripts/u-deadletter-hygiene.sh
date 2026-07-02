@@ -13,7 +13,7 @@
 # (If malformed-AI dead-letters ever appear, add a re-prompt branch here — but per the live
 #  data they don't, so it's intentionally not built. Verify before building.)
 # Cron suggestion: 25 * * * *  (hourly).
-set -uo pipefail
+set -euo pipefail
 VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 PW=$(docker exec -e VAULT_TOKEN="$VT" homeai-vault vault kv get -field=password secret/postgres 2>/dev/null)
 psqlc(){ docker exec -i -e PGPASSWORD="$PW" homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 -tAq "$@"; }

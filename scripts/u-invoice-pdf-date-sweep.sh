@@ -13,7 +13,7 @@
 # extractor flags anything it can't verify (no-PDF / unparseable) rather than guess.
 #
 #   u-invoice-pdf-date-sweep.sh [hours]   # default 26h window (overlap-tolerant)
-set -uo pipefail
+set -euo pipefail
 SCRIPT=/home_ai/scripts/invoice-pdf-date-extract.py
 LOGDIR=/home_ai/logs; mkdir -p "$LOGDIR"; LOG="$LOGDIR/invoice-pdf-date-sweep.log"
 HOURS="${1:-26}"

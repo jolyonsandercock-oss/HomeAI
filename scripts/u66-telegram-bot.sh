@@ -17,7 +17,7 @@
 #   * Anything else  → forward to Claude Sonnet with the existing
 #                      finance/research slug catalog, reply via Telegram.
 
-set -uo pipefail
+set -euo pipefail
 
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 PG_PW=$(docker exec -e VAULT_TOKEN="$VAULT_TOKEN" homeai-vault vault kv get -field=password secret/postgres)

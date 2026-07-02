@@ -12,7 +12,11 @@
 #   bash u68-recon-orchestrator.sh           # default 30-day window
 #   bash u68-recon-orchestrator.sh 14        # override window
 
-set -uo pipefail   # NOT -e: we want to capture each step's exit code
+set -euo pipefail   # -e added (R0.9): per-step failures are still captured via
+                    # `run_step ... || STATUS[x]="fail"` (|| is -e-exempt), so the
+                    # continue-on-error step design below is unaffected. The
+                    # summary-count psql_q calls are separately guarded so a query
+                    # failure can't abort before the Telegram pulse fires.
 
 WINDOW="${1:-30}"
 LOG_PFX="[u68-recon-orchestrator]"
@@ -48,11 +52,11 @@ psql_q() {
     docker exec -i homeai-postgres psql -U postgres -d homeai -X -q -A -t -c "$1" | tr -d '[:space:]'
 }
 
-L1_TOTAL=$(psql_q "SELECT COUNT(*) FROM mart.daily_totals          WHERE transaction_date >= current_date - ${WINDOW}")
-L1_MISMATCH=$(psql_q "SELECT COUNT(*) FROM mart.daily_totals       WHERE transaction_date >= current_date - ${WINDOW} AND status='mismatch'")
-L2_OPEN=$(psql_q  "SELECT COUNT(*) FROM mart.exceptions             WHERE kind LIKE 'l2_%' AND status='open'")
-L3_UNSETTLED=$(psql_q "SELECT COUNT(*) FROM mart.expected_settlements WHERE status='unsettled_5d' AND batch_date >= current_date - ${WINDOW}")
-L3_SHORT=$(psql_q "SELECT COUNT(*) FROM mart.expected_settlements   WHERE status='settled_short' AND batch_date >= current_date - ${WINDOW}")
+L1_TOTAL=$(psql_q "SELECT COUNT(*) FROM mart.daily_totals          WHERE transaction_date >= current_date - ${WINDOW}") || L1_TOTAL="ERR"
+L1_MISMATCH=$(psql_q "SELECT COUNT(*) FROM mart.daily_totals       WHERE transaction_date >= current_date - ${WINDOW} AND status='mismatch'") || L1_MISMATCH="ERR"
+L2_OPEN=$(psql_q  "SELECT COUNT(*) FROM mart.exceptions             WHERE kind LIKE 'l2_%' AND status='open'") || L2_OPEN="ERR"
+L3_UNSETTLED=$(psql_q "SELECT COUNT(*) FROM mart.expected_settlements WHERE status='unsettled_5d' AND batch_date >= current_date - ${WINDOW}") || L3_UNSETTLED="ERR"
+L3_SHORT=$(psql_q "SELECT COUNT(*) FROM mart.expected_settlements   WHERE status='settled_short' AND batch_date >= current_date - ${WINDOW}") || L3_SHORT="ERR"
 
 # ── Telegram pulse ──────────────────────────────────────────────────
 icon_l1=$([[ ${STATUS[l1]} == ok ]] && echo "✓" || echo "✗")

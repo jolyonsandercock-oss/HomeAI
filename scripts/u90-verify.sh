@@ -2,7 +2,7 @@
 # u90-verify.sh — post-session check that every U90 packet item landed.
 # Prints PASS/FAIL per check; exits with count of failures.
 
-set -uo pipefail
+set -euo pipefail
 fails=0
 
 check() {

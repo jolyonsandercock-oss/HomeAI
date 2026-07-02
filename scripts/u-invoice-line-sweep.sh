@@ -13,7 +13,7 @@ fi
 # Off the n8n event path. Runs after tonight's backfill, so no GPU contention.
 #
 #   u-invoice-line-sweep.sh [year]   # default 2026
-set -uo pipefail
+set -euo pipefail
 echo "$(date -Is) u-invoice-line-sweep heartbeat (started)"  # liveness → cron log; START not END because line-extraction can run long (72B over the backlog)
 SCRIPT=/home_ai/scripts/invoice-line-extract.py
 LOGDIR=/home_ai/logs; mkdir -p "$LOGDIR"; LOG="$LOGDIR/invoice-line-sweep.log"

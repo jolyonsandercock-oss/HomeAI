@@ -3,7 +3,7 @@
 # audit index, and pending instructions. Idempotent.
 # Output: STATUS.md (overwrites)
 
-set -uo pipefail
+set -euo pipefail
 cd /home_ai
 OUT=STATUS.md
 
@@ -24,7 +24,7 @@ COMMITS=$(git log --oneline -20)
 # Audit index
 AUDIT_TOC=""
 if [[ -f audits/INDEX.md ]]; then
-    AUDIT_TOC=$(grep -E '^## 20' audits/INDEX.md | head -5)
+    AUDIT_TOC=$(grep -E '^## 20' audits/INDEX.md | head -5 || true)
 fi
 
 {

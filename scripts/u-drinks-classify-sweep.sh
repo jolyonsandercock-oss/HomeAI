@@ -4,7 +4,7 @@
 # Idempotent (only fills NULLs). Unmatched drinks-supplier lines are surfaced by £ for
 # rule-adding — never guessed. Records an ops.pipeline_runs heartbeat.
 # Cron suggestion: 50 7 * * *  (after the line sweep at 07:40).
-set -uo pipefail
+set -euo pipefail
 VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 PW=$(docker exec -e VAULT_TOKEN="$VT" homeai-vault vault kv get -field=password secret/postgres 2>/dev/null)
 psqlc(){ docker exec -i -e PGPASSWORD="$PW" homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 "$@"; }
@@ -28,7 +28,7 @@ echo "OPS_ROWS=$N"
 
 # surface-don't-guess: top unclassified lines from drinks suppliers (St Austell etc.), by £
 echo "── Unclassified drinks-supplier lines (add a rule):"
-psqlc -tA -F'  ' <<'SQL'
+psqlc -tA -F'  ' <<'SQL' || true
 SET app.current_entity='all'; SET app.current_realm='owner';
 SELECT round(sum(l.line_net),2) AS gbp, count(*) n, left(l.description,46) AS sample
 FROM vendor_invoice_lines l JOIN vendor_invoice_inbox v ON v.id=l.invoice_id

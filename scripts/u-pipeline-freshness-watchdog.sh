@@ -4,7 +4,7 @@
 # row for each STALE/NO_DATA pipeline (upsert-guarded so it never spams — one open
 # row per pipeline) and auto-resolves pipelines that have recovered. This is the
 # safety net cron lacked: silent pipeline failures now alert.
-set -uo pipefail
+set -euo pipefail
 LOGDIR=/home_ai/logs; mkdir -p "$LOGDIR"; LOG="$LOGDIR/pipeline-freshness-watchdog.log"
 VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 PG_PW=$(docker exec -e VAULT_TOKEN="$VT" homeai-vault vault kv get -field=password secret/postgres 2>/dev/null)

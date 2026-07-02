@@ -9,7 +9,7 @@
 # by Claude/Jo — this script just keeps the factual commit trail current.
 #
 # Cron: 50 23 * * *  (end of day). Manual: ./update-master-status.sh [since]
-set -uo pipefail
+set -euo pipefail
 cd /home_ai || exit 1
 MASTER=/home_ai/MASTER.md
 TODAY=$(date +%F)

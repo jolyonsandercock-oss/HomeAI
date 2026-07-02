@@ -4,7 +4,7 @@
 # silently if the queue is empty OR an identical-count notice was sent in the
 # last 12 hours.
 
-set -uo pipefail
+set -euo pipefail
 
 N=$(docker exec -i homeai-postgres psql -U postgres -d homeai -A -t -X -c "
     SET app.current_entity='all'; SET app.current_realm='owner';

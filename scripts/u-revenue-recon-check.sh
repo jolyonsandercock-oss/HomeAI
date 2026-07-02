@@ -3,7 +3,7 @@
 # authoritative figure (ops.revenue_truth). The ONLY revenue validation that matters (per the
 # May-31 forensic: per-till is contaminated, head_office is truth, owner's report is ground truth).
 # Add a month's figure: SELECT ops.set_revenue_truth('2026-06-01', <amount>, 'Jo Jun report');
-set -uo pipefail
+set -euo pipefail
 VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 PW=$(docker exec -e VAULT_TOKEN="$VT" homeai-vault vault kv get -field=password secret/postgres 2>/dev/null)
 psqlc(){ docker exec -i -e PGPASSWORD="$PW" homeai-postgres psql -U postgres -d homeai -tAq "$@"; }

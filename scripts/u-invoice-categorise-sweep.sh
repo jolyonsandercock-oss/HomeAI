@@ -10,7 +10,7 @@
 # (e.g. RCC Roofing via notification.intuit.com -> software). The rule system needs to
 # distinguish platform-forwarded from platform-subscription invoices. Big mis-matches
 # are caught by the >£1k review check below.
-set -uo pipefail
+set -euo pipefail
 LOGDIR=/home_ai/logs; mkdir -p "$LOGDIR"; LOG="$LOGDIR/invoice-categorise-sweep.log"
 VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 PG_PW=$(docker exec -e VAULT_TOKEN="$VT" homeai-vault vault kv get -field=password secret/postgres 2>/dev/null)

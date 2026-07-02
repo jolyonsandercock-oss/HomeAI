@@ -3,7 +3,7 @@
 # every [[wiki-link]] resolves. Read-only.
 # Output: audits/<date>-memory-hygiene.md
 
-set -uo pipefail
+set -euo pipefail
 OUT=/home_ai/audits/$(date +%Y-%m-%d)-memory-hygiene.md
 
 MEMDIR=/home/joly/.claude/projects/-home-joly/memory
@@ -22,7 +22,7 @@ fi
 # Index entries
 echo "## Files on disk"
 echo ""
-on_disk=$(ls "$MEMDIR"/*.md 2>/dev/null | grep -v MEMORY.md | xargs -n1 basename)
+on_disk=$(ls "$MEMDIR"/*.md 2>/dev/null | grep -v MEMORY.md | xargs -n1 basename || true)
 n_disk=$(echo "$on_disk" | wc -l)
 echo "Total memory files (excl. MEMORY.md): $n_disk"
 echo ""
@@ -34,7 +34,7 @@ echo ""
 # Linked in MEMORY.md
 echo "## Indexed in MEMORY.md"
 echo ""
-linked=$(grep -oE '\([a-z_-]+\.md\)' "$INDEX" 2>/dev/null | tr -d '()' | sort -u)
+linked=$(grep -oE '\([a-z_-]+\.md\)' "$INDEX" 2>/dev/null | tr -d '()' | sort -u || true)
 n_linked=$(echo "$linked" | wc -l)
 echo "Total linked entries: $n_linked"
 echo ""
@@ -68,7 +68,7 @@ echo ""
 # Wiki-link refs across all memory files
 echo "## Wiki-link \`[[name]]\` references"
 echo ""
-wiki_refs=$(grep -rhoE '\[\[[a-z_-]+\]\]' "$MEMDIR"/*.md 2>/dev/null | sort -u)
+wiki_refs=$(grep -rhoE '\[\[[a-z_-]+\]\]' "$MEMDIR"/*.md 2>/dev/null | sort -u || true)
 if [[ -n "$wiki_refs" ]]; then
     echo "All \`[[link]]\` targets seen:"
     echo ""

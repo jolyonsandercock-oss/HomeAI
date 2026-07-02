@@ -4,7 +4,7 @@
 # X-Realm: work and X-Realm: all, and asserts a 200 response.
 # Also smokes the new slug endpoints and confirms expected non-empty rows.
 
-set -uo pipefail
+set -euo pipefail
 
 PASS=0
 FAIL=0
@@ -15,7 +15,7 @@ check() {
   local realm="$2"
   local path="$3"
   local expect="${4:-200}"
-  out=$(docker exec homeai-build-dashboard curl -s -o /dev/null -w "%{http_code}" -H "X-Realm: $realm" "http://localhost:8090$path")
+  out=$(docker exec homeai-build-dashboard curl -s -o /dev/null -w "%{http_code}" -H "X-Realm: $realm" "http://localhost:8090$path") || true
   if [ "$out" = "$expect" ]; then
     PASS=$((PASS + 1))
     printf "  \e[32mOK\e[0m  [%s] %-30s → HTTP %s\n" "$realm" "$path" "$out"
@@ -30,7 +30,7 @@ slug_check() {
   local label="$1"
   local realm="$2"
   local slug="$3"
-  body=$(docker exec homeai-build-dashboard curl -s -H "X-Realm: $realm" "http://localhost:8090/api/finance/slug/$slug")
+  body=$(docker exec homeai-build-dashboard curl -s -H "X-Realm: $realm" "http://localhost:8090/api/finance/slug/$slug") || true
   if echo "$body" | grep -q '"n_rows"'; then
     PASS=$((PASS + 1))
     printf "  \e[32mOK\e[0m  [%s] slug/%-25s\n" "$realm" "$slug"
@@ -98,8 +98,8 @@ slug_check "bld"  "all" "build_forensic_summary"
 echo
 echo "── Realm-mapping sanity ─────────────────────────────────"
 # 'all' maps to DB 'owner' — query should return rows
-body=$(docker exec homeai-build-dashboard curl -s -H "X-Realm: all" http://localhost:8090/api/finance/slug/action_queue)
-rows=$(echo "$body" | python3 -c "import sys, json; d = json.load(sys.stdin); print(d.get('n_rows', 0))" 2>/dev/null)
+body=$(docker exec homeai-build-dashboard curl -s -H "X-Realm: all" http://localhost:8090/api/finance/slug/action_queue) || true
+rows=$(echo "$body" | python3 -c "import sys, json; d = json.load(sys.stdin); print(d.get('n_rows', 0))" 2>/dev/null) || true
 if [ "$rows" -gt 0 ] 2>/dev/null; then
   PASS=$((PASS + 1))
   echo "  OK   action_queue returns $rows rows when X-Realm=all"
@@ -109,7 +109,7 @@ else
 fi
 
 # Invalid realm rejected
-out=$(docker exec homeai-build-dashboard curl -s -o /dev/null -w "%{http_code}" -H "X-Realm: bogus" http://localhost:8090/api/finance/slug/action_queue)
+out=$(docker exec homeai-build-dashboard curl -s -o /dev/null -w "%{http_code}" -H "X-Realm: bogus" http://localhost:8090/api/finance/slug/action_queue) || true
 if [ "$out" = "401" ]; then
   PASS=$((PASS + 1))
   echo "  OK   bogus X-Realm rejected with 401"

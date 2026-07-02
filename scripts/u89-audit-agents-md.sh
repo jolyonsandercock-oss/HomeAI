@@ -3,7 +3,7 @@
 # in AGENTS.md still exists. Read-only.
 # Output: audits/<date>-agents-md-drift.md
 
-set -uo pipefail
+set -euo pipefail
 OUT=/home_ai/audits/$(date +%Y-%m-%d)-agents-md-drift.md
 AGENTS=/home_ai/AGENTS.md
 
@@ -38,7 +38,7 @@ grep -oE '(/home_ai/[A-Za-z0-9_./-]+|scripts/[A-Za-z0-9_./-]+\.(sh|py|sql)|postg
         else
             echo "| \`$path\` | 🔴 missing |"
         fi
-    done
+    done || true
 
 echo ""
 
@@ -59,13 +59,13 @@ grep -oE '\`[a-z_]+[a-z0-9_]*\`' "$AGENTS" \
             home|true|false|null|select|from|where|count|integer|text|timestamp) continue;;
         esac
         exists=$(docker exec homeai-postgres psql -U postgres -d homeai -At </dev/null -c \
-            "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON c.relnamespace=n.oid WHERE c.relname='$candidate' AND n.nspname IN ('public','mart','staging','raw');" 2>/dev/null | head -1)
+            "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON c.relnamespace=n.oid WHERE c.relname='$candidate' AND n.nspname IN ('public','mart','staging','raw');" 2>/dev/null | head -1) || true
         if [[ "$exists" =~ ^[1-9] ]]; then
             echo "| \`$candidate\` | ✓ |"
         elif [[ "$exists" == "0" ]]; then
             : # not flagged — many backticked words are SQL keywords or column names, not tables
         fi
-    done
+    done || true
 
 echo ""
 echo "## Summary"

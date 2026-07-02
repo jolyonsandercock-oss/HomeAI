@@ -12,7 +12,7 @@
 # Account→entity mapping comes from bank_accounts (NOT hardcoded).
 # RLS: sets app.current_entity='all' + realm='owner' (cross-realm admin import);
 # each row's realm/entity is written explicitly from bank_accounts.
-set -uo pipefail
+set -euo pipefail
 INBOX="/home_ai/data/natwest-inbox"
 ARCHIVE="$INBOX/processed"
 mkdir -p "$ARCHIVE"
@@ -29,7 +29,7 @@ mapfile -t CSVS < <(find "$INBOX" -name '*.csv' -not -path "$ARCHIVE/*" 2>/dev/n
 docker exec homeai-bot-responder mkdir -p "$CTR_DIR"
 for f in "${CSVS[@]}"; do docker cp "$f" "homeai-bot-responder:$CTR_DIR/$(basename "$f")" 2>/dev/null; done
 
-docker exec -i -e PG_DSN="$PG_DSN" -e CSV_DIR="$CTR_DIR" homeai-bot-responder python <<'PYEOF'
+if docker exec -i -e PG_DSN="$PG_DSN" -e CSV_DIR="$CTR_DIR" homeai-bot-responder python <<'PYEOF'
 import asyncio, asyncpg, os, csv, glob, hashlib
 from datetime import datetime
 CSV_DIR=os.environ["CSV_DIR"]
@@ -77,10 +77,14 @@ async def main():
     await c.close()
 asyncio.run(main())
 PYEOF
-rc=$?
-docker exec homeai-bot-responder rm -rf "$CTR_DIR" 2>/dev/null
+then
+  rc=0
+else
+  rc=$?
+fi
+docker exec homeai-bot-responder rm -rf "$CTR_DIR" 2>/dev/null || true
 if [ "$rc" -eq 0 ]; then
-  for f in "${CSVS[@]}"; do mv "$f" "$ARCHIVE/$(date +%Y%m%d-%H%M%S)-$(basename "$f")" 2>/dev/null; done
+  for f in "${CSVS[@]}"; do mv "$f" "$ARCHIVE/$(date +%Y%m%d-%H%M%S)-$(basename "$f")" 2>/dev/null || true; done
   echo "$(date -Is) archived ${#CSVS[@]} file(s) → $ARCHIVE"
 fi
 exit $rc

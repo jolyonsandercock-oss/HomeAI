@@ -4,7 +4,7 @@
 # Read-write (the hunters insert mart.exceptions on detect, but idempotent).
 # Output: audits/<date>-missing-data-summary.md
 
-set -uo pipefail
+set -euo pipefail
 OUT=/home_ai/audits/$(date +%Y-%m-%d)-missing-data-summary.md
 mkdir -p "$(dirname "$OUT")"
 
@@ -17,7 +17,7 @@ COUNTS=$(docker exec -i homeai-postgres psql -U postgres -d homeai -At -F'|' -v 
  SELECT kind, count(*) FILTER (WHERE status='open') AS open, count(*) AS total, max(raised_at)::date AS latest
    FROM mart.exceptions
   WHERE kind IN ('to_scrape_gap','dojo_settlement_gap','till_recon_missing','ghost_shift_day')
-  GROUP BY kind ORDER BY kind;" 2>/dev/null | grep -v '^$\|^SET$')
+  GROUP BY kind ORDER BY kind;" 2>/dev/null | grep -v '^$\|^SET$' || true)
 
 # Confirm cron entries
 CRON=$(crontab -l 2>/dev/null | grep -E 'u72-missing-data-hunters|u75-pipeline-smoke|u67-recon-l1' || echo "(no relevant cron found)")

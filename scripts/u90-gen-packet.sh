@@ -2,7 +2,7 @@
 # u90-gen-packet.sh — assemble Jo's in-person checklist from prior sprint
 # audits. Idempotent. Output: audits/<date>-jo-checklist.md
 
-set -uo pipefail
+set -euo pipefail
 OUT=/home_ai/audits/$(date +%Y-%m-%d)-jo-checklist.md
 
 {

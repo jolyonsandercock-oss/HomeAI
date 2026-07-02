@@ -4,7 +4,7 @@
 # SPEC §4b.7. Terse, actionable. NO message if zero exceptions in
 # window (silence = success signal, per spec).
 
-set -uo pipefail
+set -euo pipefail
 
 # Pull severity/kind counts + a sample summary line for the prior-day window.
 cat > /tmp/u69-digest-query.sql <<'SQL'

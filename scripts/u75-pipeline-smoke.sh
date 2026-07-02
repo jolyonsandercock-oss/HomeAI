@@ -11,7 +11,7 @@
 #
 # Exits non-zero (and tg_sends a message) on failure.
 
-set -uo pipefail
+set -euo pipefail
 
 INBOX="/mnt/shared_storage/scans/inbox"
 TAG="u75-smoke-$(date +%s)"
@@ -53,7 +53,7 @@ for i in $(seq 1 18); do
     # postgres superuser has BYPASSRLS so no GUC SETs needed.
     DOC_ID=$(docker exec homeai-postgres psql -U postgres -d homeai -At -c \
         "SELECT id FROM documents WHERE title LIKE '$TAG%' OR title = '$PDF' LIMIT 1;" \
-        2>/dev/null | head -1)
+        2>/dev/null | head -1) || true
     if [[ -n "$DOC_ID" ]]; then break; fi
 done
 

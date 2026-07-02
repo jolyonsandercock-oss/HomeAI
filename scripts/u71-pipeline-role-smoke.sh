@@ -5,7 +5,7 @@
 #
 # Read-only; safe to run on production.
 
-set -uo pipefail
+set -euo pipefail
 
 VAULT_TOKEN=$(docker inspect homeai-bot-responder \
   --format '{{range .Config.Env}}{{println .}}{{end}}' \
@@ -16,11 +16,16 @@ PW=$(docker exec -e VAULT_TOKEN="$VAULT_TOKEN" homeai-vault \
 
 run() {
     local label="$1" sql="$2"
-    out=$(PGPASSWORD="$PW" docker exec -e PGPASSWORD="$PW" \
-          homeai-postgres psql -U homeai_pipeline -d homeai -At -c "$sql" 2>&1)
-    if [[ $? -eq 0 && -n "$out" ]]; then
+    local rc
+    if out=$(PGPASSWORD="$PW" docker exec -e PGPASSWORD="$PW" \
+          homeai-postgres psql -U homeai_pipeline -d homeai -At -c "$sql" 2>&1); then
+        rc=0
+    else
+        rc=$?
+    fi
+    if [[ $rc -eq 0 && -n "$out" ]]; then
         printf "  ✓ %-40s → %s\n" "$label" "$(echo "$out" | head -1 | head -c 60)"
-    elif [[ $? -eq 0 ]]; then
+    elif [[ $rc -eq 0 ]]; then
         printf "  ✓ %-40s → (empty)\n" "$label"
     else
         printf "  ✗ %-40s → %s\n" "$label" "$(echo "$out" | head -1 | head -c 90)"

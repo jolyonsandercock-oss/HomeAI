@@ -12,7 +12,7 @@
 #   bash /home_ai/scripts/u84-bulk-reclassify-shared.sh [LIMIT]
 #   LIMIT defaults to 500. Run a few times to drain the backlog.
 
-set -uo pipefail
+set -euo pipefail
 LIMIT="${1:-500}"
 
 echo "── u84 bulk reclassifier — limit=$LIMIT"

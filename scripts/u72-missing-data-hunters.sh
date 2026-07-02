@@ -4,7 +4,7 @@
 #
 # Output goes to stdout so cron logs reflect what was raised.
 
-set -uo pipefail
+set -euo pipefail
 
 docker exec homeai-postgres psql -U postgres -d homeai -At -c "
 SELECT set_config('app.current_entity','all',false);

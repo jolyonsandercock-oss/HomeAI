@@ -2,7 +2,7 @@
 # u89-gen-cron-doc.sh — generate docs/cron.md from crontab + script docstrings.
 # Read-only. Output: docs/cron.md
 
-set -uo pipefail
+set -euo pipefail
 mkdir -p /home_ai/docs
 OUT=/home_ai/docs/cron.md
 
@@ -18,14 +18,14 @@ crontab -l 2>/dev/null | grep -v '^#' | grep -v '^$' | while IFS= read -r line; 
     # Extract schedule (first 5 fields)
     sched=$(echo "$line" | awk '{print $1, $2, $3, $4, $5}')
     # Extract script path
-    script=$(echo "$line" | grep -oE '/[^ ]+\.sh' | head -1)
+    script=$(echo "$line" | grep -oE '/[^ ]+\.sh' | head -1 || true)
     [[ -z "$script" ]] && continue
     base=$(basename "$script")
     # Pull leading comment block from script
     purpose=""
     if [[ -f "$script" ]]; then
         purpose=$(awk 'NR<10 && /^#/ {sub(/^# */, ""); print}' "$script" \
-                  | grep -v '^!/' | head -2 | tr '\n' ' ' | head -c 120)
+                  | grep -v '^!/' | head -2 | tr '\n' ' ' | head -c 120 || true)
     fi
     printf "| \`%s\` | \`%s\` | %s |\n" "$sched" "$base" "$purpose"
 done
@@ -36,7 +36,7 @@ echo "## Orphan scripts (on disk, not cronned)"
 echo ""
 echo "Scripts matching \`u\\d+-\` in scripts/ that aren't on cron. May be ad-hoc/one-shot or genuine orphans."
 echo ""
-crontab_scripts=$(crontab -l 2>/dev/null | grep -oE '/[^ ]+\.sh' | xargs -n1 basename 2>/dev/null | sort -u)
+crontab_scripts=$(crontab -l 2>/dev/null | grep -oE '/[^ ]+\.sh' | xargs -n1 basename 2>/dev/null | sort -u || true)
 on_disk=$(ls /home_ai/scripts/u*-*.sh 2>/dev/null | xargs -n1 basename | sort -u)
 comm -23 <(echo "$on_disk") <(echo "$crontab_scripts") | head -30 | sed 's/^/  /'
 } > "$OUT"

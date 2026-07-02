@@ -3,7 +3,7 @@
 # Includes a top-30 mermaid graph of the most-referenced views.
 # Read-only. Output: docs/views.md
 
-set -uo pipefail
+set -euo pipefail
 mkdir -p /home_ai/docs
 OUT=/home_ai/docs/views.md
 
@@ -51,7 +51,7 @@ while read -r n dep; do
         v_short=$(echo "$view" | sed 's/^public\.//' | tr '.' '_')
         echo "  $d_short --> $v_short"
     done
-done | sort -u | head -60
+done | sort -u | head -60 || true
 echo '```'
 echo ""
 echo "## Full per-view dependency list"

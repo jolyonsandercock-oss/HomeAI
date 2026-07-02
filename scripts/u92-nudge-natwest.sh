@@ -6,7 +6,7 @@
 #   30 9 * * * /home_ai/scripts/u92-nudge-natwest.sh  # tomorrow 09:30
 # Script then deletes its own crontab entry.
 
-set -uo pipefail
+set -euo pipefail
 
 VT=$(docker inspect homeai-bot-responder --format '{{range .Config.Env}}{{println .}}{{end}}' \
      | grep '^VAULT_TOKEN=' | cut -d= -f2-)

@@ -3,7 +3,7 @@
 # in git and classify them. Read-only.
 # Output: audits/<date>-untracked-files.md
 
-set -uo pipefail
+set -euo pipefail
 OUT=/home_ai/audits/$(date +%Y-%m-%d)-untracked-files.md
 
 cd /home_ai

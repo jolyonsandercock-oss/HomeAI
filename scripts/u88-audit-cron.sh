@@ -3,11 +3,11 @@
 # codes from its log + flag scripts that haven't run successfully recently.
 # Read-only. Output: audits/<date>-cron-health.md
 
-set -uo pipefail
+set -euo pipefail
 OUT=/home_ai/audits/$(date +%Y-%m-%d)-cron-health.md
 
 # Pull cron schedule
-cron_lines=$(crontab -l 2>/dev/null | grep -v '^#' | grep -v '^$' | grep -oE '/home_ai/scripts/[^ ]+\.sh' | sort -u)
+cron_lines=$(crontab -l 2>/dev/null | grep -v '^#' | grep -v '^$' | grep -oE '/home_ai/scripts/[^ ]+\.sh' | sort -u || true)
 
 {
 echo "# Cron health audit"
@@ -24,14 +24,14 @@ while IFS= read -r script; do
     [[ -z "$script" ]] && continue
     base=$(basename "$script" .sh)
     # Look for matching log
-    log=$(ls /home_ai/logs/${base}*.log 2>/dev/null | head -1)
+    log=$(ls /home_ai/logs/${base}*.log 2>/dev/null | head -1) || true
     if [[ -z "$log" ]]; then
         log="(none)"; size="—"; touched="—"; errors="—"; flag="🟡 no log"
     else
-        size=$(stat -c '%s' "$log" 2>/dev/null | awk '{printf "%.1f KB", $1/1024}')
-        touched=$(stat -c '%y' "$log" 2>/dev/null | cut -d. -f1)
+        size=$(stat -c '%s' "$log" 2>/dev/null | awk '{printf "%.1f KB", $1/1024}') || true
+        touched=$(stat -c '%y' "$log" 2>/dev/null | cut -d. -f1) || true
         # Errors in last 100 lines
-        errors=$(tail -100 "$log" 2>/dev/null | grep -ciE 'error|traceback|fatal|fail|exception' || echo 0)
+        errors=$(tail -100 "$log" 2>/dev/null | grep -ciE 'error|traceback|fatal|fail|exception' || true)
         # Staleness
         log_age_days=$(( ($(date +%s) - $(date -d "$touched" +%s 2>/dev/null || echo 0)) / 86400 ))
         flag=""
