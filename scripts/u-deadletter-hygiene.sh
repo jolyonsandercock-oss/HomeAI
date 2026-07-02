@@ -29,16 +29,21 @@ WITH ph AS (
   RETURNING 1)
 SELECT count(*) FROM ph;
 -- 2. bounded re-drive of genuinely-failed, recoverable events (once)
+-- Uses the dedicated redrive_count (default 0): dead_letter.retry_count arrives
+-- already =3 (inherited from the event's exhausted retries), so gating on it
+-- made the re-drive a permanent no-op (0 re-driven ever, fixed 2026-07-02).
 WITH rd AS (
   UPDATE events e SET status='pending', processing_started_at=NULL, processing_node_id=NULL, retry_count=0
   FROM dead_letter d
   WHERE d.event_id=e.id AND NOT d.resolved AND e.status='failed'
-    AND COALESCE(d.retry_count,0) < 2
+    AND COALESCE(d.redrive_count,0) < 1
     AND e.event_type NOT IN ('document.received')   -- known V250 quarantine; don't churn it
-  RETURNING d.id)
-SELECT count(*) FROM rd;
-UPDATE dead_letter SET retry_count=COALESCE(retry_count,0)+1
-  WHERE NOT resolved AND event_id IN (SELECT id FROM events WHERE status='pending');
+  RETURNING d.id),
+bump AS (
+  UPDATE dead_letter SET redrive_count=COALESCE(redrive_count,0)+1
+  WHERE id IN (SELECT id FROM rd)
+  RETURNING 1)
+SELECT count(*) FROM bump;
 SQL
 )"
 echo "deadletter-hygiene: phantom-resolved=$PHANTOM re-driven=$REDRIVEN"

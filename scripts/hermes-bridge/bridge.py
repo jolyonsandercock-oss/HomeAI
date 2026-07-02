@@ -73,7 +73,17 @@ class Mnemosyne:
             return dict(row) if row else None
 
     def delete(self, mem_id: str):
-        self._cli("delete", mem_id)
+        # NOT via the CLI: mnemosyne's forget() is session-scoped
+        # (DELETE FROM memories ... AND session_id = <current session>) and its
+        # BEAM half only checks working_memory — so a row stored by a previous
+        # bridge run can never be deleted through the CLI (exit 1 "Memory not
+        # found"; broke the daily sync 2026-06-16..07-02). Delete directly,
+        # guarded to inherited rows so Hermes-authored memory is untouchable.
+        with sqlite3.connect(self._db_path()) as cx:
+            for table in ("memories", "working_memory"):
+                cx.execute(f"DELETE FROM {table} WHERE id=? AND source LIKE ?",
+                           (mem_id, SOURCE_PREFIX + "%"))
+            cx.commit()
 
     def list_inherited_sources(self) -> list[str]:
         with sqlite3.connect(self._db_path()) as cx:
