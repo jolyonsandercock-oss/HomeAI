@@ -1,5 +1,10 @@
 # STATUS
 
+> **SUPERSEDED (2026-07-02):** this file is only regenerated at `/retro` and
+> is stale between runs (last generated 2026-05-24 below). For current status
+> see `MASTER.md`. The R0-R5 hygiene/hardening program tracks current debt —
+> don't treat this snapshot as live.
+
 _generated: 2026-05-24T17:38:12+01:00_
 _by: scripts/u89-regen-status.sh_
 

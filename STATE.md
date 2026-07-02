@@ -1,5 +1,11 @@
 # Home AI — Live State Snapshot (for external review)
 
+> **SUPERSEDED (2026-07-02):** this snapshot stopped being updated after the
+> 2026-05-14 appends below and does not reflect the current build. For the
+> current architecture and design direction see
+> `docs/superpowers/specs/2026-07-02-e2e-refactor-design.md`. Kept for
+> historical external-review context only.
+
 *Generated 2026-05-12. R2 appended 2026-05-14 (U52). R5 + U50 closeout
 appended 2026-05-14 (U53). U54/U55/U56/U54-D appended 2026-05-14 (6h
 autonomous run). Designed to be ingested by another LLM (Gemini, GPT,

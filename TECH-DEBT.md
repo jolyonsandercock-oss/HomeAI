@@ -1,5 +1,12 @@
 # Home AI — Technical Debt & User Actions Tracker
 
+> **SUPERSEDED (2026-07-02):** this file is a point-in-time tracker and is no
+> longer the canonical debt list. Current tech debt is tracked by the R0-R5
+> hygiene/hardening program; see `docs/TECH-DEBT-REVIEW-2026-06-20.md` for the
+> reviewed baseline that program works from. Entries below are kept for
+> history — do not add new items here without also reflecting them in the
+> R0-R5 tracking.
+
 Items that need user (Jo) attention — surfaced during build sessions. Updated by Claude Code each session. Items remain until resolved with `✓` prefix.
 
 ---
