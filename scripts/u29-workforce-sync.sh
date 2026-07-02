@@ -14,7 +14,7 @@
 #
 # Pre-req: scripts/u29-workforce-creds.sh ran successfully.
 
-set -uo pipefail
+set -euo pipefail
 DAYS="${1:-90}"
 DAYS_FORWARD="${2:-21}"
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)

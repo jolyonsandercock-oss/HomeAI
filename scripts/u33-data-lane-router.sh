@@ -12,7 +12,7 @@
 # Cron: every 5 minutes. Idempotent — vendor_invoice_inbox has UNIQUE on
 # idempotency_key; saved files use the Gmail message_id.
 
-set -uo pipefail
+set -euo pipefail
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 
 # Attachments are written under /home_ai/data — must be bind-mounted in the

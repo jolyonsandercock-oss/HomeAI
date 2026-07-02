@@ -12,7 +12,11 @@ cat > "$HOOK" <<'HOOK_BODY'
 # Block on high-entropy strings that look like API keys / tokens.
 # Override with `git commit --no-verify` (only when explicitly intended).
 
-set -uo pipefail
+# R0.9: -e is safe here — the `grep '^+' | grep -v '^+++' | python3 -c ...`
+# pipeline's exit status (with pipefail) is always the python3 script's own
+# deliberate exit(0)/exit(1), even when an intermediate grep matches nothing
+# (e.g. a pure-deletion diff), so a false abort on "no added lines" can't happen.
+set -euo pipefail
 ENTROPY_THRESHOLD=4.5  # bits per char (real API keys are 4.7+; long file paths hover 4.2-4.4)
 
 # Get staged content (added or modified)

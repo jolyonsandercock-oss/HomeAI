@@ -12,7 +12,7 @@
 #   ./scripts/u29-vendor-invoices-backfill.sh           # last 30 days
 #   ./scripts/u29-vendor-invoices-backfill.sh 90        # last 90 days
 
-set -uo pipefail
+set -euo pipefail
 DAYS="${1:-30}"
 
 # Noise senders we explicitly skip (booking platforms — not real invoices)

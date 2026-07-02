@@ -9,5 +9,5 @@
 # Cron: every 5 minutes. Idempotent — picks one row at a time under
 # `FOR UPDATE SKIP LOCKED` so parallel runs (overlap) won't double-process.
 
-set -uo pipefail
+set -euo pipefail
 docker exec homeai-bot-responder python /app/responder.py

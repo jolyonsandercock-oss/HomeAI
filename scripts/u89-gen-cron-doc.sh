@@ -36,8 +36,12 @@ echo "## Orphan scripts (on disk, not cronned)"
 echo ""
 echo "Scripts matching \`u\\d+-\` in scripts/ that aren't on cron. May be ad-hoc/one-shot or genuine orphans."
 echo ""
-crontab_scripts=$(crontab -l 2>/dev/null | grep -oE '/[^ ]+\.sh' | xargs -n1 basename 2>/dev/null | sort -u || true)
-on_disk=$(ls /home_ai/scripts/u*-*.sh 2>/dev/null | xargs -n1 basename | sort -u)
+# LC_ALL=C on both: en_US.UTF-8 collation sorts differently from the strict
+# byte-order comm expects, so `sort -u` output that looks fine on its own can
+# still trip "comm: input is not in sorted order" (exit 1, would abort under
+# set -e) -- LC_ALL=C keeps sort and comm's notion of "sorted" in agreement.
+crontab_scripts=$(crontab -l 2>/dev/null | grep -oE '/[^ ]+\.sh' | xargs -n1 basename 2>/dev/null | LC_ALL=C sort -u || true)
+on_disk=$(ls /home_ai/scripts/u*-*.sh 2>/dev/null | xargs -n1 basename | LC_ALL=C sort -u)
 comm -23 <(echo "$on_disk") <(echo "$crontab_scripts") | head -30 | sed 's/^/  /'
 } > "$OUT"
 echo "✓ wrote $OUT"
