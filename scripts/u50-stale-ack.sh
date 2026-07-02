@@ -35,4 +35,13 @@ UPDATE system_alerts
    AND status='firing'
    AND acknowledged=false
    AND last_updated_at < now() - interval '12 hours';
+
+-- R0.3: auto-resolve ANY firing alert (not just Diag_*) not refreshed in 72h.
+-- The digest task trusts status='firing' as "currently live" — stale rows
+-- that stopped being refreshed (detector removed/renamed, one-off blip)
+-- must not linger forever. Keys on last_updated_at (refresh timestamp),
+-- not starts_at, so genuinely-live alerts that keep upserting survive.
+UPDATE system_alerts SET status='resolved', ends_at=now(),
+       notes=COALESCE(notes,'')||' [auto-resolved: not refreshed >72h, R0.3]'
+ WHERE status='firing' AND last_updated_at < now() - interval '72 hours';
 SQL
