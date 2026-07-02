@@ -13,15 +13,13 @@
 # can't blow the digest up to hundreds of lines.
 set -euo pipefail
 echo "START $(date -Is)"
-VT=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
-PW=$(docker exec -e VAULT_TOKEN="$VT" homeai-vault vault kv get -field=password secret/postgres)
-psqlc(){ docker exec -e PGPASSWORD="$PW" homeai-postgres psql -U postgres -d homeai -tA -F'|' -c "$1"; }
+source "$(dirname "${BASH_SOURCE[0]}")/lib/pg-connect.sh"
 
 STALE=$(psqlc "SELECT name||' age='||COALESCE(age_hours::text,'n/a')||'h (sla '||sla_hours||'h)'
                FROM ops.check_freshness() WHERE status IN ('STALE','NO_DATA') ORDER BY age_hours DESC NULLS LAST")
 ALERTS=$(psqlc "SELECT alertname||' ['||COALESCE(severity,'?')||'] since '||to_char(starts_at,'MM-DD')||
                 CASE WHEN acknowledged THEN ' (acked)' ELSE '' END
-                FROM system_alerts WHERE status='firing' ORDER BY starts_at")
+                FROM system_alerts WHERE status='firing' ORDER BY starts_at LIMIT 20")
 EXC=$(psqlc "SELECT kind||': '||left(summary,60)||' ('||to_char(raised_at,'MM-DD')||')'
              FROM mart.exceptions WHERE status='open' ORDER BY raised_at DESC LIMIT 15")
 

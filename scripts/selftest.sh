@@ -100,13 +100,13 @@ echo
 
 # ── HTTP probes ────────────────────────────────────────────────
 echo "[5] HTTP probes"
-CURL="docker run --rm --network home_ai_ai-internal curlimages/curl:latest -sS -o /dev/null -w %{http_code}"
+CURL="docker run --rm --network home_ai_ai-internal curlimages/curl:latest -sS -m 8 -o /dev/null -w %{http_code}"
 check "n8n /healthz"          "code=\$($CURL http://homeai-n8n:5678/healthz 2>/dev/null); [[ \$code == 200 ]] && echo \$code"
 check "pdfplumber /healthcheck" "code=\$($CURL http://homeai-pdfplumber:8003/healthcheck 2>/dev/null); [[ \$code == 200 ]] && echo \$code"
 check "markitdown /healthcheck" "code=\$($CURL http://homeai-markitdown:8004/healthcheck 2>/dev/null); [[ \$code == 200 ]] && echo \$code"
 check "ollama /api/version"   "code=\$($CURL http://homeai-ollama:11434/api/version 2>/dev/null); [[ \$code == 200 ]] && echo \$code"
 check "build-dashboard /api/healthz" "code=\$($CURL http://homeai-build-dashboard:8090/api/healthz 2>/dev/null); [[ \$code == 200 ]] && echo \$code"
-PROM="docker run --rm --network home_ai_ai-monitoring curlimages/curl:latest -sS"
+PROM="docker run --rm --network home_ai_ai-monitoring curlimages/curl:latest -sS -m 8"
 check "prometheus targets up >= 3" "n=\$($PROM 'http://homeai-prometheus:9090/api/v1/targets' 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(1 for t in d[\"data\"][\"activeTargets\"] if t[\"health\"]==\"up\"))'); [[ \$n -ge 3 ]] && echo \$n"
 check "alertmanager ready"       "code=\$($PROM -o /dev/null -w %{http_code} http://homeai-alertmanager:9093/-/ready 2>/dev/null); [[ \$code == 200 ]] && echo \$code"
 echo

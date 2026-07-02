@@ -33,8 +33,15 @@ if [ "${#DEAD[@]}" -eq 0 ]; then echo "all publishes alive"; exit 0; fi
 echo "dead publishes -> recreating: ${DEAD[*]}"
 bash /home_ai/scripts/recreate-with-secrets.sh "${DEAD[@]}" || echo "WARN: recreate returned $? — continuing to post-heal verification"
 sleep 15
+STILL_DEAD=()
 for port in "${!OWNER[@]}"; do
   code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://100.104.82.53:${port}/") || code=000
   echo "post-heal port $port -> $code"
+  [ "$code" = "000" ] && STILL_DEAD+=("${OWNER[$port]}")
 done
+if [ "${#STILL_DEAD[@]}" -gt 0 ]; then
+  echo "PARTIAL HEAL: still dead -> ${STILL_DEAD[*]}"
+  echo "DONE $(date -Is)"
+  exit 1
+fi
 echo "DONE $(date -Is)"
