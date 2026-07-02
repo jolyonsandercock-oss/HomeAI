@@ -6,7 +6,7 @@
 #
 # Reads from Vault — no secrets on disk. Output is shown ONCE.
 
-set -uo pipefail
+set -euo pipefail
 
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 if [[ -z "$VAULT_TOKEN" ]]; then

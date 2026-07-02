@@ -15,7 +15,7 @@
 # DORMANT until Pipeline 3 (Xero sync) unblocks and reconciliation_flags
 # starts being populated. Script is safe to run with 0 candidates.
 
-set -uo pipefail
+set -euo pipefail
 LIMIT="${1:-20}"
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 

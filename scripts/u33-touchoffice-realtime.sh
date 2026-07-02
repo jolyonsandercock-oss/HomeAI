@@ -8,7 +8,7 @@
 #
 # Cron: */10 * * * *. The 03:00 daily job remains for the previous-day pass.
 
-set -uo pipefail
+set -euo pipefail
 TODAY=$(date '+%Y-%m-%d')
 
 # ── Overlap guard ────────────────────────────────────────────

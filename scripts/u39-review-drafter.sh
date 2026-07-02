@@ -10,7 +10,7 @@
 #
 # Telegram-alerts immediately on rating ≤3 (separate from the draft path).
 
-set -uo pipefail
+set -euo pipefail
 LIMIT="${1:-20}"
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 

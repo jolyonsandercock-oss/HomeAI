@@ -9,7 +9,7 @@
 #
 # Cron: 0 2 * * *  (daily 02:00)
 
-set -uo pipefail
+set -euo pipefail
 HOURS_BACK="${1:-24}"
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 
@@ -236,7 +236,7 @@ if (( PROPOSALS > 0 )); then
     SELECT string_agg(format('  • [%s] %s: %s', severity, scope, LEFT(observation, 80)), E'\n')
       FROM dreaming_heuristics
      WHERE status='proposed' AND severity IN ('medium','high')
-       AND generated_at > now() - interval '2 hours';" 2>/dev/null)
+       AND generated_at > now() - interval '2 hours';" 2>/dev/null || echo "")
   bash /home_ai/.claude/scripts/notify-telegram.sh \
     "💭 <b>Dreaming proposals</b> — $PROPOSALS new (severity ≥ medium)
 $SUMMARY

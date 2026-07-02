@@ -12,7 +12,7 @@
 #   4. Application type = "Live"
 #   5. Copy the API key shown
 
-set -uo pipefail
+set -euo pipefail
 
 echo "── Companies House Public Data API key intake ──"
 echo "If you don't have an app yet:"
@@ -24,7 +24,7 @@ if [[ -z "$API_KEY" ]]; then echo "Aborted (no key entered)."; exit 1; fi
 echo
 echo "Testing key against /company/00000006 …"
 HTTP=$(curl -s -o /tmp/ch_test.json -w "%{http_code}" \
-  -u "${API_KEY}:" "https://api.company-information.service.gov.uk/company/00000006")
+  -u "${API_KEY}:" "https://api.company-information.service.gov.uk/company/00000006" || echo "000")
 if [[ "$HTTP" != "200" ]]; then
   echo "  ✗ HTTP $HTTP — key rejected. Response:"
   cat /tmp/ch_test.json | head -c 400; echo

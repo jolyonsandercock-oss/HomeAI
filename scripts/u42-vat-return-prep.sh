@@ -7,7 +7,7 @@
 #
 # Cron: 0 6 3 1,4,7,10 *   (3rd of Jan/Apr/Jul/Oct at 06:00)
 
-set -uo pipefail
+set -euo pipefail
 
 # ── Dormancy gate ────────────────────────────────────────────
 GATE=$(docker exec homeai-postgres psql -U postgres -d homeai -tA -c "

@@ -8,7 +8,7 @@
 #
 # Cron: 06:25 and 18:25 daily.
 
-set -uo pipefail
+set -euo pipefail
 DRY="${1:-}"
 
 docker exec -i homeai-postgres psql -U postgres -d homeai <<SQL

@@ -5,7 +5,7 @@
 # Telegrams a digest if any item falls inside 14 days.
 # Silent otherwise.
 
-set -uo pipefail
+set -euo pipefail
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 
 docker exec -i -e VAULT_TOKEN="$VAULT_TOKEN" homeai-playwright python << 'PYEOF'

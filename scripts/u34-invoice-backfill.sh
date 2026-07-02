@@ -12,7 +12,7 @@
 #
 # Idempotent — ON CONFLICT on idempotency_key.
 
-set -uo pipefail
+set -euo pipefail
 DAYS_BACK="${1:-100}"
 
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)

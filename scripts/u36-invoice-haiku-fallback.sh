@@ -12,7 +12,7 @@
 # Idempotent: only touches rows where extraction_method IN ('pdf_low_conf')
 # AND net_amount IS NULL (so re-runs after a success don't re-bill Haiku).
 
-set -uo pipefail
+set -euo pipefail
 LIMIT="${1:-50}"
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 

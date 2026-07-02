@@ -7,7 +7,7 @@
 #
 # Idempotent — skips rows already extracted.
 
-set -uo pipefail
+set -euo pipefail
 LIMIT="${1:-200}"
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 

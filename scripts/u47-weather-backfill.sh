@@ -8,7 +8,7 @@
 #   - First population of weather_daily beyond the 30-day window u46 created.
 #   - Re-pull if Open-Meteo updates an old reading.
 
-set -uo pipefail
+set -euo pipefail
 DAYS="${1:-400}"
 
 docker exec -i -e DAYS="$DAYS" homeai-playwright python <<'PYEOF'

@@ -8,7 +8,7 @@
 # Storage:  /home_ai/data/invoice-pdfs/{invoice_id}.pdf
 # Idempotent: skip if pdf_local_path is set and file exists.
 
-set -uo pipefail
+set -euo pipefail
 LIMIT="${1:-200}"
 
 docker exec -i -e LIMIT="$LIMIT" homeai-playwright python <<'PYEOF'

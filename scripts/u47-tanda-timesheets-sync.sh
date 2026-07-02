@@ -16,7 +16,7 @@
 # Cost_total: left NULL — needs pay-rate join, handled separately in
 # v_daily_unit_economics. raw_payload retains the full Tanda response.
 
-set -uo pipefail
+set -euo pipefail
 DAYS="${1:-7}"
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 

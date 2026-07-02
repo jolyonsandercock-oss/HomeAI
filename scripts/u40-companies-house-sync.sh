@@ -9,7 +9,7 @@
 #
 # Setup: UPDATE entities SET companies_house_number = '<num>' WHERE id IN (1, 2);
 
-set -uo pipefail
+set -euo pipefail
 
 docker exec -i homeai-playwright python <<'PYEOF'
 import os, json, urllib.request, urllib.error, base64, asyncio, asyncpg

@@ -11,7 +11,7 @@
 #        VALUES (2, 'PL34 0DA', 'Tintagel address...', '2019-08-15', 195000);
 #        (×7 for Jo's portfolio)
 
-set -uo pipefail
+set -euo pipefail
 DAYS_BACK="${1:-90}"
 
 docker exec -i -e DAYS_BACK="$DAYS_BACK" homeai-playwright python <<'PYEOF'

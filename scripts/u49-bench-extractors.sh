@@ -5,7 +5,7 @@
 # Models: qwen2.5:7b (local), Haiku 4.5, Sonnet 4.6.
 # Output: /home_ai/logs/u49-bench-results.json + .md
 
-set -uo pipefail
+set -euo pipefail
 
 # Sample invoices spanning vendor types
 SAMPLES="${1:-14,15,1,198,221}"

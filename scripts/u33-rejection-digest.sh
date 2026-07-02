@@ -8,7 +8,7 @@
 #
 # Cron: */15 * * * *.
 
-set -uo pipefail
+set -euo pipefail
 echo "$(date -Is) u33-rejection-digest heartbeat"  # liveness → cron log (digest only sent on surge; top-of-script so cooldown early-exit still beats)
 MARKER=/home_ai/data/u33-rejection-digest.lastsent
 THRESHOLD=5

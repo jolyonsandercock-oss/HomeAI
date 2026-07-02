@@ -13,7 +13,7 @@
 #
 # Cron: hourly at minute 23.
 
-set -uo pipefail
+set -euo pipefail
 
 docker exec -i homeai-playwright python << 'PYEOF'
 import os, asyncio

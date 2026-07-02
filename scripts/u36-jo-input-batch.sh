@@ -6,7 +6,7 @@
 #   2. Statement spot-check     → flip false-positives in vendor_invoice_inbox
 #   3. Dept→team sign-off       → confirm or override workforce_departments.team
 
-set -uo pipefail
+set -euo pipefail
 PSQL() { docker exec -i homeai-postgres psql -U postgres -d homeai "$@"; }
 SQL()  { docker exec    homeai-postgres psql -U postgres -d homeai -tAc "$@"; }
 

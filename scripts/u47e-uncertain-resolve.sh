@@ -21,7 +21,7 @@
 #   ./scripts/u47e-uncertain-resolve.sh            # default: 30 most uncertain
 #   ./scripts/u47e-uncertain-resolve.sh 200        # process up to N
 
-set -uo pipefail
+set -euo pipefail
 LIMIT="${1:-30}"
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 

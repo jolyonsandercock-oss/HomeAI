@@ -10,7 +10,7 @@
 #   u49-extract-invoice-lines.sh 50          # cap at 50 invoices
 #   u49-extract-invoice-lines.sh 1 123       # just invoice 123
 
-set -uo pipefail
+set -euo pipefail
 LIMIT="${1:-200}"
 ONLY_ID="${2:-}"
 

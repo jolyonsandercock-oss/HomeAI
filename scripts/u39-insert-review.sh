@@ -5,7 +5,7 @@
 # whitelisted) can paste a Google/TripAdvisor review and queue it for
 # Sonnet drafting + Action Queue review.
 
-set -uo pipefail
+set -euo pipefail
 
 PSQL() { docker exec -i homeai-postgres psql -U postgres -d homeai "$@"; }
 

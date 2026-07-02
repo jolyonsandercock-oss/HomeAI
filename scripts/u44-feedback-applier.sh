@@ -8,7 +8,7 @@
 # Cron: 30 21 * * *  (daily 21:30, before u29-daily-digest at 21:00... actually
 # after it — keep at 21:30 so the next digest picks up the proposals.)
 
-set -uo pipefail
+set -euo pipefail
 LIMIT="${1:-20}"
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 

@@ -16,7 +16,7 @@
 #                                                  via home_ai.realm_override
 #                                                  — requires V67 + owner GUC)
 
-set -uo pipefail
+set -euo pipefail
 
 MODE="${1:---audit-only}"
 
@@ -45,7 +45,7 @@ run_audit() {
     local table="$1"     # display name
     local query="$2"
     local count
-    count=$( $PSQL <<< "$query" 2>&1 | tr -d ' ' )
+    count=$( ($PSQL <<< "$query" 2>&1 || true) | tr -d ' ' )
     if ! [[ "$count" =~ ^[0-9]+$ ]]; then
         printf "  %-28s ERROR: %s\n" "$table" "$count"
         mismatches_total=$(( mismatches_total + 1 ))

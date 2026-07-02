@@ -12,7 +12,7 @@
 # Cron: 30 7 * * *  (daily 07:30 — after the daily TouchOffice scrape at 03:00,
 #                    so we can join sales-vs-weather in the same digest)
 
-set -uo pipefail
+set -euo pipefail
 
 docker exec -i homeai-playwright python <<'PYEOF'
 import os, json, urllib.request, urllib.parse, asyncio, asyncpg
@@ -212,7 +212,7 @@ asyncio.run(main())
 PYEOF
 
 # Ferry alert through notify-telegram on the host
-MSG=$(docker exec homeai-playwright sh -c 'test -f /tmp/u46-weather-alert.txt && cat /tmp/u46-weather-alert.txt; rm -f /tmp/u46-weather-alert.txt' 2>/dev/null)
+MSG=$(docker exec homeai-playwright sh -c 'test -f /tmp/u46-weather-alert.txt && cat /tmp/u46-weather-alert.txt; rm -f /tmp/u46-weather-alert.txt' 2>/dev/null || echo "")
 if [[ -n "$MSG" ]]; then
   bash /home_ai/.claude/scripts/notify-telegram.sh "$MSG" "weather" >/dev/null 2>&1 || true
 fi

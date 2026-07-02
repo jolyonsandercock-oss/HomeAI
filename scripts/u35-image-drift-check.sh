@@ -11,7 +11,7 @@
 # Output: writes a summary to /home_ai/logs/u35-image-drift.log; if any image
 # is flagged, also Telegram-alerts via notify-telegram.sh.
 
-set -uo pipefail
+set -euo pipefail
 LOG=/home_ai/logs/u35-image-drift.log
 {
   echo
@@ -38,7 +38,7 @@ for img in "${IMAGES[@]}"; do
     echo "  ? $img — couldn't check (registry response empty/error)" >> "$LOG"
     continue
   fi
-  last_updated=$(echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('last_updated','') or '')" 2>/dev/null)
+  last_updated=$(echo "$resp" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('last_updated','') or '')" 2>/dev/null || echo "")
   if [[ -z "$last_updated" ]]; then
     echo "  ? $img — no last_updated field" >> "$LOG"
     continue

@@ -7,7 +7,7 @@
 # Cron: 0 3 * * 0  (Sundays 03:00)
 # Idempotent — re-runs simply append a new snapshot row.
 
-set -uo pipefail
+set -euo pipefail
 
 docker exec -i homeai-playwright python <<'PYEOF'
 import os, json, urllib.request, asyncio, asyncpg
@@ -96,7 +96,7 @@ asyncio.run(main())
 PYEOF
 
 # If the python wrote a message file, ferry it through notify-telegram on the host
-MSG_FILE=$(docker exec homeai-playwright sh -c 'test -f /tmp/u36-model-inventory-msg.txt && cat /tmp/u36-model-inventory-msg.txt; rm -f /tmp/u36-model-inventory-msg.txt' 2>/dev/null)
+MSG_FILE=$(docker exec homeai-playwright sh -c 'test -f /tmp/u36-model-inventory-msg.txt && cat /tmp/u36-model-inventory-msg.txt; rm -f /tmp/u36-model-inventory-msg.txt' 2>/dev/null || echo "")
 if [[ -n "$MSG_FILE" ]]; then
   bash /home_ai/.claude/scripts/notify-telegram.sh "$MSG_FILE" "model-inventory" >/dev/null 2>&1 || true
 fi

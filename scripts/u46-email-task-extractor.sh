@@ -13,7 +13,7 @@
 #
 # Cron candidate: */20 * * * *
 
-set -uo pipefail
+set -euo pipefail
 WINDOW_HOURS="${1:-72}"
 VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
 

@@ -4,7 +4,7 @@
 # Guided per-vehicle Q&A. Idempotent on registration — re-running just
 # UPDATEs existing rows. Skip a field by pressing Enter.
 
-set -uo pipefail
+set -euo pipefail
 
 read_field() {
   local prompt="$1" default="$2" validator="${3:-}"
@@ -30,7 +30,7 @@ while true; do
   EXISTING=$(docker exec homeai-postgres psql -U postgres -d homeai -t -A -c "
     SET app.current_entity='all';
     SELECT id || '|' || make_model || '|' || COALESCE(mot_due::text,'')
-    FROM vehicles WHERE upper(replace(registration,' ','')) = upper(replace('$REG_UPPER',' ',''))" 2>/dev/null)
+    FROM vehicles WHERE upper(replace(registration,' ','')) = upper(replace('$REG_UPPER',' ',''))" 2>/dev/null || echo "")
   if [[ -n "$EXISTING" ]]; then
     echo "  ↻ existing row: $EXISTING — values shown as defaults; Enter keeps them."
   fi
