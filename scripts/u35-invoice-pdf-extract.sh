@@ -153,23 +153,47 @@ def save_pdf_to_disk(pdf_bytes: bytes, mid: str, filename: str, received_at=None
     return str(target)
 
 
+def _fetch_json(url_or_req, timeout=60, tries=3):
+    """GET/POST -> parsed JSON, with bounded retry + backoff.
+
+    google-fetch and pdfplumber are container-local services, so a 60s timeout
+    is generous; the retry absorbs transient slow-OCR/cold-start blips. Bare
+    `except (HTTPError, URLError)` does NOT catch a read-phase socket timeout
+    (raised as a plain TimeoutError once the connection is already open, per
+    Python's urllib/http.client) — that uncaught TimeoutError was crashing the
+    whole batch on one slow invoice instead of just skipping that row. Catch
+    broadly and never raise: caller treats None as "this row failed", same as
+    the old behaviour, but a failure here no longer takes down the other
+    candidates in the run.
+    """
+    import time as _time
+    last = None
+    for i in range(tries):
+        try:
+            r = urllib.request.urlopen(url_or_req, timeout=timeout)
+            return json.load(r)
+        except Exception as e:
+            last = e
+            if i < tries - 1:
+                _time.sleep(2 * (i + 1))
+    print(f"  WARN: fetch failed after {tries} tries: {last}")
+    return None
+
+
 def fetch_attachment(acct: str, mid: str) -> tuple[bytes | None, str | None]:
     """Returns (raw bytes, filename) of the first PDF attachment, or (None, None)."""
-    try:
-        r = urllib.request.urlopen(f"{GF}/attachments/{acct}/{mid}", timeout=15)
-        atts = json.load(r).get("attachments", [])
-    except (urllib.error.HTTPError, urllib.error.URLError) as e:
+    j = _fetch_json(f"{GF}/attachments/{acct}/{mid}")
+    if j is None:
         return None, None
+    atts = j.get("attachments", [])
     pdf = next((a for a in atts if (a.get("mime_type") == "application/pdf"
                                     or (a.get("filename") or "").lower().endswith(".pdf"))), None)
     if not pdf: return None, None
-    try:
-        r = urllib.request.urlopen(f"{GF}/attachment/{acct}/{mid}/{pdf['attachment_id']}", timeout=45)
-        o = json.load(r)
-        b64 = o.get("data_b64url") or ""
-        return base64.urlsafe_b64decode(b64 + "=" * (-len(b64) % 4)), pdf.get("filename")
-    except (urllib.error.HTTPError, urllib.error.URLError):
+    o = _fetch_json(f"{GF}/attachment/{acct}/{mid}/{pdf['attachment_id']}")
+    if o is None:
         return None, None
+    b64 = o.get("data_b64url") or ""
+    return base64.urlsafe_b64decode(b64 + "=" * (-len(b64) % 4)), pdf.get("filename")
 
 
 def extract_via_pdfplumber(pdf_bytes: bytes) -> str | None:
@@ -179,11 +203,10 @@ def extract_via_pdfplumber(pdf_bytes: bytes) -> str | None:
             f'Content-Type: application/pdf\r\n\r\n').encode() + pdf_bytes + f"\r\n--{boundary}--\r\n".encode()
     req = urllib.request.Request(f"{PDF_PL}/extract-pdf", data=body,
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}, method="POST")
-    try:
-        r = urllib.request.urlopen(req, timeout=45)
-        return json.load(r).get("text") or ""
-    except (urllib.error.HTTPError, urllib.error.URLError) as e:
+    j = _fetch_json(req)
+    if j is None:
         return None
+    return j.get("text") or ""
 
 
 async def main():
