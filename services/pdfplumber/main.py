@@ -42,7 +42,28 @@ async def parse_csv(file: UploadFile = File(...)):
     content = await file.read()
     return await asyncio.to_thread(_df_records, pd.read_csv, content)
 
+def _repair_pdf(content: bytes) -> bytes:
+    """Rewrite a structurally-quirky PDF via pikepdf/qpdf. Some real supplier
+    invoices (Forest Produce daily invoices, found 2026-07-03) parse fine in
+    pdfminer (text extraction) but hard-fail pdfium ('Data format error') —
+    the renderer behind Page.to_image. qpdf normalises the xref/trailer so
+    pdfium accepts it. Raises on genuinely-unreadable input."""
+    import pikepdf
+    buf = io.BytesIO()
+    with pikepdf.open(io.BytesIO(content)) as p:
+        p.save(buf)
+    return buf.getvalue()
+
 def _render_page_png(content: bytes, width: int, page: int) -> tuple[bytes, int]:
+    try:
+        return _render_page_png_inner(content, width, page)
+    except HTTPException:
+        raise
+    except Exception:
+        # pdfium rejected it — repair and retry once before giving up
+        return _render_page_png_inner(_repair_pdf(content), width, page)
+
+def _render_page_png_inner(content: bytes, width: int, page: int) -> tuple[bytes, int]:
     with pdfplumber.open(io.BytesIO(content)) as pdf:
         if not pdf.pages:
             raise HTTPException(400, "PDF has no pages")
