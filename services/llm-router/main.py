@@ -198,27 +198,33 @@ async def _log_usage(
         print(f"Warning: failed to log usage: {e}")
 
 
-async def _get_model_tiers(pool: asyncpg.Pool) -> dict:
+# Rarely-changing static_context config, cached 60s (perf pass 2026-07-03) —
+# was 1-2 pool round-trips on EVERY /route call. Same idiom as _budget_cache.
+_config_cache: dict = {}  # key -> (fetched_at, value)
+
+async def _static_context_cached(pool: asyncpg.Pool, key: str, default):
+    hit = _config_cache.get(key)
+    if hit and (time.time() - hit[0]) < 60:
+        return hit[1]
     try:
         async with pool.acquire() as conn:
             value = await conn.fetchval(
-                "SELECT value FROM static_context WHERE key = 'model.tiers'"
+                "SELECT value FROM static_context WHERE key = $1", key
             )
-        return json.loads(value) if value else {}
+        result = json.loads(value) if value else default
     except Exception as e:
-        print(f"Warning: failed to fetch model.tiers from DB: {e}")
-        return {}
+        print(f"Warning: failed to fetch {key} from DB: {e}")
+        return default  # not cached — retry on next call
+    _config_cache[key] = (time.time(), result)
+    return result
+
+
+async def _get_model_tiers(pool: asyncpg.Pool) -> dict:
+    return await _static_context_cached(pool, "model.tiers", {})
 
 
 async def _get_thresholds(pool: asyncpg.Pool) -> dict:
-    try:
-        async with pool.acquire() as conn:
-            value = await conn.fetchval(
-                "SELECT value FROM static_context WHERE key = 'ai.thresholds'"
-            )
-        return json.loads(value) if value else DEFAULT_THRESHOLDS
-    except Exception:
-        return DEFAULT_THRESHOLDS
+    return await _static_context_cached(pool, "ai.thresholds", DEFAULT_THRESHOLDS)
 
 
 async def _call_ollama(http: httpx.AsyncClient, model: str, prompt: str) -> tuple[str, int, int, int]:
