@@ -1,0 +1,26 @@
+╭──────────────────────────────────────────────────────────────────────╮
+│  OPT Benchmark — phi4:14b         think=off prompts=u7 ctx=8192    │
+╰──────────────────────────────────────────────────────────────────────╯
+
+▸ Email classification (10 samples):
+Traceback (most recent call last):
+  File "/app/run_benchmark_opt.py", line 166, in <module>
+    asyncio.run(run(args.model, args.tier, args.think == "on",
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/app/run_benchmark_opt.py", line 86, in run
+    out = await call(client, model, prompt, system=system, think=think,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/run_benchmark_opt.py", line 56, in call
+    r.raise_for_status()
+  File "/usr/local/lib/python3.11/site-packages/httpx/_models.py", line 761, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Server error '500 Internal Server Error' for url 'http://homeai-ollama:11434/api/generate'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500

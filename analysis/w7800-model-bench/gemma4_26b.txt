@@ -1,0 +1,57 @@
+╭──────────────────────────────────────────────────────────────────────╮
+│  OPT Benchmark — gemma4:26b       think=off prompts=u7 ctx=8192    │
+╰──────────────────────────────────────────────────────────────────────╯
+
+▸ Email classification (10 samples):
+  ✓ email_001    score=1.00   61.1 t/s 20647ms   15tok exact
+  ✓ email_002    score=1.00   61.7 t/s   982ms   17tok exact
+  ✓ email_003    score=1.00   76.1 t/s   909ms   17tok exact
+  ✓ email_004    score=1.00   75.8 t/s   916ms   17tok exact
+  ✓ email_005    score=1.00   75.1 t/s   856ms   15tok exact
+  ✓ email_006    score=1.00   75.7 t/s   903ms   17tok exact
+  ✓ email_007    score=1.00   76.7 t/s   871ms   15tok exact
+  ✓ email_008    score=1.00   76.1 t/s   894ms   16tok exact
+  ✓ email_009    score=1.00   76.0 t/s   914ms   17tok exact
+  ✓ email_010    score=1.00   76.1 t/s   913ms   17tok exact
+  → accuracy 100.0%  avg 73.0 t/s  avg 2880ms
+
+▸ JSON validity (10 prompts):
+  ✓ prompt_01    75.1 t/s  1835ms
+  ✓ prompt_02    75.9 t/s  1034ms
+  ✓ prompt_03    76.3 t/s   901ms
+  ✓ prompt_04    75.7 t/s  1053ms
+  ✓ prompt_05    75.4 t/s   922ms
+  ✓ prompt_06    75.5 t/s   995ms
+  ✓ prompt_07    75.8 t/s  1084ms
+  ✓ prompt_08    76.2 t/s  1025ms
+  ✓ prompt_09    75.9 t/s  1016ms
+  ✓ prompt_10    76.1 t/s  1109ms
+  → JSON validity 100.0%
+
+▸ Invoice extraction (5 samples):
+  ✓ inv_001  score=0.89   73.6 t/s   2665ms 8/9 fields
+  ✓ inv_002  score=1.00   74.4 t/s   2193ms 6/6 fields
+  ✓ inv_003  score=0.88   74.1 t/s   2343ms 7/8 fields
+  ✓ inv_004  score=0.80   74.8 t/s   2035ms 4/5 fields
+  ✓ inv_005  score=1.00   74.4 t/s   2180ms 7/7 fields
+  → invoice extraction 91.3%
+
+▸ Report parsing (3 samples):
+  ✓ epos_001   score=1.00   74.8 t/s   1873ms 7/7 fields
+  ✓ accom_001  score=1.00   74.5 t/s   2034ms 8/8 fields
+  ✓ epos_002   score=1.00   74.4 t/s   1846ms 7/7 fields
+  → report parsing 100.0%
+
+▸ Speed (tier prompt: hot):
+  77.9 t/s  (target 60 → 100%)  809ms
+
+╭──────────────────────────────────────────────────────────────────────╮
+│  COMPOSITE  [think=off prompts=u7 ctx=8192]
+╰──────────────────────────────────────────────────────────────────────╯
+  email          100.0%
+  json validity  100.0%
+  invoice         91.3%
+  reports        100.0%
+  speed          100.0%  (77.9 t/s vs target 60)
+  ─────────────────────────────────────
+  composite       98.6%   (deploy threshold +3%)
