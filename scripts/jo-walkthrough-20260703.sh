@@ -109,9 +109,14 @@ if ask "Do step 3?"; then
   fi
   ( cd /home_ai && docker compose up -d --force-recreate homeai-litellm ) \
     && ok "litellm recreated with port publish" || { fail "compose recreate failed"; exit 1; }
-  sleep 5
-  CODE=$(curl -s -o /tmp/jo-models.json -w '%{http_code}' \
-        -H "Authorization: Bearer $MASTER_KEY" http://127.0.0.1:8771/v1/models) || CODE=000
+  # litellm takes ~20-60s to boot (config load + DB connect) — poll, don't race
+  CODE=000
+  for i in $(seq 1 30); do
+    CODE=$(curl -s -o /tmp/jo-models.json -w '%{http_code}' \
+          -H "Authorization: Bearer $MASTER_KEY" http://127.0.0.1:8771/v1/models) || CODE=000
+    [ "$CODE" = "200" ] && break
+    sleep 3
+  done
   if [ "$CODE" = "200" ] && grep -q 'deepseek-v4-pro' /tmp/jo-models.json; then
     ok "gateway answers on 127.0.0.1:8771 and lists deepseek-v4-pro"
   else
