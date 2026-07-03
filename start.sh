@@ -228,6 +228,23 @@ check_n8n_credential_drift() {
   fi
 }
 
+# -------------------------------------------------------------------
+# 9. Refresh planner statistics. An UNCLEAN shutdown wipes Postgres's
+#    cumulative stats (pg_stat), which also zeroes autovacuum's trigger
+#    counters — after the 2026-07-02 crash NO table had current planner
+#    estimates (emails: est 591 vs 78k real) and autovacuum stayed dormant.
+#    analyze-only is cheap (~10s whole DB) and harmless when stats are fine.
+#    Non-fatal: a failed ANALYZE must never block startup.
+# -------------------------------------------------------------------
+refresh_planner_stats() {
+  info "refreshing planner statistics (vacuumdb --analyze-only)..."
+  if docker exec homeai-postgres vacuumdb -U postgres -d homeai --analyze-only -j 4 >/dev/null 2>&1; then
+    ok "planner stats refreshed"
+  else
+    err "vacuumdb --analyze-only failed (non-fatal) — run it manually"
+  fi
+}
+
 summary() {
   printf '\n'
   ok "Home AI startup complete"
@@ -246,6 +263,7 @@ main() {
   issue_n8n_token
   run_compose
   health_check
+  refresh_planner_stats
   check_n8n_credential_drift
   summary
 }
