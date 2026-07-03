@@ -27,6 +27,7 @@
   a.card { text-decoration: none; color: inherit; display: block; }
   .row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(148,163,184,0.08); }
   .row:last-child { border-bottom: none; }
+  [x-cloak] { display: none !important; }
 </style>
 </head>
 <body>
@@ -63,6 +64,12 @@
     <span class="ml-auto mono text-xs text-slate-500" x-text="$store?.refresh?.label || ''"></span>
   </div>
 </header>
+
+<!-- Feed-failure banner: a failed fetch must never masquerade as a real £0 -->
+<div class="card border-rose-500/40 bg-rose-950/40 text-rose-200 text-sm" x-show="failedFeeds().length" x-cloak>
+  ⚠ Live data unavailable: <span class="font-semibold" x-text="failedFeeds().join(', ')"></span>
+  — figures below may be stale or missing. Retrying every 60s.
+</div>
 
 <!-- Header Alpine component (inline since this page isn't Jinja-templated yet) -->
 <script>
@@ -225,6 +232,8 @@ function m() {
     invoicesPending: '—', invoicesTotal: 0,
     ages: { to: '—', cb: '—', wf: '—' },
     alerts: 0, pendingInstructions: 0,
+    feedErrors: { economics: false, invoices: false, 'system pulse': false, notes: false },
+    failedFeeds() { return Object.keys(this.feedErrors).filter(k => this.feedErrors[k]); },
     lastRefresh: '',
     noteDate: new Date().toISOString().slice(0,10),
     noteBody: '',
@@ -240,9 +249,12 @@ function m() {
     },
     async loadNotes() {
       try {
-        const r = await (await fetch('/api/manager-notes?days=14')).json();
+        const rr = await fetch('/api/manager-notes?days=14');
+        if (!rr.ok) throw new Error(rr.status);
+        const r = await rr.json();
         this.recentNotes = r.rows || [];
-      } catch {}
+        this.feedErrors.notes = false;
+      } catch { this.feedErrors.notes = true; }
     },
     async postTill() {
       this.till.status = 'saving…';
@@ -294,25 +306,34 @@ function m() {
     },
     async refresh() {
       try {
-        const e = await (await fetch('/api/economics/overview?days=14')).json();
+        const er = await fetch('/api/economics/overview?days=14');
+        if (!er.ok) throw new Error(er.status);
+        const e = await er.json();
         this.kpi = e.kpi || {};
         ['labour_pct','total_revenue','total_net_sales','splh','total_covers','net_sales_lw','accom_revenue'].forEach(k => {
           if (this.kpi[k] != null && !isNaN(this.kpi[k])) this.kpi[k] = Number(this.kpi[k]);
         });
-      } catch {}
+        this.feedErrors.economics = false;
+      } catch { this.feedErrors.economics = true; }
       try {
-        const i = await (await fetch('/api/invoices/list?days=90&status=new')).json();
+        const ir = await fetch('/api/invoices/list?days=90&status=new');
+        if (!ir.ok) throw new Error(ir.status);
+        const i = await ir.json();
         this.invoicesPending = i.totals?.pending ?? '—';
         this.invoicesTotal = i.totals?.sum_seen || 0;
-      } catch {}
+        this.feedErrors.invoices = false;
+      } catch { this.feedErrors.invoices = true; }
       try {
-        const m = await (await fetch('/api/m/mobile')).json();
+        const mr = await fetch('/api/m/mobile');
+        if (!mr.ok) throw new Error(mr.status);
+        const m = await mr.json();
         this.flagged = m.flagged_7d || 0;
         this.latestVarianceDate = m.latest_variance_date || '';
         this.ages = m.ages || this.ages;
         this.alerts = m.firing_alerts || 0;
         this.pendingInstructions = m.pending_instructions || 0;
-      } catch {}
+        this.feedErrors['system pulse'] = false;
+      } catch { this.feedErrors['system pulse'] = true; }
       this.lastRefresh = new Date().toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
     },
     tlClass() {

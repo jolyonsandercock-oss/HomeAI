@@ -9,6 +9,10 @@ declare -A urls=(
   [alpine-3.14.min.js]="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"
   [tabulator-6.2.5.min.js]="https://unpkg.com/tabulator-tables@6.2.5/dist/js/tabulator.min.js"
   [tabulator-6.2.5.min.css]="https://unpkg.com/tabulator-tables@6.2.5/dist/css/tabulator_midnight.min.css"
+  [tabulator-5.5.4.min.js]="https://unpkg.com/tabulator-tables@5.5.4/dist/js/tabulator.min.js"
+  [tabulator-5.5.4.min.css]="https://unpkg.com/tabulator-tables@5.5.4/dist/css/tabulator.min.css"
+  [tabulator-5.6.1.min.js]="https://cdn.jsdelivr.net/npm/tabulator-tables@5.6.1/dist/js/tabulator.min.js"
+  [tabulator-5.6.1_midnight.min.css]="https://cdn.jsdelivr.net/npm/tabulator-tables@5.6.1/dist/css/tabulator_midnight.min.css"
   [d3-7.9.min.js]="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"
 )
 
