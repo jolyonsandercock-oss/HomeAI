@@ -88,6 +88,16 @@ model_list:
       api_key: os.environ/DEEPSEEK_API_KEY
       max_tokens: 4096
 
+  # TD-007 completion (2026-07-03): Hermes's DELEGATION path runs
+  # deepseek-v4-flash (the daily-driver routing model) — it must exist here
+  # too or the repoint 400s on unknown model.
+  - model_name: deepseek-v4-flash
+    litellm_params:
+      model: deepseek/deepseek-v4-flash
+      api_base: https://api.deepseek.com/v1
+      api_key: os.environ/DEEPSEEK_API_KEY
+      max_tokens: 4096
+
   # ---- Local multimodal (W7800/ROCm via Ollama) — added 2026-06-19 ----
   # Gemma 4 QAT 31B, Unsloth dynamic UD-Q4_K_XL. Local = no secret/api_key.
   # NOTE: the global presidio_gate callback still applies to this entry; for
