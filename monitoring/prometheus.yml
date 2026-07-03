@@ -17,7 +17,12 @@ scrape_configs:
 
   # PostgreSQL is scraped via the postgres_exporter sidecar (port 9187),
   # not the Postgres SQL port — Postgres has no native /metrics endpoint.
+  # 60s job-level interval (2026-07-03 perf pass): each scrape runs ~20 custom
+  # SQL queries (queries.yaml), several of them whole-table counts — at the
+  # global 15s that was ~115k queries/day of constant DB load for
+  # minute-granularity metrics.
   - job_name: postgres
+    scrape_interval: 60s
     static_configs:
       - targets: [homeai-postgres-exporter:9187]
 
