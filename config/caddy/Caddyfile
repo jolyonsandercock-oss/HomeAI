@@ -147,6 +147,15 @@ https://jolybox.tailc27dff.ts.net {
         reverse_proxy homeai-grafana:3000
     }
 
+    # U-cutover 2026-06-25: the new Next.js dashboard (/app) is now primary. The bare
+    # domain and the old /dashboard bookmark redirect to it. The 6 kept legacy features
+    # (/documents /memory /playground /search /vehicles /counterparty-review) are their
+    # own paths and fall through to the catch-all below — unaffected.
+    @landing path / /dashboard /dashboard/
+    handle @landing {
+        redir /app/ permanent
+    }
+
     # Everything else: forward_auth, then proxy to the dashboard.
     # Remote-Groups carries the realm membership which the dashboard
     # middleware (REALM_ENFORCE=1) reads and maps to app.current_realm.

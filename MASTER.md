@@ -188,3 +188,41 @@ Big session. Security, COGS/KPIs, data backfills, comms restore.
 - **Booking.com reviews** — 6 from screenshot loaded into guest_reviews.
 - **UX pass** — content max-width, mobile table overflow, mobile-first KPI grids, rhythm.
 - Migrations V216–V223. Many commits (d309160 … be5160d).
+
+### 2026-07-02 — commits
+- 46c57d0 feat(invoices): rules-based categorisation push for 2026 residual (48 vendors, 81.8%->91.6%)
+- ad6adac feat(security): deepseek route via LiteLLM gateway (Presidio + ai_usage) — hermes repoint pending host port
+- 84482db chore(security): relocate loose n8n cred backup to security/cred-archive/
+- 4f66f3c chore(compose): remove duplicate markitdown stanza + dead garmin/vault-mcp
+- 0f93f7a docs(gen): regenerate stale views/migrations/cron docs
+- e9a0be5 docs(spec): R2 decision framework — mechanical thresholds for OCR engine, model stack, prune, cap migration
+- f7075e0 docs(architecture): correct four stale §2 health-column entries
+- 5243a5b docs(hygiene): add supersession banners to stale dead-docs
+- f129cd5 fix(ops): small-fix bundle — selftest timeouts, digest cap, u273b exit, shared pg-connect helper
+- 8fb806c chore(hygiene): attic one-shot UI patch scripts, drop stale .bak files
+- b16d058 fix(counterparty): wire anchor + resolution_log provenance writes (were never landing)
+- 22fd8c6 fix(invoices): timeout+retry on pdf-extract fetch path
+- 935ede7 fix(calendar): map dead 'family' realm to 'personal' at sync source (V164 pivot leftover)
+- 07a5839 fix(invoices): TD-036 add think:false to date extractor (gemma4 returns empty without it)
+- 0aef115 feat(ocr): implement MistralOCRAdapter (vault-gated, supplier-invoice scope)
+- 32f6737 fix(ops): R0 final-review fixes — cron-health attribution through ops-run wrapper, reporter exit-0, 45d runs retention
+- d18213b fix(scripts): R0.9 review fixes — guard heredoc rc-capture in 4 sweeps + per-item natwest docker cp
+- 3485d33 fix(pipelines): P6 fix #3 — restore Parseable? gate semantics broken by report_date defaulting
+- 6bfb12f fix(scripts): R0.9 batch 4/4 — set -e on silent-exit-0 scripts (with || true audit)
+- e9aa8b3 fix(scripts): R0.9 batch 3/4 — set -e on silent-exit-0 scripts (with || true audit)
+- 74dfb9d fix(scripts): R0.9 batch 3/4 — set -e on silent-exit-0 scripts (with || true audit)
+- ec1db46 fix(scripts): R0.9 batch 2/4 — set -e on silent-exit-0 scripts (with || true audit)
+- 82e3941 fix(scripts): R0.9 batch 1/4 — set -e on silent-exit-0 scripts (with || true audit)
+- d2039fe feat(db): R0.8 generic partition maintenance for all partitioned parents
+- 74d0174 feat(ops): R0.7 schedule nightly system auditor (05:30)
+- 14159e8 fix(ops): u273b review fixes — add build-dashboard:8090 to MAP, guard recreate failure
+- 12143d3 feat(ops): R0.6 boot-race self-heal for all tailnet-bound services
+- 192fbc1 fix(ops): R0.5 review fixes — probe hard-fail = 000/5xx only + re-probe in post-repair verification
+- fa38054 feat(ops): R0.5 deep ollama generate-probe + full-fleet selftest coverage
+- 6246168 feat(ops): R0.4 daily Telegram ops digest (stale pipelines + firing alerts + open exceptions)
+- 738001c feat(ops): R0.3 alert-row hygiene — 72h auto-resolve
+- 3cf8ad2 feat(ops): R0.2 stuck-processing reaper + pipeline_runs 30d retention
+- 896a1c1 feat(ops): R0.1 canonical crontab — heartbeat-wrap all jobs, dedupe, full registry seed
+- 7f7f2b8 docs(plan): R0 close-the-loop implementation plan (9 tasks)
+- 358c6b1 fix(pipelines): 2026-07-02 incident triage — gmail SQL param, P6 repair, dead-letter re-drive, hermes bridge
+- 957b967 docs(spec): end-to-end refactor program design (approach A, observability first)
