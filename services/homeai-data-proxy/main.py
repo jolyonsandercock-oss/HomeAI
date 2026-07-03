@@ -29,7 +29,7 @@ if not TOKEN:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=4)
+    app.state.pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=16)
     log.info("data-proxy ready (max_rows=%d)", MAX_ROWS)
     yield
     await app.state.pool.close()

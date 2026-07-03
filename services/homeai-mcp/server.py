@@ -49,7 +49,7 @@ _pool: asyncpg.Pool | None = None
 async def get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=4)
+        _pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=16)
     return _pool
 
 
