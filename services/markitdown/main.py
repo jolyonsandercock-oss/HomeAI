@@ -11,10 +11,12 @@ than raw text; bigger cap than pdfplumber's 8K).
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import re
 import tempfile
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -25,6 +27,15 @@ MAX_OUTPUT_CHARS = 16_000
 
 app = FastAPI(title="MarkItDown", version="1.0")
 md = MarkItDown()
+# md is a shared instance and not documented thread-safe; conversions run in
+# a worker thread (so the event loop stays responsive — perf pass 2026-07-03)
+# but serialised under this lock, matching the old effective concurrency.
+_md_lock = threading.Lock()
+
+
+def _convert_locked(path: str):
+    with _md_lock:
+        return md.convert(path)
 
 
 def sanitise(text: str) -> str:
@@ -49,7 +60,7 @@ async def convert(file: UploadFile = File(...)):
         tmp_path = tf.name
 
     try:
-        result = md.convert(tmp_path)
+        result = await asyncio.to_thread(_convert_locked, tmp_path)
         text = sanitise(result.text_content or "")
     except Exception as e:
         raise HTTPException(422, f"conversion failed: {e}")
