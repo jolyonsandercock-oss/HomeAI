@@ -13,6 +13,7 @@ YAML data files live in ./data/ and are re-read on each request.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import os
 import re
@@ -68,6 +69,29 @@ async def cached(key: str, fn, ttl: int = CACHE_TTL):
     _cache[key] = (now, val)
     return val
 
+def ttl_cache(seconds: float):
+    """Decorator form of cached() for read-only JSON endpoints polled on the
+    60s dashboard loop (2026-07-03 perf pass). Key includes the query params
+    AND the request realm so realm-scoped reads never cross-serve. Uses the
+    same _cache store. Apply UNDER the @app.get decorator."""
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            key = (fn.__name__, args, tuple(sorted(kwargs.items())),
+                   _current_realm.get())
+            now = time.time()
+            hit = _cache.get(key)
+            if hit is not None and (now - hit[0]) < seconds:
+                return hit[1]
+            if len(_cache) > 512:
+                for k in [k for k, v in _cache.items() if now - v[0] >= seconds]:
+                    _cache.pop(k, None)
+            val = await fn(*args, **kwargs)
+            _cache[key] = (now, val)
+            return val
+        return wrapper
+    return deco
+
 # ─── YAML loaders (re-read on each call) ────────────────────────
 def _isoify(o):
     """Walk a yaml-loaded structure and convert datetime.date / datetime.datetime
@@ -96,7 +120,7 @@ _pool: asyncpg.Pool | None = None
 async def pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=4)
+        _pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=16)
     return _pool
 
 # Realm enforcement (R2) — see U52 sprint plan.
@@ -268,8 +292,9 @@ async def hardware_snapshot() -> dict:
 
     # GPU via nvidia-smi (shell). Only present if the dashboard container has
     # access to /usr/bin/nvidia-smi via NVIDIA Container Toolkit; otherwise
-    # this returns []. The frontend handles empty gracefully.
-    gpu = _gpu_via_nvidia_smi()
+    # this returns []. The frontend handles empty gracefully. Off-loop: the
+    # subprocess spawn blocks up to its 3s timeout.
+    gpu = await asyncio.to_thread(_gpu_via_nvidia_smi)
 
     # Disk for /home_ai (mounted in)
     disk_pct = None
@@ -2074,6 +2099,7 @@ async def dojo_page():
 
 
 @app.get("/api/dojo/daily")
+@ttl_cache(45)
 async def api_dojo_daily(days: int = 90):
     """Per-site Dojo daily totals from v_dojo_daily. WORK realm only —
     OWNER also sees these via the realm policy."""
@@ -2125,6 +2151,7 @@ async def api_dojo_daily(days: int = 90):
 
 
 @app.get("/api/m/mobile")
+@ttl_cache(45)
 async def api_m_mobile():
     """Compact roll-up for the phone landing page."""
     from datetime import datetime, timezone
@@ -2165,6 +2192,7 @@ async def api_m_mobile():
 
 
 @app.get("/api/kpi/pending-instructions")
+@ttl_cache(45)
 async def api_kpi_pending_instructions():
     p = await pool()
     async with p.acquire() as c:
@@ -4160,28 +4188,65 @@ async def api_emails_search(
     extra = " ".join(where_extra)
     args.append(limit)
 
-    sql = f"""
-        SELECT e.id, e.gmail_message_id, e.account, e.from_address, e.from_name,
-               e.subject, e.received_at, e.has_attachment, e.realm,
-               ts_rank_cd(e.tsv, websearch_to_tsquery('english', $1)) AS rank,
-               ts_headline('english', COALESCE(e.body_text, e.subject, ''),
+    # Perf pass 2026-07-03: the old single query OR-ed the tsv match with three
+    # leading-wildcard ILIKEs, which defeated every index and seq-scanned the
+    # whole emails table (876MB) per search, computing ts_headline per row.
+    # Now: tsv-indexed query first (headline only on the returned page via the
+    # subquery), then a trigram-index ILIKE fallback ONLY for the remainder.
+    # Same response shape and ordering semantics: ranked tsv hits first, then
+    # rank-0 ILIKE-only hits by recency.
+    headline_cols = """
+        SELECT s.id, s.gmail_message_id, s.account, s.from_address, s.from_name,
+               s.subject, s.received_at, s.has_attachment, s.realm, s.rank,
+               ts_headline('english', COALESCE(s.body_text, s.subject, ''),
                            websearch_to_tsquery('english', $1),
                            'MaxFragments=2, MaxWords=20, MinWords=5,
                             StartSel=<mark>, StopSel=</mark>') AS snippet
-          FROM emails e
-         WHERE (
-                e.tsv @@ websearch_to_tsquery('english', $1)
-             OR e.subject  ILIKE $2
-             OR e.body_text ILIKE $2
-             OR e.from_address ILIKE $2
-         )
-         {extra}
-         ORDER BY rank DESC, e.received_at DESC
-         LIMIT ${arg_n}
     """
-    rows = await db_all(sql, *args)
+    sql = f"""
+        {headline_cols}
+          FROM (
+            SELECT e.id, e.gmail_message_id, e.account, e.from_address,
+                   e.from_name, e.subject, e.received_at, e.has_attachment,
+                   e.realm, e.body_text,
+                   ts_rank_cd(e.tsv, websearch_to_tsquery('english', $1)) AS rank
+              FROM emails e
+             WHERE e.tsv @@ websearch_to_tsquery('english', $1)
+               AND $2::text IS NOT NULL  -- no-op: keeps $-numbering shared
+                                         -- with the fallback query (asyncpg
+                                         -- rejects unreferenced parameters)
+             {extra}
+             ORDER BY rank DESC, e.received_at DESC
+             LIMIT ${arg_n}
+          ) s
+         ORDER BY s.rank DESC, s.received_at DESC
+    """
+    rows = [dict(r) for r in await db_all(sql, *args)]
+
+    remaining = limit - len(rows)
+    if remaining > 0:
+        fb_sql = f"""
+        {headline_cols}
+          FROM (
+            SELECT e.id, e.gmail_message_id, e.account, e.from_address,
+                   e.from_name, e.subject, e.received_at, e.has_attachment,
+                   e.realm, e.body_text, 0.0::float4 AS rank
+              FROM emails e
+             WHERE (e.subject ILIKE $2
+                 OR e.body_text ILIKE $2
+                 OR e.from_address ILIKE $2)
+               AND NOT (e.tsv @@ websearch_to_tsquery('english', $1))
+             {extra}
+             ORDER BY e.received_at DESC
+             LIMIT ${arg_n}
+          ) s
+         ORDER BY s.received_at DESC
+        """
+        fb_args = args[:-1] + [remaining]
+        rows += [dict(r) for r in await db_all(fb_sql, *fb_args)]
+
     return {"q": q, "n_rows": len(rows),
-            "rows": [_isoify(dict(r)) for r in rows]}
+            "rows": [_isoify(r) for r in rows]}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4310,6 +4375,7 @@ async def api_invoice_feedback(invoice_id: int, payload: dict):
 
 
 @app.get("/api/reviews/queue")
+@ttl_cache(45)
 async def api_reviews_queue():
     """U39 — Action Queue feed for guest reviews. Returns drafted-but-not-actioned
     reviews newest first, plus the latest draft text per review."""
@@ -4408,6 +4474,7 @@ async def api_reviews_mark_posted(payload: dict):
 
 
 @app.get("/api/drift/current")
+@ttl_cache(45)
 async def api_drift_current():
     """v_ai_worker_drift consumer — current AI worker drift status.
     Returns top 5 worst drifters and a flagged count."""
@@ -4469,6 +4536,7 @@ async def api_dreaming_heuristics():
 
 
 @app.get("/api/anomalies")
+@ttl_cache(45)
 async def api_anomalies():
     """KPI anomalies: today vs 7-day rolling avg, flag if outside ±50%.
     Catches silent extraction failures (empty PDF, missed email, zero values)."""
@@ -4498,6 +4566,7 @@ async def api_anomalies():
 
 
 @app.get("/api/kpi/sparklines")
+@ttl_cache(45)
 async def api_kpi_sparklines(days: int = 14):
     """7-14d series for the top KPIs surfaced in the ribbon. Used for
     inline SVG sparklines next to each headline number."""
@@ -4736,6 +4805,7 @@ async def api_till_recon_resolve(recon_id: int, payload: dict = Body(default={})
 
 
 @app.get("/api/economics/overview")
+@ttl_cache(45)
 async def api_economics_overview(days: int = 90):
     p = await pool()
     async with p.acquire() as c:
@@ -4780,6 +4850,7 @@ async def api_economics_overview(days: int = 90):
 # front_of_house; cafe labour = cafe team. Accommodation labour is excluded
 # (lives separately in Caterbook accounting).
 @app.get("/api/economics/period-summary")
+@ttl_cache(45)
 async def api_economics_period_summary():
     p = await pool()
     async with p.acquire() as c:
@@ -5411,6 +5482,7 @@ async def api_invoices_mark(invoice_id: int, payload: dict = Body(...)):
 
 
 @app.get("/api/invoices/list")
+@ttl_cache(45)
 async def api_invoices_list(
     days: int = 90,
     status: str = "",
@@ -5682,6 +5754,7 @@ async def api_touchoffice_overview(days: int = 30):
 
 
 @app.get("/api/pub/snapshot")
+@ttl_cache(45)
 async def pub_snapshot():
     """U47a — Pub-side metrics from real tables (caterbook + touchoffice).
     The legacy epos_daily/accommodation_* tables are stubs and were always
