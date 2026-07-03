@@ -34,23 +34,32 @@ export function BottomTabs() {
             className="lg:hidden fixed bottom-14 inset-x-0 bg-ink-50 border-t border-ink-200 z-50 max-h-[60vh] overflow-y-auto"
           >
             <ul className="grid grid-cols-3 sm:grid-cols-4 gap-1 p-3">
-              {secondary.map(({ href, label, icon: Icon }) => {
+              {secondary.map(({ href, label, icon: Icon, external }) => {
                 const active = pathname === href || (href !== '/' && pathname.startsWith(href));
+                const cls =
+                  'flex flex-col items-center justify-center gap-1 py-3 rounded text-xs ' +
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ' +
+                  (active ? 'bg-ink-100 text-amber-500' : 'text-ink-700 hover:bg-ink-100');
                 return (
                   <li key={href}>
-                    <Link
-                      href={href}
-                      onClick={closeMore}
-                      aria-current={active ? 'page' : undefined}
-                      className={
-                        'flex flex-col items-center justify-center gap-1 py-3 rounded text-xs ' +
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ' +
-                        (active ? 'bg-ink-100 text-amber-500' : 'text-ink-700 hover:bg-ink-100')
-                      }
-                    >
-                      <Icon size={20} />
-                      <span>{label}</span>
-                    </Link>
+                    {external ? (
+                      // Outside the /app basePath (legacy dashboard page) —
+                      // plain <a> so next/link doesn't prefix the href.
+                      <a href={href} onClick={closeMore} className={cls}>
+                        <Icon size={20} />
+                        <span>{label}</span>
+                      </a>
+                    ) : (
+                      <Link
+                        href={href}
+                        onClick={closeMore}
+                        aria-current={active ? 'page' : undefined}
+                        className={cls}
+                      >
+                        <Icon size={20} />
+                        <span>{label}</span>
+                      </Link>
+                    )}
                   </li>
                 );
               })}

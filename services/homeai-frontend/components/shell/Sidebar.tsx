@@ -2,10 +2,37 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { NAV } from './nav';
+import { NAV, NavItem } from './nav';
 import { Briefcase, User } from 'lucide-react';
 import { SnagTicker } from './SnagTicker';
 import { BirthdayTicker } from './BirthdayTicker';
+
+// External entries (e.g. /counterparty-review on the build-dashboard) live on
+// the same FQDN but outside the /app basePath, so they must render as plain
+// <a> — next/link would prefix the basePath and 404.
+function NavEntry({ item, active }: { item: NavItem; active: boolean }) {
+  const { href, label, icon: Icon, external } = item;
+  const className =
+    'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ' +
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ' +
+    (active
+      ? 'bg-ink-100 text-ink-900'
+      : 'text-ink-600 hover:bg-ink-100 hover:text-ink-800');
+  const body = (
+    <>
+      <Icon size={16} className={active ? 'text-amber-500' : ''} />
+      <span>{label}</span>
+    </>
+  );
+  if (external) {
+    return <a href={href} className={className}>{body}</a>;
+  }
+  return (
+    <Link href={href} aria-current={active ? 'page' : undefined} className={className}>
+      {body}
+    </Link>
+  );
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -49,61 +76,22 @@ export function Sidebar() {
       <nav className="px-2 py-3 space-y-0.5 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 140px)' }}>
         {realm === 'personal' ? (
           // Personal mode — all items, no divider
-          NAV.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href || (href !== '/' && pathname.startsWith(href));
-            return (
-              <Link key={href} href={href}
-                aria-current={active ? 'page' : undefined}
-                className={
-                  'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ' +
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ' +
-                  (active
-                    ? 'bg-ink-100 text-ink-900'
-                    : 'text-ink-600 hover:bg-ink-100 hover:text-ink-800')
-                }>
-                <Icon size={16} className={active ? 'text-amber-500' : ''} />
-                <span>{label}</span>
-              </Link>
-            );
+          NAV.map((item) => {
+            const active = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+            return <NavEntry key={item.href} item={item} active={active} />;
           })
         ) : (
           // Work mode — work items, then personal at bottom with subtle divider
           <>
-            {workItems.map(({ href, label, icon: Icon }) => {
-              const active = pathname === href || (href !== '/' && pathname.startsWith(href));
-              return (
-                <Link key={href} href={href}
-                  aria-current={active ? 'page' : undefined}
-                  className={
-                    'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ' +
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ' +
-                    (active
-                      ? 'bg-ink-100 text-ink-900'
-                      : 'text-ink-600 hover:bg-ink-100 hover:text-ink-800')
-                  }>
-                  <Icon size={16} className={active ? 'text-amber-500' : ''} />
-                  <span>{label}</span>
-                </Link>
-              );
+            {workItems.map((item) => {
+              const active = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+              return <NavEntry key={item.href} item={item} active={active} />;
             })}
             <div className="my-2 border-t border-ink-200" />
             <div className="text-2xs text-ink-400 uppercase tracking-wider px-3 py-1">Personal</div>
-            {personalItems.map(({ href, label, icon: Icon }) => {
-              const active = pathname === href || (href !== '/' && pathname.startsWith(href));
-              return (
-                <Link key={href} href={href}
-                  aria-current={active ? 'page' : undefined}
-                  className={
-                    'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ' +
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ' +
-                    (active
-                      ? 'bg-ink-100 text-ink-900'
-                      : 'text-ink-600 hover:bg-ink-100 hover:text-ink-800')
-                  }>
-                  <Icon size={16} className={active ? 'text-amber-500' : ''} />
-                  <span>{label}</span>
-                </Link>
-              );
+            {personalItems.map((item) => {
+              const active = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+              return <NavEntry key={item.href} item={item} active={active} />;
             })}
           </>
         )}
