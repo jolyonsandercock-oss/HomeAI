@@ -19,6 +19,10 @@ START="$(date -Is)"
 TMP="$(mktemp)"
 "$@" >"$TMP" 2>&1; RC=$?
 cat "$TMP"                                  # passthrough for cron logs
+# per-run heartbeat line: wrapped scripts that log internally (freshness-watchdog,
+# hermes-sentinel) otherwise leave the cron log untouched on quiet success, and
+# cron-health's log-mtime proxy falsely flags them dead
+echo "[ops-run] $(date -Is) $NAME rc=$RC"
 ROWS="$(grep -oE 'OPS_ROWS=[0-9]+' "$TMP" | tail -1 | cut -d= -f2)"
 rm -f "$TMP"
 

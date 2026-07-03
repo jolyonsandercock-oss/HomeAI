@@ -105,6 +105,9 @@ async def main():
     o = gmail_search("bot", "newer_than:1d -in:chats")
     msgs = o.get("messages", [])
     if not msgs:
+        # heartbeat even on empty inbox — silent exit here made cron-health
+        # flag this job dead for 7h on 2026-07-03 (log-mtime proxy)
+        print("queued: query=0 data=0 skipped_self=0 (empty inbox)")
         return
 
     conn = await asyncpg.connect(PG_DSN)
@@ -162,8 +165,9 @@ async def main():
             tg_send(ack)
 
     await conn.close()
-    if queued_query or queued_data or skipped_self:
-        print(f"queued: query={queued_query} data={queued_data} skipped_self={skipped_self}")
+    # unconditional heartbeat — a conditional print here left the cron log
+    # untouched on quiet cycles and cron-health falsely flagged the job dead
+    print(f"queued: query={queued_query} data={queued_data} skipped_self={skipped_self}")
 
 asyncio.run(main())
 PYEOF
