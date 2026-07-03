@@ -339,6 +339,8 @@ services:
       - ./AGENTS.md:/home_ai/AGENTS.md:ro
       - ./HOME-AI-STRETCH.md:/home_ai/HOME-AI-STRETCH.md:ro
       - /proc:/host/proc:ro
+      # amdgpu sysfs GPU sensing (W7800) — read-only, same posture as /proc
+      - /sys:/host/sys:ro
       # F4: NO docker.sock. /api/benchmark/stream now relays over HTTP from
       # homeai-model-evaluator, which runs the benchmark in its own container.
       # This web-facing container has zero Docker access.

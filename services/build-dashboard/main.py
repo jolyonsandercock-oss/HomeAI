@@ -247,6 +247,46 @@ def _gpu_via_nvidia_smi() -> list[dict]:
             continue
     return out
 
+def _gpu_via_amdgpu_sysfs(base: str = "/host/sys/class/drm") -> list[dict]:
+    """AMD GPU sensing via amdgpu sysfs (W7800 swap 2026-06-18 killed
+    nvidia-smi). Needs /sys bind-mounted at /host/sys (docker-compose).
+    Emits the same dict shape as _gpu_via_nvidia_smi so the frontend is
+    agnostic; mem_pct is the memory-controller busy %, mirroring
+    nvidia-smi's utilization.memory."""
+    import glob
+    out = []
+    for dev in sorted(glob.glob(f"{base}/card[0-9]*/device")):
+        try:
+            def _read_int(rel):
+                with open(f"{dev}/{rel}") as f:
+                    return int(f.read().strip())
+            if not os.path.exists(f"{dev}/mem_info_vram_total"):
+                continue  # not an amdgpu card (or driver too old)
+            used  = _read_int("mem_info_vram_used")
+            total = _read_int("mem_info_vram_total")
+            busy  = _read_int("gpu_busy_percent") if os.path.exists(f"{dev}/gpu_busy_percent") else 0
+            mem_busy = _read_int("mem_busy_percent") if os.path.exists(f"{dev}/mem_busy_percent") else 0
+            temp = None
+            hw = glob.glob(f"{dev}/hwmon/hwmon*/temp1_input")
+            if hw:
+                with open(hw[0]) as f:
+                    temp = int(f.read().strip()) // 1000
+            out.append({
+                "name": "AMD Radeon (amdgpu)",
+                "vram_used_mb":  used // (1024 * 1024),
+                "vram_total_mb": total // (1024 * 1024),
+                "vram_pct":      round(100 * used / max(total, 1), 1),
+                "temp_c":        temp,
+                "gpu_pct":       busy,
+                "mem_pct":       mem_busy,
+            })
+        except Exception:
+            continue
+    return out
+
+def _gpu_sense() -> list[dict]:
+    return _gpu_via_nvidia_smi() or _gpu_via_amdgpu_sysfs()
+
 def _read_cpu_jiffies(path: str = "/host/proc/stat") -> tuple[int, int]:
     """Returns (idle_jiffies, total_jiffies) from /proc/stat."""
     try:
@@ -297,11 +337,9 @@ async def hardware_snapshot() -> dict:
     except Exception:
         pass
 
-    # GPU via nvidia-smi (shell). Only present if the dashboard container has
-    # access to /usr/bin/nvidia-smi via NVIDIA Container Toolkit; otherwise
-    # this returns []. The frontend handles empty gracefully. Off-loop: the
-    # subprocess spawn blocks up to its 3s timeout.
-    gpu = await asyncio.to_thread(_gpu_via_nvidia_smi)
+    # GPU: nvidia-smi if the toolkit is wired (pre-2026-06-18), else amdgpu
+    # sysfs (W7800). Off-loop: the nvidia probe can block up to 3s.
+    gpu = await asyncio.to_thread(_gpu_sense)
 
     # Disk for /home_ai (mounted in)
     disk_pct = None
