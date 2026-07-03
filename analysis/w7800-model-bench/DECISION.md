@@ -36,3 +36,21 @@ target 60 t/s). Runs sequential on the live box, raw outputs alongside.
   calls/30d): pointing it at gemma4:26b (+5.9pts fields) is the single
   biggest real-accuracy win — n8n workflow patch, do in daylight.
 - phi4:14b (9.1GB) now referenced by nothing — candidate for `ollama rm`.
+
+## Correction + the real production win (added 2026-07-04, same session)
+
+The "repoint P2 invoice.extract to gemma4:26b" follow-up above was based on a
+misread: P2's extractor is already VISION-based (`gemma4-doc`, page image to
+ollama), not qwen text. The actual production problem was far bigger: under
+newer n8n's filesystem binary mode, P2's 'Build Extractor Prompt' read the
+raw binary field and sent the literal storage marker 'filesystem-v2' to
+ollama's images[] — Go base64 decode fails on the '-' at index 10 ("illegal
+base64 data at input byte 10") — so EVERY with-attachment invoice failed at
+extraction (58 errors today; the recurring dead-letter/stale-lease loop).
+Fixed by u291 (getBinaryDataBuffer — binary-mode-agnostic; new workflow
+version, rollback id in script output). Verified: the stuck Forest Produce
+invoice processed end-to-end (webhook 200 in 17.2s), both re-driven
+invoice.detected events processed by the live router within a minute,
+stale leases now zero. Production email-classifier prompts checked: already
+U7-grade. Remaining micro-optimisations: ollama keep_alive warm-pinning for
+the three tier models; a U7-v2 prompt pass at qwen's email-classify misses.
