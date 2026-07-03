@@ -26,6 +26,9 @@ import urllib.request
 from datetime import datetime
 
 VISION_MODEL = os.environ.get("VISION_MODEL", "qwen2.5vl:7b")
+# rollback lever: LEARNED_EXAMPLES=0 disables supplier few-shot (R2 framework D1)
+LEARNED_EXAMPLES = os.environ.get("LEARNED_EXAMPLES", "1") == "1"
+MAX_ATTEMPTS = 5  # after this many failed drains a doc is escalation-tier, not ours
 RENDER_URL = "http://localhost:8003/render-page1-png?width=1400"
 OLLAMA_URL = "http://localhost:11434/api/generate"
 LIMIT = int(sys.argv[1]) if len(sys.argv) > 1 else 200
@@ -37,6 +40,59 @@ PROMPT = (
     '"vat": <number or null>, "gross": <number or null>}\n'
     "gross is the total amount payable including VAT. Use null for anything not visible."
 )
+
+
+def esc(s: str) -> str:
+    return (s or "").replace("'", "''")
+
+
+def _vendor_key(vendor_name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (vendor_name or "").split("<")[0].lower())[:10]
+
+
+def get_learned_example(vendor_name: str, vendor_domain: str, exclude_id: int):
+    """Verified line-extraction from the same supplier (mirrors r2-ocr-bench;
+    +10pts invoice_date / +4pts hard-pile acceptance in the 2026-07-03 bake-off)."""
+    if vendor_domain and len(vendor_domain) >= 4 and not re.search(r"intuit|xero|sage|quickbooks", vendor_domain, re.I):
+        cond = f"v.vendor_domain = '{esc(vendor_domain)}'"
+    else:
+        key = _vendor_key(vendor_name)
+        if len(key) < 5:
+            return None
+        cond = f"regexp_replace(lower(split_part(v.vendor_name,'<',1)),'[^a-z0-9]','','g') LIKE '{esc(key)}%'"
+    rows = psql(f"""
+      SELECT json_agg(json_build_object('description',description,'qty',qty,'unit',unit,
+             'unit_price',unit_price,'line_net',line_net) ORDER BY line_no)
+        FROM vendor_invoice_lines l
+        JOIN vendor_invoice_inbox v ON v.id = l.invoice_id
+       WHERE {cond} AND v.id <> {int(exclude_id)}
+         AND l.extraction_confidence >= 0.92
+         AND l.invoice_id = (
+               SELECT l2.invoice_id FROM vendor_invoice_lines l2
+                 JOIN vendor_invoice_inbox v2 ON v2.id = l2.invoice_id
+                WHERE {cond.replace('v.', 'v2.').replace('l.', 'l2.')} AND v2.id <> {int(exclude_id)}
+                  AND l2.extraction_confidence >= 0.92
+                ORDER BY l2.invoice_id DESC LIMIT 1);""")
+    if not rows or not rows[0] or not rows[0][0] or rows[0][0] == "":
+        return None
+    try:
+        return json.loads(rows[0][0])
+    except Exception:
+        return None
+
+
+def build_prompt(learned_lines) -> str:
+    if not learned_lines:
+        return PROMPT
+    exemplar = json.dumps(learned_lines, ensure_ascii=False)
+    if len(exemplar) > 1800:
+        exemplar = exemplar[:1800] + "...(truncated)"
+    return (
+        "Reference only — a previously verified correct line-extraction from an "
+        "earlier invoice by the SAME supplier, showing this supplier's typical layout:\n"
+        f"{exemplar}\n\n"
+        "Now extract THIS invoice's own values (do not copy the reference numbers):\n"
+    ) + PROMPT
 
 
 def psql(sql: str) -> list[list[str]]:
@@ -70,9 +126,9 @@ def render_png(pdf_path: str, page: int = 0) -> tuple[bytes, int]:
     return resp.read(), int(resp.headers.get("X-Page-Count", "1"))
 
 
-def vision_extract(png: bytes) -> dict:
+def vision_extract(png: bytes, prompt: str = PROMPT) -> dict:
     req = urllib.request.Request(OLLAMA_URL, method="POST",
-        data=json.dumps({"model": VISION_MODEL, "prompt": PROMPT,
+        data=json.dumps({"model": VISION_MODEL, "prompt": prompt,
                          "images": [base64.b64encode(png).decode()],
                          "stream": False,
                          "options": {"temperature": 0, "num_predict": 300}}).encode(),
@@ -87,7 +143,7 @@ def vision_extract(png: bytes) -> dict:
         return {}
 
 
-def extract_document(pdf_path: str, max_pages: int = 3) -> dict:
+def extract_document(pdf_path: str, max_pages: int = 3, prompt: str = PROMPT) -> dict:
     png0, n_pages = render_png(pdf_path, 0)
     order = list(range(n_pages - 1, -1, -1))[:max_pages]
     if 0 not in order:
@@ -95,7 +151,7 @@ def extract_document(pdf_path: str, max_pages: int = 3) -> dict:
     first = {}
     for p in order:
         png = png0 if p == 0 else render_png(pdf_path, p)[0]
-        res = vision_extract(png)
+        res = vision_extract(png, prompt)
         if not first:
             first = res
         if isinstance(res.get("gross"), (int, float)):
@@ -136,22 +192,34 @@ def parse_date(s):
 
 
 def main():
+    # V286 ordering fix: never-attempted docs FIRST. The old received_at DESC
+    # LIMIT meant the hourly cron reground the same ~30 newest failures forever
+    # while ~700 older pool docs were never attempted once (7% live acceptance
+    # vs 75% on a random sample of the same pool — r2-ocr-bench 2026-07-03).
     rows = psql(f"""
-      SELECT id, pdf_local_path FROM vendor_invoice_inbox
+      SELECT id, pdf_local_path, coalesce(vendor_name,''), coalesce(vendor_domain,'')
+        FROM vendor_invoice_inbox
        WHERE extraction_method='pdf_low_conf'
          AND (pdf_text_extracted IS NULL OR pdf_text_extracted='')
          AND pdf_local_path IS NOT NULL
          AND coalesce(gross_amount,0)=0
          AND coalesce(is_statement,false)=false
-       ORDER BY received_at DESC LIMIT {LIMIT};""")
-    print(f"{datetime.now().isoformat()} u281 drain start: {len(rows)} candidates, model={VISION_MODEL}")
+         AND vision_attempts < {MAX_ATTEMPTS}
+       ORDER BY last_vision_attempt ASC NULLS FIRST, received_at DESC
+       LIMIT {LIMIT};""")
+    print(f"{datetime.now().isoformat()} u281 drain start: {len(rows)} candidates, "
+          f"model={VISION_MODEL} learned={LEARNED_EXAMPLES}")
     acc = rej = err = 0
-    for inv_id, path in rows:
+    for inv_id, path, vendor_name, vendor_domain in rows:
         if not os.path.exists(path):
             print(f"#{inv_id} SKIP missing pdf")
             continue
+        psql_exec(f"""UPDATE vendor_invoice_inbox
+                         SET vision_attempts=vision_attempts+1, last_vision_attempt=now()
+                       WHERE id={int(inv_id)} RETURNING 'OK';""", "OK")
         try:
-            res = extract_document(path)
+            learned = get_learned_example(vendor_name, vendor_domain, int(inv_id)) if LEARNED_EXAMPLES else None
+            res = extract_document(path, prompt=build_prompt(learned))
             ok = gate(res)
             if ok:
                 n, v, g = ok
@@ -162,7 +230,7 @@ def main():
                        SET net_amount={n}, vat_amount={v}, gross_amount={g},
                            invoice_date=COALESCE(invoice_date, {('DATE ' + chr(39) + dt + chr(39)) if dt else 'NULL'}),
                            extraction_method='vision_ocr', extraction_confidence=0.70,
-                           extracted_at=now(), pipeline_version='u281-v1'
+                           extracted_at=now(), pipeline_version='u281-v2'
                      WHERE id={int(inv_id)} AND coalesce(gross_amount,0)=0
                      RETURNING 'OK';""", "OK")
                 if done:
