@@ -127,13 +127,13 @@ export default function InvoiceDrilldown({ params }: { params: Promise<{ id: str
               )}
               <div className="px-4 py-3 border-t border-ink-200 flex gap-2 flex-wrap">
                 {h.has_pdf && (
-                  <a href={`http://100.104.82.53:8090/api/invoice/${h.id}/pdf`}
+                  <a href={`/api/invoice/${h.id}/pdf`}
                      target="_blank" rel="noreferrer"
                      className="text-xs px-2.5 py-1.5 bg-ink-100 hover:bg-ink-200 rounded-md inline-flex items-center gap-1">
                     <FileText size={12} /> Open PDF
                   </a>
                 )}
-                <a href={`http://100.104.82.53:8090/invoices?id=${h.id}`}
+                <a href={`/invoices?id=${h.id}`}
                    target="_blank" rel="noreferrer"
                    className="text-xs px-2.5 py-1.5 bg-ink-100 hover:bg-ink-200 rounded-md inline-flex items-center gap-1">
                   Open in build-dashboard <ExternalLink size={12} />

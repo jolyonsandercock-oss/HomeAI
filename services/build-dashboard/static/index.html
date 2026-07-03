@@ -553,23 +553,9 @@
         </template>
       </div>
 
-      <!-- Drift alert strip — only renders when any worker drifting >2σ below baseline -->
-      <div x-show="drift && drift.flagged_count > 0" x-cloak
-           class="glass p-3 mb-2 rounded-xl flex items-center gap-3"
-           style="border-left: 3px solid var(--tl-active); cursor:pointer"
-           @click="showDriftDetail = !showDriftDetail">
-        <span class="conn-dot pulse-dot" style="background:var(--tl-active); box-shadow:0 0 0 3px var(--tl-active-bg)"></span>
-        <div class="flex-1">
-          <div class="text-sm font-semibold" style="color:rgb(146,64,14)">
-            <span x-text="drift.flagged_count"></span>
-            AI worker<span x-text="drift.flagged_count === 1 ? '' : 's'"></span>
-            drifting below baseline
-          </div>
-          <div class="text-xs text-slate-500"
-               x-text="drift.items.filter(i => i.flagged).map(i => i.ai_worker + '/' + (i.ai_model||'?') + ' (' + (i.delta_stddev||'?') + 'σ)').join(' · ')"></div>
-        </div>
-        <span class="chev text-slate-400" :style="showDriftDetail ? 'transform:rotate(90deg)' : ''">▸</span>
-      </div>
+      <!-- Drift alert strip removed 2026-07-03 (F1 item 3): v_ai_worker_drift is
+           permanently empty so /api/drift/current always returned flagged_count 0
+           and the strip never rendered. The API endpoint is kept. -->
       <!-- Anomaly alert strip — only renders when flagged_count > 0 -->
       <div x-show="anomalies && anomalies.flagged_count > 0" x-cloak
            class="glass p-3 mb-2 rounded-xl flex items-center gap-3"
@@ -1732,14 +1718,12 @@ function kpiRibbon() {
     pendingCount: 0,
     anomalies: null,         // { items, flagged_count, max_severity }
     sparklines: null,        // { dates, revenue, labour, in_house }
-    drift: null,             // { items, flagged_count }
     reviews: null,           // { items, pending_count, low_star_count }
     period: null,            // { yesterday, last_7d, last_30d } — U225 T2
     showAnomalyDetail: false,
-    showDriftDetail: false,
     showReviewsDetail: false,
     async boot() {
-      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadDrift(), this.loadReviews(), this.loadPeriod()]);
+      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadReviews(), this.loadPeriod()]);
       setInterval(() => this.refresh(), 60000);
     },
     async loadPeriod() {
@@ -1810,12 +1794,6 @@ function kpiRibbon() {
         this.sparklines = await r.json();
       } catch {}
     },
-    async loadDrift() {
-      try {
-        const r = await fetch('/api/drift/current');
-        this.drift = await r.json();
-      } catch {}
-    },
     async loadReviews() {
       try {
         const r = await fetch('/api/reviews/queue');
@@ -1846,7 +1824,7 @@ function kpiRibbon() {
       if ((await r.json()).ok) this.loadReviews();
     },
     async refresh() {
-      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadDrift(), this.loadReviews(), this.loadPeriod()]);
+      await Promise.all([this.loadKpi(), this.loadPending(), this.loadAnomalies(), this.loadSparklines(), this.loadReviews(), this.loadPeriod()]);
     },
     lwDir() {
       const t = Number(this.kpi.total_net_sales), l = Number(this.kpi.net_sales_lw);
