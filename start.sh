@@ -17,7 +17,7 @@ readonly N8N_TOKEN_TTL="24h"
 # Secrets are unset on any exit path, including SIGINT/SIGTERM.
 cleanup_secrets() {
   unset POSTGRES_PASSWORD N8N_DB_PASSWORD METABASE_APP_PASSWORD \
-        PAPERLESS_DB_PASSWORD \
+        PAPERLESS_DB_PASSWORD EXPORTER_DB_PASSWORD \
         REDIS_PASSWORD GRAFANA_ADMIN_PASSWORD OPEN_WEBUI_SECRET \
         PAYLOAD_HMAC_KEY ANTHROPIC_API_KEY \
         VAULT_N8N_TOKEN VAULT_TOKEN ROLES_JSON
@@ -136,6 +136,8 @@ fetch_secrets() {
     || { err "secret/postgres-roles missing 'metabase_app' — metabase will not start (run scripts/fix-metabase-role-pw.sh)"; METABASE_APP_PASSWORD=""; }
   PAPERLESS_DB_PASSWORD=$(printf '%s' "$ROLES_JSON" | jq -er '.data.data.paperless') \
     || { err "secret/postgres-roles missing 'paperless' — paperless will not start (run scripts/fix-paperless-role-pw.sh)"; PAPERLESS_DB_PASSWORD=""; }
+  EXPORTER_DB_PASSWORD=$(printf '%s' "$ROLES_JSON" | jq -er '.data.data.metrics_exporter') \
+    || { err "secret/postgres-roles missing 'metrics_exporter' — postgres-exporter metrics will degrade (role created 2026-07-03)"; EXPORTER_DB_PASSWORD=""; }
   ROLES_JSON=""
 
   # U250: breakfast-link signing secret. NON-CRITICAL — missing only degrades
@@ -146,7 +148,7 @@ fetch_secrets() {
     || { err "secret/breakfast missing 'token_secret' — build-dashboard will not start (U250)"; BREAKFAST_TOKEN_SECRET=""; }
 
   export POSTGRES_PASSWORD N8N_DB_PASSWORD METABASE_APP_PASSWORD \
-         PAPERLESS_DB_PASSWORD \
+         PAPERLESS_DB_PASSWORD EXPORTER_DB_PASSWORD \
          REDIS_PASSWORD GRAFANA_ADMIN_PASSWORD OPEN_WEBUI_SECRET \
          PAYLOAD_HMAC_KEY ANTHROPIC_API_KEY BREAKFAST_TOKEN_SECRET
   ok "10 infrastructure secrets fetched"

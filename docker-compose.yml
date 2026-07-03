@@ -61,7 +61,12 @@ services:
       - ./monitoring/postgres-exporter-queries.yaml:/etc/postgres_exporter/queries.yaml:ro
     command: ["--extend.query-path=/etc/postgres_exporter/queries.yaml"]
     environment:
-      DATA_SOURCE_NAME: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai?sslmode=disable"
+      # De-superusered 2026-07-03: scoped read-only role (pg_monitor +
+      # pg_read_all_data + BYPASSRLS so whole-table counts stay truthful).
+      # Password: Vault secret/postgres-roles field metrics_exporter,
+      # mirrored in .env; non-critical — a missing value only degrades
+      # metrics, never boot (metabase pattern).
+      DATA_SOURCE_NAME: "postgresql://metrics_exporter:${EXPORTER_DB_PASSWORD:-}@homeai-postgres:5432/homeai?sslmode=disable"
     depends_on:
       postgres: {condition: service_healthy}
     restart: unless-stopped
@@ -455,7 +460,10 @@ services:
     # NOT on ai-monitoring/ai-proxy — internal-only consumer (n8n hits it).
     networks: [ai-internal, ai-egress]
     environment:
-      PG_DSN: "postgresql://postgres:${POSTGRES_PASSWORD}@homeai-postgres:5432/homeai"
+      # De-superusered 2026-07-03: whole SQL surface (static_context SELECT,
+      # events + google_api_calls INSERT, claim_idempotency_key) verified
+      # granted to homeai_pipeline — the same role n8n's pipelines use.
+      PG_DSN: "postgresql://homeai_pipeline:${N8N_DB_PASSWORD}@homeai-postgres:5432/homeai"
       VAULT_ADDR: "http://vault:8200"
       VAULT_TOKEN: "${VAULT_TOKEN}"
     depends_on:
