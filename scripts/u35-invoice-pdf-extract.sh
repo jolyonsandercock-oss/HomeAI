@@ -213,7 +213,7 @@ async def main():
     conn = await asyncpg.connect(PG_DSN)
     await conn.execute("SET app.current_entity='1'")
     rows = await conn.fetch("""
-      SELECT id, account, source_email_id
+      SELECT id, account, source_email_id, received_at
         FROM vendor_invoice_inbox
        WHERE (extraction_method IS NULL
               OR extraction_method IN ('harvest_keyword','harvest_overdue'))
@@ -246,8 +246,9 @@ async def main():
         # U44: save PDF to disk + populate first_attachment_path (idempotent).
         # Use received_at for the date-bucket; fall back to today if NULL.
         try:
-            ra = await conn.fetchval("SELECT received_at FROM vendor_invoice_inbox WHERE id=$1", bid)
-            saved_path = save_pdf_to_disk(pdf, mid, pdf_filename or "invoice.pdf", ra)
+            # received_at comes from the candidate SELECT — was a redundant
+            # per-row fetchval (perf pass 2026-07-03)
+            saved_path = save_pdf_to_disk(pdf, mid, pdf_filename or "invoice.pdf", row['received_at'])
             if saved_path:
                 await conn.execute("""
                   UPDATE vendor_invoice_inbox SET first_attachment_path=$2

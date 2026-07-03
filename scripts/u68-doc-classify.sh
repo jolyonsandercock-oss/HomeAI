@@ -194,10 +194,19 @@ async def main():
     print(f"{len(rows)} candidate docs for Layer 3 classify")
 
     n_auto = n_review = n_reject = n_fail = 0
+    # Perf pass 2026-07-03: classify_one is pure HTTP, so run the Haiku calls
+    # concurrently (bounded at 4) instead of serially — up to 20 sequential
+    # LLM round-trips was 20-60s of wall time per 5-min cron run. DB work
+    # stays serial below: the shared asyncpg connection isn't concurrency-safe.
+    sem = asyncio.Semaphore(4)
     async with httpx.AsyncClient() as client:
-        for row in rows:
+        async def classify_bounded(row):
+            async with sem:
+                return await classify_one(client, row["ocr_text"], row["title"])
+        results = await asyncio.gather(*(classify_bounded(r) for r in rows))
+
+        for row, (inp, err, usage) in zip(rows, results):
             doc_id = row["id"]
-            inp, err, usage = await classify_one(client, row["ocr_text"], row["title"])
             if usage:
                 await log_ai_usage(conn, MODEL, usage,
                                    service="u68-doc-classify", trace=f"doc#{doc_id}")

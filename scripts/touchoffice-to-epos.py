@@ -20,10 +20,15 @@ MAP = {
 
 async def run():
     conn = await asyncpg.connect(PG_DSN)
+    # Perf pass 2026-07-03: was the last 60 DISTINCT site-dates, re-read and
+    # re-upserted on every 30-min cron run (~120 queries/run) when only
+    # today/yesterday ever change. Rolling 3-day window now; for a historical
+    # backfill, run manually with the window widened.
     dates = await conn.fetch("""
         SELECT DISTINCT site, report_date FROM touchoffice_fixed_totals
         WHERE site IN ('malthouse','sandwich')
-        ORDER BY report_date DESC LIMIT 60
+          AND report_date >= current_date - 3
+        ORDER BY report_date DESC
     """)
     for r in dates:
         site, dt = r["site"], r["report_date"]

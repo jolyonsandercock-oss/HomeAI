@@ -117,6 +117,19 @@ async def main():
         wl_rows = await conn.fetch("SELECT email FROM bot_sender_whitelist WHERE active")
         whitelist = {r["email"].lower() for r in wl_rows}
 
+    # Perf pass 2026-07-03: pre-check which message ids are already queued so
+    # the full-body gmail_message() HTTP fetch is skipped for them. With the
+    # 15-min cutoff on a 2-min cron, every new email's body was re-fetched
+    # ~7x before ageing out. The ON CONFLICT insert below stays as the
+    # correctness backstop.
+    ids = [m.get("id") for m in msgs if m.get("id")]
+    async with conn.transaction():
+        await conn.execute("SET LOCAL app.current_entity = '3'")
+        known_rows = await conn.fetch(
+            "SELECT source_id FROM bot_instructions"
+            " WHERE source='email' AND source_id = ANY($1::text[])", ids)
+    known = {r["source_id"] for r in known_rows}
+
     queued_query = 0
     queued_data  = 0
     skipped_self = 0
@@ -135,6 +148,8 @@ async def main():
         received = (datetime.fromtimestamp(internal_date / 1000, tz=timezone.utc)
                     if internal_date else datetime.now(timezone.utc))
         if received < cutoff:
+            continue
+        if mid in known:      # already queued — skip the body fetch
             continue
 
         msg = gmail_message("bot", mid)
