@@ -153,17 +153,24 @@ async def _apply_db_context(c, entity: str | None, realm: str | None = None):
     """Set realm (+ entity) on the transaction; under RLS_ENFORCE_SET_ROLE also
     drop superuser for the txn. Must run inside an open transaction. `realm`
     overrides the request realm — pass it for endpoints that must pin a specific
-    realm (e.g. 'owner' for cross-realm admin/recon views)."""
+    realm (e.g. 'owner' for cross-realm admin/recon views).
+
+    Perf pass 2026-07-03: role + entity + realm now applied in ONE round trip
+    via home_ai.apply_db_context() (V288) — was 2-3 statements per helper
+    query. The function preserves statement order (role first, so set_realm's
+    role-realm pairing checks see the switched current_user) and the entity
+    defaulting branches below are unchanged. Verified: per-realm emails row
+    visibility identical old vs new for work/personal/owner."""
     if RLS_ENFORCE_SET_ROLE:
-        await c.execute(f"SET LOCAL ROLE {RLS_SET_ROLE_NAME}")
         # Without an explicit entity the permissive entity_isolation policy
         # denies everything — default to 'all' so non-entity helpers still read.
-        await c.execute("SELECT set_config('app.current_entity', $1, true)",
-                        str(entity) if entity is not None else "all")
-    elif entity is not None:
-        await c.execute("SELECT set_config('app.current_entity', $1, true)", str(entity))
-    await c.execute("SELECT home_ai.set_realm($1)",
-                    realm if realm is not None else _current_realm.get())
+        role = RLS_SET_ROLE_NAME
+        ent = str(entity) if entity is not None else "all"
+    else:
+        role = None
+        ent = str(entity) if entity is not None else None
+    await c.execute("SELECT home_ai.apply_db_context($1, $2, $3)",
+                    role, ent, realm if realm is not None else _current_realm.get())
 
 async def db_one(sql: str, *args):
     p = await pool()
