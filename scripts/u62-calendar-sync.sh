@@ -55,23 +55,30 @@ async def access_token(client, sec):
     r.raise_for_status()
     return r.json()["access_token"]
 
-async def fetch_calendar(client, acct, tok):
-    time_min = (datetime.now(timezone.utc) - timedelta(days=WINDOW_PAST)).isoformat()
-    time_max = (datetime.now(timezone.utc) + timedelta(days=WINDOW_FUTURE)).isoformat()
-    items = []
-    page = None
-    for _ in range(8):  # max ~2000 events
-        params = {
-            "timeMin": time_min, "timeMax": time_max,
-            "singleEvents": "true", "orderBy": "startTime",
-            "maxResults": "250",
-        }
+# Perf pass 2026-07-03: incremental sync via Google syncToken. The old code
+# re-pulled the ENTIRE -30d..+180d window and re-upserted every event, every
+# 15 minutes. Now: first run (or 410 GONE / lost token) does one full-window
+# sync and stores the nextSyncToken in static_context
+# ('calendar.sync_token.<acct>'); subsequent runs fetch only changed events.
+# Constraints per the events.list reference: syncToken is incompatible with
+# orderBy/timeMin/timeMax (orderBy dropped everywhere — nothing consumed it),
+# and nextSyncToken only appears on the LAST page. Cancelled events arrive in
+# incremental responses (often without start/end) — handled in upsert().
+EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+
+async def _list_pages(client, acct, tok, base_params):
+    """Paginate events.list. Returns (items, next_sync_token) —
+    (None, None) signals 410 GONE (expired syncToken)."""
+    items, page, nst = [], None, None
+    for _ in range(24):  # max ~6000 events per run
+        params = dict(base_params)
         if page:
             params["pageToken"] = page
-        r = await client.get(
-            "https://www.googleapis.com/calendar/v3/calendars/primary/events",
-            headers={"Authorization": f"Bearer {tok}"},
-            params=params, timeout=30)
+        r = await client.get(EVENTS_URL,
+                             headers={"Authorization": f"Bearer {tok}"},
+                             params=params, timeout=30)
+        if r.status_code == 410:
+            return None, None
         if r.status_code != 200:
             print(f"  [{acct}] HTTP {r.status_code}: {r.text[:200]}")
             break
@@ -79,8 +86,37 @@ async def fetch_calendar(client, acct, tok):
         items.extend(j.get("items", []))
         page = j.get("nextPageToken")
         if not page:
+            nst = j.get("nextSyncToken")
             break
-    return items
+    return items, nst
+
+async def fetch_calendar(client, acct, tok, sync_token):
+    """Returns (items, next_sync_token, mode)."""
+    if sync_token:
+        items, nst = await _list_pages(client, acct, tok, {
+            "syncToken": sync_token, "singleEvents": "true", "maxResults": "250"})
+        if items is not None:
+            return items, nst, "incremental"
+        print(f"  [{acct}] syncToken expired (410) — full resync")
+    time_min = (datetime.now(timezone.utc) - timedelta(days=WINDOW_PAST)).isoformat()
+    time_max = (datetime.now(timezone.utc) + timedelta(days=WINDOW_FUTURE)).isoformat()
+    items, nst = await _list_pages(client, acct, tok, {
+        "timeMin": time_min, "timeMax": time_max,
+        "singleEvents": "true", "maxResults": "250"})
+    return (items or []), nst, "full"
+
+async def get_sync_token(conn, acct):
+    return await conn.fetchval(
+        "SELECT value->>'token' FROM static_context WHERE key=$1",
+        f"calendar.sync_token.{acct}")
+
+async def save_sync_token(conn, acct, token):
+    await conn.execute("""
+        INSERT INTO static_context (key, value, updated_at, realm)
+        VALUES ($1, jsonb_build_object('token', $2::text), NOW(), 'owner')
+        ON CONFLICT (key) DO UPDATE
+           SET value = EXCLUDED.value, updated_at = NOW()
+    """, f"calendar.sync_token.{acct}", token)
 
 import asyncpg
 async def upsert(conn, acct, realm, ev):
@@ -95,6 +131,15 @@ async def upsert(conn, acct, realm, ev):
     start_at = parse(start_obj.get("dateTime") or start_obj.get("date"))
     end_at   = parse(end_obj.get("dateTime")   or end_obj.get("date"))
     if not start_at:
+        # Incremental sync delivers cancelled events with no start/end —
+        # flip the stored row's status instead of dropping the tombstone.
+        if ev.get("status") == "cancelled" and ev.get("id"):
+            await conn.execute("""
+                UPDATE calendar_events
+                   SET status='cancelled', fetched_at=NOW()
+                 WHERE source_account=$1 AND gcal_event_id=$2
+            """, acct, ev["id"])
+            return True
         return False
     attendees = ev.get("attendees")
     await conn.execute("""
@@ -152,12 +197,16 @@ async def main():
             except Exception as e:
                 print(f"  [{acct}] token refresh failed: {e}")
                 continue
-            events = await fetch_calendar(client, acct, tok)
+            sync_token = await get_sync_token(conn, acct)
+            events, next_token, mode = await fetch_calendar(client, acct, tok, sync_token)
             n_ok = 0
             for ev in events:
                 if await upsert(conn, acct, ACCT_REALM.get(acct, "personal"), ev):
                     n_ok += 1
-            print(f"  [{acct}] {n_ok} events upserted (window -{WINDOW_PAST}d..+{WINDOW_FUTURE}d)")
+            if next_token:
+                await save_sync_token(conn, acct, next_token)
+            print(f"  [{acct}] {mode} sync: {len(events)} changed, {n_ok} applied"
+                  + ("" if next_token else " (no nextSyncToken — will retry same mode)"))
 
     total = await conn.fetchval("SELECT COUNT(*) FROM calendar_events")
     upcoming = await conn.fetchval("SELECT COUNT(*) FROM v_calendar_upcoming")
