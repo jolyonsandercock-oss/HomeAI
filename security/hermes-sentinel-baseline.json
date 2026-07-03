@@ -92,16 +92,16 @@
  ],
  "hooks_sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
  "kanban_open": [],
- "memory_sha": "7bade12caeb8bfd670f5dabb88d7e4948c0d53b87e3dc57e13231b6864728953",
+ "memory_sha": "27bcaf51e22b14712bd6a815c1a292802699a6bcb5ba991946f77b32bc18d911",
  "providers": {
   "anthropic": 1,
   "deepseek": 2,
   "nous": 1,
   "openai-api": 1
  },
- "skills_count": 574,
- "skills_sha": "49454ec36cae482b6a17fbe22c729c41718ab4aa9718030ad26856cff9a4fcf0",
+ "skills_count": 591,
+ "skills_sha": "dbc021a46ea18548a7867ff3a17c5156dcf5a30935db5f21ad3aed9b211b1325",
  "soul_sha": "9e6acde6357e4d8851ae2f384d5dada6218c1f54b27fcc87ee954da9b6618055",
  "user_listeners": [],
- "user_profile_sha": "81c56929b91fef2d0bea11b7d11c984e5347446faf6e27f49727ceecda9869be"
+ "user_profile_sha": "3e388eda5705e9742b4c16de93d964bb7f3b8509a0a24cf1f6183783221b85e7"
 }
