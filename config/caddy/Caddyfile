@@ -24,6 +24,16 @@ http://100.104.82.53:8080 {
 
 # IP-based path-routed listener — UNCHANGED, kept as rollback path.
 http://:80 {
+    # SEC 2026-07-03 (F1 item 5): strip client-supplied Authelia identity
+    # headers. This listener has NO forward_auth, and build-dashboard runs
+    # REALM_ENFORCE=1 reading Remote-Groups — a forged `Remote-Groups: all`
+    # on /api/pub/* elevated to owner realm. Site-level request_header runs
+    # before the handle subroutes (Caddyfile directive order), so nothing
+    # client-supplied survives to any upstream.
+    request_header -Remote-User
+    request_header -Remote-Groups
+    request_header -Remote-Name
+    request_header -Remote-Email
     # SEC 2026-06-16: /dashboard is owner-internal and must not be served
     # unauthenticated even on the Tailscale-only :80 listener. Bounce browsers
     # to the Authelia-gated HTTPS FQDN instead of proxying straight through.
@@ -99,6 +109,27 @@ http://:80 {
 # /api/m/mobile, /api/economics/overview, ...) hit the right endpoint.
 https://jolybox.tailc27dff.ts.net {
     tls /etc/caddy/tls/jolybox.tailc27dff.ts.net.crt /etc/caddy/tls/jolybox.tailc27dff.ts.net.key
+
+    # F1 item 5 (2026-07-03): JSON access log — usage data feeds the F2
+    # two-stack consolidation decision. /data is the caddy_data volume.
+    log {
+        output file /data/access-fqdn.log {
+            roll_size 10MiB
+            roll_keep 5
+        }
+        format json
+    }
+
+    # SEC 2026-07-03 (F1 item 5): strip client-supplied Authelia identity
+    # headers BEFORE forward_auth re-injects the real values via copy_headers.
+    # forward_auth only overwrites headers present in Authelia's verify
+    # response — anything it doesn't set would otherwise pass through
+    # client-controlled (lib/realm.ts spoofing follow-up). Site-level
+    # request_header runs before the handle subroutes in directive order.
+    request_header -Remote-User
+    request_header -Remote-Groups
+    request_header -Remote-Name
+    request_header -Remote-Email
 
     # Authelia portal — open (must be reachable to log in).
     handle /auth/* {
