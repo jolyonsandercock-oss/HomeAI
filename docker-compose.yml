@@ -171,7 +171,15 @@ services:
       # (vision + 72B both fit in VRAM), but 5m is a fine default; revisit if we
       # want a 72B pinned hot. 2026-06-15, reviewed for AMD swap 2026-06-18.
       OLLAMA_KEEP_ALIVE: "5m"
-      OLLAMA_NUM_PARALLEL: "2"
+      # 2026-06-25: bumped 2→4 after benchmarking the W7800. At NP=2 a 4-concurrent
+      # load queued 2 requests (the "c=4 collapse" Hermes mis-diagnosed as an HBM
+      # bandwidth wall); at NP=4, gemma4-qat31b aggregate scaled 24.9→48.5→66.0→77.0
+      # t/s across c=1..4 with NO cliff. BUT NP is global and 4 unbounded KV slots
+      # spilled the 41GB 72B q4_0 to CPU (62/81 layers). Fix = pin CONTEXT_LENGTH
+      # below so 4 KV slots fit alongside big weights. Long-context callers must pass
+      # options.num_ctx per request to exceed this default.
+      OLLAMA_NUM_PARALLEL: "4"
+      OLLAMA_CONTEXT_LENGTH: "8192"
       OLLAMA_KV_CACHE_TYPE: "q8_0"
       # 0.30.10's llama.cpp REQUIRES flash attention for KV-cache quantization
       # (q8_0); with it off, every model load crashes ("V cache quantization
@@ -504,6 +512,11 @@ services:
     build: ./services/homeai-litellm
     container_name: homeai-litellm
     networks: [ai-internal, ai-egress]
+    # loopback-only publish for host-side Hermes (repointed off api.deepseek.com
+    # so its egress gets Presidio redaction + ai_usage logging). Not tailnet-bound,
+    # so immune to the docker/tailscale boot race.
+    ports:
+      - "127.0.0.1:8771:4000"
     volumes:
       - homeai_secrets:/run/secrets:ro
     environment:
