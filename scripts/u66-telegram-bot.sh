@@ -19,18 +19,18 @@
 
 set -euo pipefail
 
-VAULT_TOKEN=$(docker inspect homeai-google-fetch --format='{{range .Config.Env}}{{println .}}{{end}}' | grep '^VAULT_TOKEN=' | cut -d= -f2-)
-PG_PW=$(docker exec -e VAULT_TOKEN="$VAULT_TOKEN" homeai-vault vault kv get -field=password secret/postgres)
-PG_DSN="postgresql://postgres:${PG_PW}@homeai-postgres:5432/homeai"
-ANTH_KEY=$(docker exec -e VAULT_TOKEN="$VAULT_TOKEN" homeai-vault vault kv get -field=api_key secret/anthropic)
-
-docker exec -i -e VAULT_TOKEN="$VAULT_TOKEN" -e PG_DSN="$PG_DSN" -e ANTHROPIC_API_KEY="$ANTH_KEY" \
-    homeai-bot-responder python /dev/stdin <<'PYEOF'
+# Perf pass 2026-07-03: this runs every minute — the old preamble spawned
+# 4 subprocesses per run (docker inspect + 2 vault CLI execs + docker exec,
+# ~2,880 Vault CLI hits/day) just to assemble env vars. bot-responder already
+# carries its own VAULT_TOKEN, and the python below already talks to Vault
+# over HTTP for the telegram secret — postgres + anthropic now come the same
+# way. One spawn per run.
+docker exec -i homeai-bot-responder python /dev/stdin <<'PYEOF'
 import os, json, asyncio, re, urllib.parse
 import httpx, asyncpg
 
-PG_DSN = os.environ["PG_DSN"]
-ANTH_KEY = os.environ["ANTHROPIC_API_KEY"]
+PG_DSN = None      # built in main() from Vault secret/postgres
+ANTH_KEY = None    # fetched in main() from Vault secret/anthropic
 VAULT_TOKEN = os.environ["VAULT_TOKEN"]
 VAULT_ADDR = "http://vault:8200"
 
@@ -151,14 +151,20 @@ async def log_command(conn, user_id, command, args, result, note=None):
         """, user_id, command, args or "", real_result, note)
 
 async def main():
-    conn = await asyncpg.connect(PG_DSN)
-    await conn.execute("SET app.current_entity = 'all'")
-    await conn.execute("SET app.current_realm  = 'owner'")
-
+    global PG_DSN, ANTH_KEY
     async with httpx.AsyncClient() as client:
-        tg = await vault_get(client, "telegram")
+        tg, pg, anth = await asyncio.gather(
+            vault_get(client, "telegram"),
+            vault_get(client, "postgres"),
+            vault_get(client, "anthropic"))
         bot_token = tg["bot_token"]
         configured_chat = str(tg["chat_id"])
+        PG_DSN = f"postgresql://postgres:{pg['password']}@homeai-postgres:5432/homeai"
+        ANTH_KEY = anth["api_key"]
+
+        conn = await asyncpg.connect(PG_DSN)
+        await conn.execute("SET app.current_entity = 'all'")
+        await conn.execute("SET app.current_realm  = 'owner'")
 
         offset = await conn.fetchval(
             "SELECT last_update_id FROM telegram_bot_state WHERE bot_id='homeai'") or 0

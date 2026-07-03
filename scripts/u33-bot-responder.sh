@@ -6,7 +6,9 @@
 # query_whitelist, replies via /send/bot. Non-whitelisted senders are
 # silently rejected and logged to query_rejections.
 #
-# Cron: every 5 minutes. Idempotent — picks one row at a time under
+# Cron: every minute (header used to say 5 min while the crontab ran 1-min;
+# 1-min is deliberate for reply latency — comment fixed 2026-07-03, Jo left
+# cadence as-is). Idempotent — picks one row at a time under
 # `FOR UPDATE SKIP LOCKED` so parallel runs (overlap) won't double-process.
 
 set -euo pipefail
