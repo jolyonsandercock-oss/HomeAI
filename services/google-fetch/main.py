@@ -68,7 +68,7 @@ _MAILBOX_REALM: dict[str, str] = {
 # ─── DB helpers ─────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=4)
+    app.state.pool = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=16)
     app.state.http = httpx.AsyncClient(timeout=30.0)
     try:
         yield
@@ -263,7 +263,14 @@ async def list_messages(
             "internal_date":   body.get("internalDate"),
         }
 
-    metas = await asyncio.gather(*[fetch_meta(mid) for mid in msg_ids])
+    # Perf pass 2026-07-03: gate the fan-out — max_results can be 500 and an
+    # ungated gather bursts that many concurrent Gmail calls (429/retry-storm
+    # risk). 15 in flight keeps well under Gmail's per-user rate limits.
+    _sem = asyncio.Semaphore(15)
+    async def _gated(mid: str) -> dict[str, Any]:
+        async with _sem:
+            return await fetch_meta(mid)
+    metas = await asyncio.gather(*[_gated(mid) for mid in msg_ids])
     return {
         "account": account,
         "email":   acc["email"],
@@ -653,147 +660,150 @@ async def poll_and_emit(newer_than: str = Query("1d"), max_per_account: int = Qu
     hmac_key = sig_blob["payload_hmac_key"].encode()
 
     results = []
-    async with app.state.pool.acquire() as conn:
-        for acc in accounts:
-            name = acc["name"]
-            email = acc["email"]
-            try:
-                tok = await access_token(acc)
+    # Perf pass 2026-07-03: the pool connection used to be held across the
+    # ENTIRE account loop including every serial Gmail full-body HTTP fetch,
+    # starving the 4-conn pool during network I/O. It is now acquired
+    # per-message around the DB transaction only (see below).
+    for acc in accounts:
+        name = acc["name"]
+        email = acc["email"]
+        try:
+            tok = await access_token(acc)
 
-                # List recent message IDs
-                r = await app.state.http.get(
-                    "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-                    params={"q": f"newer_than:{newer_than}", "maxResults": max_per_account},
-                    headers={"Authorization": f"Bearer {tok}"},
-                )
-                if r.status_code != 200:
-                    results.append({"account": name, "error": r.text[:200]})
-                    continue
-                msg_ids = [m["id"] for m in r.json().get("messages", [])]
+            # List recent message IDs
+            r = await app.state.http.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+                params={"q": f"newer_than:{newer_than}", "maxResults": max_per_account},
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            if r.status_code != 200:
+                results.append({"account": name, "error": r.text[:200]})
+                continue
+            msg_ids = [m["id"] for m in r.json().get("messages", [])]
 
-                inserted = 0; skipped = 0; errors = 0
-                for mid in msg_ids:
-                    try:
-                        # Fetch full body
-                        rr = await app.state.http.get(
-                            f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{mid}",
-                            params={"format": "full"},
-                            headers={"Authorization": f"Bearer {tok}"},
+            inserted = 0; skipped = 0; errors = 0
+            for mid in msg_ids:
+                try:
+                    # Fetch full body
+                    rr = await app.state.http.get(
+                        f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{mid}",
+                        params={"format": "full"},
+                        headers={"Authorization": f"Bearer {tok}"},
+                    )
+                    if rr.status_code != 200:
+                        errors += 1
+                        continue
+                    msg = rr.json()
+                    payload = msg.get("payload") or {}
+                    headers = payload.get("headers") or []
+                    h = {x["name"].lower(): x["value"] for x in headers}
+
+                    from_raw = h.get("from", "")
+                    from_name, from_address = _parse_from(from_raw)
+                    body_text = _find_text(payload)
+                    body_text_safe = _sanitise(body_text)
+                    attachments = []
+                    _walk_attachments(payload, attachments)
+                    has_attachment = bool(attachments)
+
+                    internal = msg.get("internalDate")
+                    if internal:
+                        from datetime import datetime, timezone
+                        received_at = datetime.fromtimestamp(int(internal) / 1000, tz=timezone.utc).isoformat()
+                    else:
+                        received_at = h.get("date")
+
+                    # R5: realm derived from mailbox-of-receipt. KeyError
+                    # by design if a new account ships without a mapping
+                    # — better a loud poll failure than silent owner-tag.
+                    realm = _MAILBOX_REALM[name]
+
+                    event_payload = {
+                        "gmail_message_id": mid,
+                        "account": name,
+                        "realm": realm,
+                        "from_address": from_address,
+                        "from_name": from_name,
+                        "subject": h.get("subject", ""),
+                        "body_text": body_text,
+                        "body_text_safe": body_text_safe,
+                        "received_at": received_at,
+                        "has_attachment": has_attachment,
+                    }
+                    canonical = json.dumps(event_payload, sort_keys=True, separators=(",", ":"))
+                    signature = _hmac.new(hmac_key, canonical.encode(), hashlib.sha256).hexdigest()
+                    idem_key = f"email_{mid}"
+
+                    # Atomic claim + insert in a single transaction.
+                    # email.received claim is gated, but document.received claims are
+                    # INDEPENDENT — so re-polling existing emails will backfill any
+                    # missing attachment events. Per U43 fix — without this, the
+                    # Invoice Pipeline P2 dead-letters every invoice.detected because
+                    # the sibling document.received never arrives.
+                    async with app.state.pool.acquire() as conn, conn.transaction():
+                        await conn.execute("SET LOCAL app.current_entity = 'all'")
+                        claimed = await conn.fetchval(
+                            "SELECT claim_idempotency_key($1, 'gmail-poller-py')",
+                            idem_key,
                         )
-                        if rr.status_code != 200:
-                            errors += 1
-                            continue
-                        msg = rr.json()
-                        payload = msg.get("payload") or {}
-                        headers = payload.get("headers") or []
-                        h = {x["name"].lower(): x["value"] for x in headers}
-
-                        from_raw = h.get("from", "")
-                        from_name, from_address = _parse_from(from_raw)
-                        body_text = _find_text(payload)
-                        body_text_safe = _sanitise(body_text)
-                        attachments = []
-                        _walk_attachments(payload, attachments)
-                        has_attachment = bool(attachments)
-
-                        internal = msg.get("internalDate")
-                        if internal:
-                            from datetime import datetime, timezone
-                            received_at = datetime.fromtimestamp(int(internal) / 1000, tz=timezone.utc).isoformat()
-                        else:
-                            received_at = h.get("date")
-
-                        # R5: realm derived from mailbox-of-receipt. KeyError
-                        # by design if a new account ships without a mapping
-                        # — better a loud poll failure than silent owner-tag.
-                        realm = _MAILBOX_REALM[name]
-
-                        event_payload = {
-                            "gmail_message_id": mid,
-                            "account": name,
-                            "realm": realm,
-                            "from_address": from_address,
-                            "from_name": from_name,
-                            "subject": h.get("subject", ""),
-                            "body_text": body_text,
-                            "body_text_safe": body_text_safe,
-                            "received_at": received_at,
-                            "has_attachment": has_attachment,
-                        }
-                        canonical = json.dumps(event_payload, sort_keys=True, separators=(",", ":"))
-                        signature = _hmac.new(hmac_key, canonical.encode(), hashlib.sha256).hexdigest()
-                        idem_key = f"email_{mid}"
-
-                        # Atomic claim + insert in a single transaction.
-                        # email.received claim is gated, but document.received claims are
-                        # INDEPENDENT — so re-polling existing emails will backfill any
-                        # missing attachment events. Per U43 fix — without this, the
-                        # Invoice Pipeline P2 dead-letters every invoice.detected because
-                        # the sibling document.received never arrives.
-                        async with conn.transaction():
-                            await conn.execute("SET LOCAL app.current_entity = 'all'")
-                            claimed = await conn.fetchval(
-                                "SELECT claim_idempotency_key($1, 'gmail-poller-py')",
-                                idem_key,
+                        if claimed:
+                            await conn.execute(
+                                """INSERT INTO events
+                                     (event_type, source, entity_id, payload, payload_signature,
+                                      idempotency_key, pipeline_version, realm)
+                                   VALUES ('email.received', 'gmail', NULL, $1::jsonb, $2,
+                                           $3, 'gmail_poller_py:1.3', $4)""",
+                                json.dumps(event_payload), signature, idem_key, realm,
                             )
-                            if claimed:
+                            inserted += 1
+                        else:
+                            skipped += 1
+
+                        # Per-attachment document.received emission (U43 fix).
+                        # Runs REGARDLESS of whether email.received was newly claimed,
+                        # so this also backfills attachment events for emails that
+                        # were polled before U43.
+                        # U47d: Gmail rotates `attachment_id` on every fetch (verified
+                        # 71 distinct ids for the same file in one hour), so it cannot
+                        # be used as an idempotency key. Use (mid, part_index, size)
+                        # instead — stable across re-polls.
+                        for idx, att in enumerate(attachments):
+                            doc_payload = {
+                                "gmail_message_id": mid,
+                                "account": name,
+                                "realm": realm,
+                                "filename": att["filename"],
+                                "mime_type": att["mime_type"],
+                                "attachment_id": att["attachment_id"],
+                                "size": att["size"],
+                            }
+                            doc_canon = json.dumps(doc_payload, sort_keys=True, separators=(",", ":"))
+                            doc_sig   = _hmac.new(hmac_key, doc_canon.encode(), hashlib.sha256).hexdigest()
+                            doc_idem  = f"doc_{mid}_p{idx}_{att['size']}"
+                            doc_claimed = await conn.fetchval(
+                                "SELECT claim_idempotency_key($1, 'gmail-poller-py')",
+                                doc_idem,
+                            )
+                            if doc_claimed:
                                 await conn.execute(
                                     """INSERT INTO events
                                          (event_type, source, entity_id, payload, payload_signature,
                                           idempotency_key, pipeline_version, realm)
-                                       VALUES ('email.received', 'gmail', NULL, $1::jsonb, $2,
+                                       VALUES ('document.received', 'gmail', NULL, $1::jsonb, $2,
                                                $3, 'gmail_poller_py:1.3', $4)""",
-                                    json.dumps(event_payload), signature, idem_key, realm,
+                                    json.dumps(doc_payload), doc_sig, doc_idem, realm,
                                 )
-                                inserted += 1
-                            else:
-                                skipped += 1
+                except Exception as e:
+                    logger.exception("message %s/%s failed: %s", name, mid, e)
+                    errors += 1
 
-                            # Per-attachment document.received emission (U43 fix).
-                            # Runs REGARDLESS of whether email.received was newly claimed,
-                            # so this also backfills attachment events for emails that
-                            # were polled before U43.
-                            # U47d: Gmail rotates `attachment_id` on every fetch (verified
-                            # 71 distinct ids for the same file in one hour), so it cannot
-                            # be used as an idempotency key. Use (mid, part_index, size)
-                            # instead — stable across re-polls.
-                            for idx, att in enumerate(attachments):
-                                doc_payload = {
-                                    "gmail_message_id": mid,
-                                    "account": name,
-                                    "realm": realm,
-                                    "filename": att["filename"],
-                                    "mime_type": att["mime_type"],
-                                    "attachment_id": att["attachment_id"],
-                                    "size": att["size"],
-                                }
-                                doc_canon = json.dumps(doc_payload, sort_keys=True, separators=(",", ":"))
-                                doc_sig   = _hmac.new(hmac_key, doc_canon.encode(), hashlib.sha256).hexdigest()
-                                doc_idem  = f"doc_{mid}_p{idx}_{att['size']}"
-                                doc_claimed = await conn.fetchval(
-                                    "SELECT claim_idempotency_key($1, 'gmail-poller-py')",
-                                    doc_idem,
-                                )
-                                if doc_claimed:
-                                    await conn.execute(
-                                        """INSERT INTO events
-                                             (event_type, source, entity_id, payload, payload_signature,
-                                              idempotency_key, pipeline_version, realm)
-                                           VALUES ('document.received', 'gmail', NULL, $1::jsonb, $2,
-                                                   $3, 'gmail_poller_py:1.3', $4)""",
-                                        json.dumps(doc_payload), doc_sig, doc_idem, realm,
-                                    )
-                    except Exception as e:
-                        logger.exception("message %s/%s failed: %s", name, mid, e)
-                        errors += 1
-
-                results.append({
-                    "account": name, "email": email,
-                    "fetched": len(msg_ids),
-                    "inserted": inserted, "skipped_duplicate": skipped, "errors": errors,
-                })
-            except Exception as e:
-                logger.exception("account %s failed: %s", name, e)
-                results.append({"account": name, "error": str(e)[:200]})
+            results.append({
+                "account": name, "email": email,
+                "fetched": len(msg_ids),
+                "inserted": inserted, "skipped_duplicate": skipped, "errors": errors,
+            })
+        except Exception as e:
+            logger.exception("account %s failed: %s", name, e)
+            results.append({"account": name, "error": str(e)[:200]})
 
     return {"results": results, "total_inserted": sum(r.get("inserted", 0) for r in results)}
