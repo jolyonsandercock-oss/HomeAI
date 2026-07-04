@@ -1,0 +1,44 @@
+-- V293 (2026-07-04) — fix the bank_fee catch-all contamination.
+--
+-- FINDING: category='bank_fee' held 21,380 of 22,213 bank_transactions (96%)
+-- and the /finance "Fees paid (12m)" tile summed it to a false £2,314,877.
+-- ROOT CAUSE: bank_transaction_rules id=48 "CC fee (catch-all)" was intended
+-- to match only RBS Mastercard rows with type='FEES', but u58's categoriser
+-- SKIPS the type_in filter (the Type column was dropped at import — see the
+-- comment in u58-bank-tx-categorise.sql), so a rule with an empty
+-- description_re degraded to "match every uncategorised row -> bank_fee".
+-- Genuine bank fees are only 14 rows (£98.25 all-time, £0 in the last 12m);
+-- the rest were transfers, mortgage payments, property purchases, card spend.
+--
+-- ROOT-CAUSE FIX (reproducible, idempotent): delete the catch-all rule so
+-- unmatched rows stay NULL (uncategorised) instead of being mislabelled fees.
+-- The two specific fee rules (id 3 "Bank service charge", id 44 "CC
+-- non-sterling fee") are kept.
+DELETE FROM bank_transaction_rules
+ WHERE name = 'CC fee (catch-all)' AND coalesce(description_re,'') = '';
+
+-- ONE-TIME DATA CLEANUP (already applied live 2026-07-04; recorded here, not
+-- re-run — it is data-state, not schema):
+--   Backed up all bank_fee rows to _bank_catfix_20260704_backup (id, old
+--   category, description, amount, date) and set category=NULL for every
+--   bank_fee row EXCEPT the 14 genuine charges matching:
+--     amount<0 AND description ~* '(unpaid item fee|non-sterling transaction
+--       fee|arranged od usage|unarranged od|paid referral fee|card misuse|
+--       o/d renewal|maintenance charge|account fee|monthly fee|quarterly fee|
+--       debit interest|surcharge)'
+--     AND description !~* '(via online|via mobile|pymt|wages|estates|contract|
+--       dispute|service charge)'
+--   Result: bank_fee 21,380 -> 14; 21,366 rows moved to NULL; 0 rows deleted
+--   (all 22,213 preserved). "Fees paid (12m)" now reads — (no genuine fees
+--   in 12m) instead of £2.3M.
+--   Deleted rule backed up to _bank_rule_catfix_20260704.
+--
+-- ROLLBACK (both parts):
+--   UPDATE bank_transactions b SET category = k.old_category
+--     FROM _bank_catfix_20260704_backup k WHERE b.id = k.id;
+--   INSERT INTO bank_transaction_rules SELECT * FROM _bank_rule_catfix_20260704;
+--
+-- FOLLOW-UP: the ~21k now-uncategorised rows need a proper categorisation pass
+-- (property / mortgage / financing / transfer / spend) — with the catch-all
+-- gone, re-running u58 applies only the specific rules and no longer
+-- re-contaminates (verified: bank_fee stays 14 after a u58 re-run).
