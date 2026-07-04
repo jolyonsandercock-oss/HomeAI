@@ -6681,3 +6681,101 @@ async def cp_create(body: dict = Body(...)):
         return {"ok": True, "counterparty_id": new["id"], "result": _jload(d["d"])}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sender Rules Review (2026-07-04) — review/whitelist the auto-derived
+# invoice-sender rules (invoice_sender_rules, V291; u294 cron; V292 rebuild fn).
+# ─────────────────────────────────────────────────────────────────────────────
+@app.get("/sender-rules-review")
+async def sender_rules_review_page():
+    return FileResponse(str(STATIC / "sender-rules-review.html"))
+
+@app.get("/api/sender-rules/queue")
+async def sender_rules_queue():
+    """Review candidates (+ recent subjects) and the full rule list."""
+    counts_row = await db_one(
+        "SELECT count(*) FILTER (WHERE action='deny') AS deny, "
+        "count(*) FILTER (WHERE action='allow') AS allow, "
+        "count(*) FILTER (WHERE action='review') AS review FROM invoice_sender_rules")
+    counts = {"deny": counts_row["deny"], "allow": counts_row["allow"],
+              "review": counts_row["review"]} if counts_row else {"deny": 0, "allow": 0, "review": 0}
+
+    # Review items enriched with up to 3 recent subjects from that sender.
+    review = await db_all(
+        """SELECT r.sender, r.match_type, r.reason, r.evidence, r.updated_at,
+                  (SELECT array_agg(s) FROM (
+                     SELECT left(e.subject, 90) AS s FROM emails e
+                      WHERE lower(e.from_address) = r.sender
+                      ORDER BY e.received_at DESC NULLS LAST LIMIT 3) t) AS sample_subjects
+             FROM invoice_sender_rules r
+            WHERE r.action='review'
+            ORDER BY (r.evidence->>'classified')::int DESC NULLS LAST, r.sender""")
+
+    rules = await db_all(
+        """SELECT sender, match_type, action, source, reason, evidence, updated_at
+             FROM invoice_sender_rules
+            ORDER BY action, sender""")
+
+    def _row(r):
+        d = dict(r)
+        d["evidence"] = _jload(d.get("evidence"))
+        d["updated_at"] = d["updated_at"].isoformat() if d.get("updated_at") else None
+        if "sample_subjects" in d:
+            d["sample_subjects"] = list(d["sample_subjects"]) if d["sample_subjects"] else []
+        return d
+
+    return {"counts": counts,
+            "review": [_row(r) for r in review],
+            "rules":  [_row(r) for r in rules]}
+
+_SR_ACTIONS = {"allow", "deny"}
+_SR_MATCH = {"address", "domain"}
+
+async def _sr_audit(c, action, sender, match_type, rule_action, by):
+    await c.execute(
+        """INSERT INTO audit_log (pipeline, action, pipeline_version, result, ai_parsed)
+           VALUES ('sender_rules_review', $1, '1.0', 'success', $2::jsonb)""",
+        action, json.dumps({"sender": sender, "match_type": match_type,
+                            "rule_action": rule_action, "by": by}))
+
+@app.post("/api/sender-rules/set")
+async def sender_rules_set(body: dict = Body(...)):
+    sender = (body.get("sender") or "").strip().lower()[:200]
+    match_type = (body.get("match_type") or "address").strip().lower()
+    action = (body.get("action") or "").strip().lower()
+    by = (body.get("by") or "dashboard")[:80]
+    if not sender or match_type not in _SR_MATCH or action not in _SR_ACTIONS:
+        return JSONResponse({"error": "sender, match_type(address|domain), action(allow|deny) required"},
+                            status_code=400)
+    try:
+        async with db_session() as c:
+            await c.execute(
+                """INSERT INTO invoice_sender_rules (sender, match_type, action, source, reason, updated_at)
+                   VALUES ($1,$2,$3,'manual','manual via dashboard', now())
+                   ON CONFLICT (sender, match_type) DO UPDATE
+                      SET action=EXCLUDED.action, source='manual',
+                          reason='manual via dashboard', updated_at=now()""",
+                sender, match_type, action)
+            counts = _jload((await c.fetchrow("SELECT home_ai.rebuild_sender_denylist() AS d"))["d"])
+            await _sr_audit(c, "set", sender, match_type, action, by)
+        return {"ok": True, "counts": counts}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+@app.post("/api/sender-rules/delete")
+async def sender_rules_delete(body: dict = Body(...)):
+    sender = (body.get("sender") or "").strip().lower()[:200]
+    match_type = (body.get("match_type") or "address").strip().lower()
+    by = (body.get("by") or "dashboard")[:80]
+    if not sender or match_type not in _SR_MATCH:
+        return JSONResponse({"error": "sender, match_type(address|domain) required"}, status_code=400)
+    try:
+        async with db_session() as c:
+            await c.execute("DELETE FROM invoice_sender_rules WHERE sender=$1 AND match_type=$2",
+                            sender, match_type)
+            counts = _jload((await c.fetchrow("SELECT home_ai.rebuild_sender_denylist() AS d"))["d"])
+            await _sr_audit(c, "delete", sender, match_type, None, by)
+        return {"ok": True, "counts": counts}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)

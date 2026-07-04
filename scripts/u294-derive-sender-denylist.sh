@@ -74,22 +74,9 @@ SELECT c.sender, 'address', 'review', 'auto',
    AND NOT EXISTS (SELECT 1 FROM invoice_sender_rules r WHERE r.sender=c.sender AND r.match_type='address')
 ON CONFLICT (sender, match_type) DO NOTHING;
 
--- Rebuild the denylist the classifier reads: all deny rules minus allow overrides.
-WITH deny AS (
-  SELECT d.sender, d.match_type FROM invoice_sender_rules d
-   WHERE d.action='deny'
-     AND NOT EXISTS (SELECT 1 FROM invoice_sender_rules a WHERE a.action='allow'
-                       AND ((a.match_type='address' AND a.sender=d.sender)
-                         OR (a.match_type='domain'  AND a.sender=split_part(d.sender,'@',2))))
-)
-INSERT INTO static_context (key, value, updated_at, realm)
-VALUES ('invoice.sender_denylist',
-        jsonb_build_object(
-          'addresses',   (SELECT coalesce(jsonb_agg(sender ORDER BY sender),'[]'::jsonb) FROM deny WHERE match_type='address'),
-          'domains',     (SELECT coalesce(jsonb_agg(sender ORDER BY sender),'[]'::jsonb) FROM deny WHERE match_type='domain'),
-          'refreshed_at', now()::text),
-        now(), 'owner')
-ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now();
+-- Rebuild the denylist the classifier reads (V292: shared with the dashboard
+-- sender-rules-review actions, so cron and UI can't drift).
+SELECT home_ai.rebuild_sender_denylist();
 
 -- Summary + audit heartbeat
 \echo 'rule counts:'

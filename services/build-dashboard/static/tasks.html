@@ -35,6 +35,30 @@
     <a href="/" class="text-xs muted hover:text-slate-200">← Mission Control</a>
   </header>
 
+  <a href="/sender-rules-review" id="sender-rules-card"
+     class="glass rounded-xl p-4 flex items-center justify-between hover:bg-slate-800/40 transition"
+     style="display:none">
+    <div>
+      <h2 class="text-sm font-medium">Invoice sender rules</h2>
+      <p class="text-xs muted">Review senders the classifier flagged — whitelist real suppliers or deny notifications.</p>
+    </div>
+    <span id="sender-rules-badge"
+          class="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30"></span>
+  </a>
+  <script>
+    (async () => {
+      try {
+        const r = await fetch('/api/sender-rules/queue'); if (!r.ok) return;
+        const d = await r.json(); const n = (d.counts && d.counts.review) || 0;
+        const card = document.getElementById('sender-rules-card');
+        const badge = document.getElementById('sender-rules-badge');
+        badge.textContent = n + ' to review';
+        if (n === 0) { badge.className = 'text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-500/15 text-slate-400 border border-slate-500/30'; }
+        card.style.display = 'flex';
+      } catch (e) { /* leave card hidden on error */ }
+    })();
+  </script>
+
   <section class="glass rounded-xl p-4 space-y-2">
     <h2 class="text-sm uppercase tracking-wide muted">Add task</h2>
     <form @submit.prevent="create()" class="flex flex-wrap gap-2 items-end">

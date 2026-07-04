@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sender Rules Review — Home AI</title>
+<style>
+  :root { --em:#059669; --dn:#dc2626; --bg:#f8fafc; --bd:#e2e8f0; --mut:#64748b; }
+  * { box-sizing:border-box; } body { font-family:system-ui,sans-serif; margin:0; background:var(--bg); color:#0f172a; }
+  header { padding:16px 24px; border-bottom:1px solid var(--bd); display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
+  h1 { font-size:20px; margin:0; } a { color:var(--em); text-decoration:none; }
+  h2 { font-size:15px; margin:24px 0 10px; }
+  #counts { font-size:13px; color:var(--mut); }
+  main { padding:24px; max-width:1000px; margin:0 auto; }
+  .intro { background:#ecfdf5; border:1px solid #a7f3d0; padding:12px 16px; border-radius:8px; margin-bottom:8px; font-size:13.5px; color:#065f46; }
+  #err { display:none; background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px 14px; border-radius:8px; margin-bottom:12px; font-size:14px; }
+  .item { background:#fff; border:1px solid var(--bd); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+  .sender { font-family:ui-monospace,monospace; font-size:14px; font-weight:600; }
+  .ev { font-size:12.5px; color:#334155; margin:6px 0; }
+  .subj { font-size:12.5px; color:var(--mut); margin:3px 0 0 0; padding-left:10px; border-left:2px solid var(--bd); }
+  .actions { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+  button { font-size:13px; padding:6px 12px; border-radius:6px; border:1px solid var(--bd); background:#fff; cursor:pointer; }
+  button.allow { background:var(--em); color:#fff; border-color:var(--em); }
+  button.deny  { background:var(--dn); color:#fff; border-color:var(--dn); }
+  button:disabled { opacity:.5; cursor:default; }
+  .muted { color:var(--mut); font-size:13px; }
+  details { margin-top:8px; } summary { cursor:pointer; font-size:14px; font-weight:600; padding:6px 0; }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
+  th,td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--bd); vertical-align:top; }
+  th { color:var(--mut); font-weight:600; }
+  .pill { display:inline-block; font-size:11px; font-weight:600; padding:1px 8px; border-radius:999px; }
+  .p-deny { color:#991b1b; background:#fef2f2; border:1px solid #fecaca; }
+  .p-allow { color:#065f46; background:#ecfdf5; border:1px solid #a7f3d0; }
+  .p-review { color:#b45309; background:#fffbeb; border:1px solid #fde68a; }
+  .src { font-size:11px; color:var(--mut); }
+  .mini { font-size:12px; padding:3px 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sender Rules Review</h1>
+  <a href="/tasks">← tasks</a>
+  <a href="/">dashboard</a>
+  <span id="counts"></span>
+</header>
+<main>
+  <div id="err"></div>
+  <p class="intro">These rules decide whether an email from a sender is treated as an <b>invoice</b> (runs extraction) or filed as <b>fyi</b>.
+     They're auto-derived nightly from 90 days of evidence. Senders below sent PDFs that never produced a captured invoice —
+     they may be a <b>real supplier whose capture is broken</b> (Whitelist), or genuinely <b>not an invoice sender</b> (Deny).</p>
+
+  <h2>Needs review</h2>
+  <div id="review"></div>
+
+  <details id="allwrap">
+    <summary>All rules (<span id="allcount">—</span>)</summary>
+    <div id="all"></div>
+  </details>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+async function jget(u){ const r = await fetch(u); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }
+async function jpost(u,b){ const r = await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); const j = await r.json(); if(!r.ok||j.error) throw new Error(j.error||('HTTP '+r.status)); return j; }
+function showErr(m){ const e=$('#err'); e.textContent='Error: '+m; e.style.display='block'; }
+function clearErr(){ $('#err').style.display='none'; }
+
+async function act(sender, match_type, action){
+  clearErr();
+  try { await jpost('/api/sender-rules/'+(action==='delete'?'delete':'set'),
+        action==='delete' ? {sender, match_type} : {sender, match_type, action}); await load(); }
+  catch(e){ showErr(e.message); }
+}
+
+function reviewCard(it){
+  const el = document.createElement('div'); el.className='item';
+  const ev = it.evidence || {};
+  const subs = (it.sample_subjects||[]).map(s=>`<div class="subj">${esc(s)}</div>`).join('');
+  el.innerHTML =
+    `<div class="sender">${esc(it.sender)}</div>`+
+    `<div class="ev">${esc(ev.classified||'?')} classified invoice · ${esc(ev.with_attachment||0)} with PDF · 0 captured · last ${esc(ev.window_days||90)}d`+
+      (it.reason?` — ${esc(it.reason)}`:'')+`</div>`+
+    subs+
+    `<div class="actions">`+
+      `<button class="allow" data-a="allow">Whitelist (treat as invoice)</button>`+
+      `<button class="deny" data-a="deny">Deny (file as fyi)</button>`+
+    `</div>`;
+  el.querySelector('[data-a=allow]').onclick = ()=>act(it.sender, it.match_type, 'allow');
+  el.querySelector('[data-a=deny]').onclick  = ()=>act(it.sender, it.match_type, 'deny');
+  return el;
+}
+
+function rulesTable(rules){
+  const rows = rules.map(r=>{
+    const flip = r.action==='deny' ? 'allow' : 'deny';
+    const flipLabel = r.action==='deny' ? 'Whitelist' : 'Deny';
+    return `<tr>`+
+      `<td class="sender">${esc(r.sender)}</td>`+
+      `<td><span class="pill p-${esc(r.action)}">${esc(r.action)}</span></td>`+
+      `<td class="src">${esc(r.match_type)} · ${esc(r.source)}</td>`+
+      `<td class="muted">${esc(r.reason||'')}</td>`+
+      `<td style="white-space:nowrap">`+
+        (r.action!=='review'?`<button class="mini" data-s="${esc(r.sender)}" data-m="${esc(r.match_type)}" data-a="${flip}">${flipLabel}</button> `:'')+
+        `<button class="mini" data-s="${esc(r.sender)}" data-m="${esc(r.match_type)}" data-a="delete">Remove</button>`+
+      `</td></tr>`;
+  }).join('');
+  const el = document.createElement('div');
+  el.innerHTML = `<table><thead><tr><th>Sender</th><th>Action</th><th>Type · Source</th><th>Reason</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  el.querySelectorAll('button[data-a]').forEach(b=>{
+    b.onclick = ()=>act(b.getAttribute('data-s'), b.getAttribute('data-m'), b.getAttribute('data-a'));
+  });
+  return el;
+}
+
+async function load(){
+  clearErr();
+  let d;
+  try { d = await jget('/api/sender-rules/queue'); }
+  catch(e){ showErr('could not load rules — '+e.message); return; }
+  const c = d.counts||{};
+  $('#counts').textContent = `${c.review||0} to review · ${c.deny||0} denied · ${c.allow||0} allowed`;
+  const rv = $('#review'); rv.innerHTML='';
+  if (!d.review.length) rv.innerHTML = '<p class="muted">Nothing to review — the auto-rules are handling it.</p>';
+  else d.review.forEach(it=>rv.appendChild(reviewCard(it)));
+  $('#allcount').textContent = (d.rules||[]).length;
+  const all = $('#all'); all.innerHTML=''; all.appendChild(rulesTable(d.rules||[]));
+}
+load();
+</script>
+</body>
+</html>
