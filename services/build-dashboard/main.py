@@ -5824,7 +5824,10 @@ async def pub_snapshot():
           FROM caterbook_room_nights
           WHERE night_date = CURRENT_DATE
         """)
-        rooms_total = 7   # Malthouse has 7 rooms (kept as constant; promote to entity meta later)
+        # True lettable-unit count (9 rooms + flat = 10) from ops_constants —
+        # was hardcoded 7, producing >100% occupancy (2026-07-04 data-integrity fix).
+        _rt = await c.fetchval("SELECT value_num::int FROM ops_constants WHERE key='inn_total_rooms'")
+        rooms_total = _rt or 10
         today_bookings = await c.fetchrow("""
           SELECT
             COUNT(*) FILTER (WHERE first_seen::date = CURRENT_DATE)            AS new_today,
@@ -5884,11 +5887,11 @@ async def pub_snapshot():
         """)
         occ_sparkline = await c.fetch("""
           SELECT night_date::text AS d,
-                 (COUNT(DISTINCT room) * 100.0 / 7)::numeric(5,1) AS v
+                 (COUNT(DISTINCT room) * 100.0 / $1)::numeric(5,1) AS v
             FROM caterbook_room_nights
            WHERE night_date >= CURRENT_DATE - INTERVAL '14 days'
            GROUP BY night_date ORDER BY night_date
-        """)
+        """, rooms_total)
         # Synthesise a single-row "today_accom" with occupancy_pct
         today_accom = {
             "occupancy_pct": (float(today_accom["rooms_occupied"]) * 100.0 / rooms_total) if today_accom else 0,
