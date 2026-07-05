@@ -42,7 +42,7 @@ LIMIT = None
 if "--limit" in sys.argv:
     LIMIT = int(sys.argv[sys.argv.index("--limit") + 1])
 
-ALLOWED_SQL = """SELECT category FROM bank_category_registry
+ALLOWED_SQL = """SELECT category, kind FROM bank_category_registry
                  WHERE kind <> 'transfer'"""
 
 CLUSTER_SQL = """
@@ -111,11 +111,12 @@ def parse_pg_array(raw: str) -> list[str]:
 
 
 def build_prompt(cats: list[str], n: int, vol: str, samples: list[str],
-                  min_amt: str, max_amt: str, entity_id: str) -> str:
+                  min_amt: str, max_amt: str, entity_id: str, sign: int) -> str:
     cats_line = ", ".join(cats)
     samples_block = "\n".join(f"- {s}" for s in samples)
+    direction = "CREDITS (money coming IN)" if sign > 0 else "DEBITS (money going OUT)"
     personal_note = ""
-    if entity_id in ("3", "4") and float(min_amt) < 0 and float(max_amt) < 0:
+    if entity_id in ("3", "4") and sign < 0:
         personal_note = (
             "\nNote: this is a PERSONAL account (entity 3/4). Unspecific outflows "
             "that don't fit a specific category should be 'personal_spend', NOT "
@@ -127,13 +128,38 @@ def build_prompt(cats: list[str], n: int, vol: str, samples: list[str],
         cats_line,
         "\nIf genuinely unsure answer needs_review. NEVER guess a transfer category ",
         "— those are handled elsewhere and are not in your allowed list.",
+        "\nIf the sample text does not clearly identify the counterparty or purpose, ",
+        "answer needs_review — do not guess.",
         personal_note,
-        f"\nLines (same pattern, {n} rows, GBP total {vol}, amount range "
-        f"{min_amt} to {max_amt}):\n",
+        f"\nAll {n} lines below are {direction}, totalling GBP {vol}, "
+        f"amount range {min_amt} to {max_amt}:\n",
         samples_block,
         '\nReturn ONLY JSON on one line, no other text: {"category": "...", "reason": "..."}',
     ]
     return "".join(parts)
+
+
+def validate(cand: str, kinds: dict, sign: int, max_abs: float):
+    """Hard validators (code, not prompt hopes). Returns (category, violation|None).
+
+    a. Direction: cost/tax kinds require negative clusters; income requires
+       positive. financing can go either way, EXCEPT financing_advance must be
+       positive and financing_repayment must be negative (enforced by name).
+    b. bank_fee magnitude cap: genuine bank fees are small; a cluster whose
+       largest |amount| exceeds £500 cannot be bank_fee (the -£195k CHAPS case).
+    """
+    kind = kinds.get(cand)
+    if kind in ("cost", "tax") and sign > 0:
+        return "needs_review", f"direction:{cand}({kind})-on-credit"
+    if kind == "income" and sign < 0:
+        return "needs_review", f"direction:{cand}(income)-on-debit"
+    if cand == "financing_advance" and sign < 0:
+        return "needs_review", "direction:financing_advance-on-debit"
+    if cand == "financing_repayment" and sign > 0:
+        return "needs_review", "direction:financing_repayment-on-credit"
+    if cand == "bank_fee" and max_abs > 500:
+        return "needs_review", f"magnitude:bank_fee-max-abs-{max_abs:.2f}>500"
+    return cand, None
 
 
 def classify(prompt: str) -> dict:
@@ -156,7 +182,8 @@ def classify(prompt: str) -> dict:
 
 def main():
     allowed_rows = psql(ALLOWED_SQL)
-    allowed = {r[0] for r in allowed_rows if r and r[0]}
+    kinds = {r[0]: r[1] for r in allowed_rows if len(r) >= 2 and r[0]}
+    allowed = set(kinds)
     if not allowed:
         print("ERROR: empty allowed-category set from registry, aborting")
         sys.exit(1)
@@ -188,15 +215,26 @@ def main():
         except ValueError:
             n = 0
 
-        category = "needs_review"
+        # cluster sign is encoded in the key (…:<sign>:<entity>)
         try:
-            prompt = build_prompt(cats_list, n, vol_s, samples, min_amt, max_amt, entity_id)
+            sign = int(ckey.rsplit(":", 2)[1])
+        except (IndexError, ValueError):
+            sign = 1 if float(max_amt) > 0 else -1
+        max_abs = max(abs(float(min_amt)), abs(float(max_amt)))
+
+        category = "needs_review"
+        violation = None
+        try:
+            prompt = build_prompt(cats_list, n, vol_s, samples, min_amt, max_amt,
+                                  entity_id, sign)
             res = classify(prompt)
             cand = (res.get("category") or "").strip()
             if cand in allowed:
-                category = cand
+                category, violation = validate(cand, kinds, sign, max_abs)
             else:
                 category = "needs_review"
+                if cand:
+                    violation = f"non-registry:{cand[:40]}"
         except Exception as e:
             errors += 1
             print(f"CLUSTER {ckey} n={n} vol={vol_s} ERROR {str(e)[:120]} -> needs_review")
@@ -224,7 +262,8 @@ def main():
         total_updated += rows_touched
         totals[category] = totals.get(category, 0) + rows_touched
 
-        print(f"CLUSTER {ckey} n={n} vol={vol_s} -> {category} (updated={rows_touched})")
+        viol = f" VIOLATION={violation}" if violation else ""
+        print(f"CLUSTER {ckey} n={n} vol={vol_s} -> {category} (updated={rows_touched}){viol}")
         time.sleep(0.2)
 
     # Full run only: everything below the model gate (sum(abs(amount)) < 250
@@ -232,6 +271,10 @@ def main():
     # needs_review, not worth the tokens. --limit runs skip this so a partial
     # dry-run doesn't blanket-mark the untouched residual.
     if LIMIT is None:
+        psql_exec("""INSERT INTO _backup_u294_task5
+                     SELECT id, category, category_source FROM bank_transactions
+                      WHERE category IS NULL;
+                     SELECT 'OK';""", "OK")
         small = psql("""
             UPDATE bank_transactions
                SET category = 'needs_review', category_confidence = 0,
