@@ -55,6 +55,17 @@ with sync_playwright() as p:
     # bootstraps after this, so wait for a specific button to appear.
     page.goto('https://app.dext.com/delta/costs/archive',
               wait_until='load', timeout=90000)
+
+    # Check for a login bounce BEFORE the long Export-button wait — a stale/
+    # expired persisted session redirects straight to /sign/in, and waiting
+    # 90s for a button that will never appear on that page just masks the
+    # real cause (session expired, needs re-pair) as a generic UI timeout.
+    if 'login' in page.url.lower() or 'sign-in' in page.url.lower() or 'sign/in' in page.url.lower():
+        print(f'ERR: bounced to {page.url} — session expired, re-pair', file=sys.stderr)
+        page.screenshot(path=OUT.replace('.csv', '-LOGINBOUNCE.png'), full_page=True)
+        open(OUT.replace('.csv', '-LOGINBOUNCE.html'), 'w').write(page.content())
+        ctx.close(); sys.exit(2)
+
     # Hard wait for the SPA to finish hydrating
     print('  (waiting for Dext SPA to hydrate…)')
     try:
@@ -66,10 +77,6 @@ with sync_playwright() as p:
         page.screenshot(path=OUT.replace('.csv', '-NOBUTTON.png'), full_page=True)
         open(OUT.replace('.csv', '-NOBUTTON.html'), 'w').write(page.content())
         raise
-
-    if 'login' in page.url.lower() or 'sign-in' in page.url.lower():
-        print(f'ERR: bounced to {page.url} — session expired, re-pair', file=sys.stderr)
-        ctx.close(); sys.exit(2)
 
     def dismiss_modals():
         """Close any blocking overlays — Dext shows banners/welcomes/tutorials."""
