@@ -250,18 +250,30 @@ def parse_staustell(text):
 
 
 def parse_jr(text):
+    """J&R layout drift seen across real PDFs (evidence: db-text ids 5285/5338
+    vs freshly-fetched id 42): dates can carry INTERNAL padding spaces
+    ('2/ 4/26'), 'Your Ref' may be multi-word ('By Telephone') or absent, and
+    a zero-debit line shows only the running balance. Parse line-wise; take
+    the FIRST of the two trailing amounts (Debit, then Balance); a
+    single-amount line is a zero-value/balance-only row — skip it (nothing
+    matchable there)."""
     out = []
-    pat = re.compile(
-        r"^(\d{1,2}/\d{1,2}/\d{2})\s+(Invoice|Credit Note)\s+(\d+)(?:\s+\S+)?\s+"
-        r"([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s*$", re.M)
-    for date_s, doctype, ref, amt1, _bal in pat.findall(text):
+    line_re = re.compile(r"^(\d{1,2}/\s?\d{1,2}/\d{2})\s+(Invoice|Credit Note)\s+(\d+)\b(.*)$")
+    for ln in text.splitlines():
+        m = line_re.match(ln.strip())
+        if not m:
+            continue
+        date_s, doctype, ref, tail = m.groups()
         if doctype != "Invoice":
             continue
+        amts = re.findall(r"[\d,]+\.\d{2}", tail)
+        if len(amts) < 2:
+            continue  # zero-debit / balance-only line
         try:
-            d = datetime.strptime(date_s, "%d/%m/%y").date()
+            d = datetime.strptime(date_s.replace(" ", ""), "%d/%m/%y").date()
         except Exception:
             continue
-        amt = _num(amt1)
+        amt = _num(amts[0])
         if amt is None:
             continue
         out.append({"ref": ref, "date": d, "amount": amt})
