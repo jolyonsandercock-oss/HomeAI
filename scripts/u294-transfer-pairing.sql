@@ -31,18 +31,24 @@ UPDATE bank_transactions bt
    SET category=t.newcat, category_confidence=0.95, category_source='u294:pairing:acctno'
   FROM tagged t WHERE bt.id=t.id;
 
--- Signal B: opposite-amount pair between two own accounts within 3 days,
--- both still NULL, description carries a transfer phrase on at least one leg.
-WITH pairs AS (
-  SELECT o.id AS out_id, i.id AS in_id
+-- Signal B (v2): strict NatWest inter-account phrases on BOTH legs + 1:1 ambiguity guard.
+-- Rationale: generic channel phrases (VIA MOBILE etc.) caused coincidental-amount false
+-- pairs — v1 reverted 2026-07-05; both legs must now carry NatWest's inter-account
+-- phrasing and match exactly one counterpart.
+WITH cand AS (
+  SELECT o.id AS out_id, i.id AS in_id,
+         count(*) OVER (PARTITION BY o.id) AS out_matches,
+         count(*) OVER (PARTITION BY i.id) AS in_matches
     FROM bank_transactions o
     JOIN bank_transactions i
       ON i.amount = -o.amount AND o.amount < 0
      AND i.bank_account_id <> o.bank_account_id
      AND i.transaction_date BETWEEN o.transaction_date AND o.transaction_date + 3
    WHERE o.category IS NULL AND i.category IS NULL
-     AND (o.description ~* 'TO A/C|VIA MOBILE|MOBILE/ONLINE|ONLINE TRANSACTION'
-          OR i.description ~* 'FROM A/C|VIA MOBILE|MOBILE/ONLINE|AUTOMATED CREDIT')
+     AND o.description ~* 'TO A/C'
+     AND i.description ~* 'FROM A/C'
+), pairs AS (
+  SELECT out_id, in_id FROM cand WHERE out_matches = 1 AND in_matches = 1
 ), ids AS (
   SELECT out_id AS id FROM pairs UNION SELECT in_id FROM pairs
 ), bk AS (
@@ -51,7 +57,7 @@ WITH pairs AS (
   RETURNING 1
 )
 UPDATE bank_transactions bt
-   SET category='internal_transfer', category_confidence=0.85, category_source='u294:pairing:legmatch'
+   SET category='internal_transfer', category_confidence=0.85, category_source='u294:pairing:legmatch2'
   FROM ids WHERE bt.id=ids.id;
 
 -- Cross-foot: transfers must roughly net to zero on deduped legmatch pairs.
