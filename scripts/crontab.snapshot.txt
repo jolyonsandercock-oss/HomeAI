@@ -69,3 +69,6 @@
 40 8 * * * cd /home_ai && bash scripts/ops-run.sh revenue_recon -- bash /home_ai/scripts/u-revenue-recon-check.sh >> /home_ai/logs/revenue-recon.log 2>&1
 45 7 * * * cd /home_ai && bash scripts/ops-run.sh ops_digest -- bash scripts/u-ops-digest.sh >> /home_ai/logs/ops-digest.log 2>&1
 30 5 * * * cd /home_ai && bash scripts/ops-run.sh system_auditor -- env PYTHONPATH=/home_ai python3 scripts/u-system-auditor.py >> /home_ai/logs/system-auditor.log 2>&1
+0 8 * * * cd /home_ai && bash scripts/ops-run.sh obligations_reminder -- bash /home_ai/scripts/u121-obligations-reminder.sh >> /home_ai/logs/u121-obligations.log 2>&1
+50 5 * * * cd /home_ai && bash scripts/ops-run.sh sender_denylist_derive -- bash /home_ai/scripts/u294-derive-sender-denylist.sh >> /home_ai/logs/u294-sender-denylist.log 2>&1
+35 5 * * * cd /home_ai && bash scripts/ops-run.sh bank_tx_categorise -- bash scripts/u58-bank-tx-categorise.sh >> /home_ai/logs/u58-bank-tx-categorise.log 2>&1

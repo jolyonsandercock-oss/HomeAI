@@ -10,12 +10,17 @@
 # Stats printed at end: rows tagged per category + remaining uncategorised.
 # A second pass with --reset clears categories below confidence_threshold so
 # you can re-seed after editing rules.
+#
+# This heredoc SQL is the ONLY implementation of the rule engine; a stale
+# scripts/u58-bank-tx-categorise.sql twin was removed 2026-07-05 (U294 T4)
+# because it lacked the type_in guard entirely (Type is dropped at import,
+# so it would have turned amount/description-only rules into catch-alls).
 
 set -euo pipefail
 
 RESET="${1:-}"
 
-docker exec -i homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 <<SQL
+OUT="$(docker exec -i homeai-postgres psql -U postgres -d homeai -v ON_ERROR_STOP=1 <<SQL 2>&1
 \set ON_ERROR_STOP on
 
 -- Per AGENTS.md SQL discipline:
@@ -58,7 +63,7 @@ BEGIN
                  THEN format('AND bt.description ~* %L', r.description_re)
                  ELSE '' END,
             CASE WHEN r.type_in IS NOT NULL
-                 THEN format('AND split_part(bt.description, '' '', 1) = ANY(%L::text[]) OR upper(left(bt.description, 4)) = ANY(ARRAY[%s])',
+                 THEN format('AND (split_part(bt.description, '' '', 1) = ANY(%L::text[]) OR upper(left(bt.description, 4)) = ANY(ARRAY[%s]))',
                              r.type_in,
                              (SELECT string_agg(quote_literal(upper(t)), ',') FROM unnest(r.type_in) AS t))
                  ELSE '' END,
@@ -93,4 +98,23 @@ SELECT bt.transaction_date, split_part(bt.description, ',', 1) AS d_head, ba.acc
   FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.bank_account_id
  WHERE bt.category IS NULL
  ORDER BY bt.transaction_date DESC LIMIT 15;
+SQL
+)"
+echo "$OUT"
+
+# U294 T4: OPS_ROWS for the ops-run.sh wrapper (harvested into
+# ops.pipeline_runs.rows_affected). The DO block already counts total_applied
+# and RAISE NOTICEs it; pull that number back out of the captured psql output.
+TOTAL_APPLIED="$(grep -oE 'total rows categorised this run: [0-9]+' <<<"$OUT" | tail -1 | grep -oE '[0-9]+$')"
+echo "OPS_ROWS=${TOTAL_APPLIED:-0}"
+
+# U294 T4: per-run coverage heartbeat (kind-level, deduped)
+docker exec -i homeai-postgres psql -U postgres -d homeai -tA <<'SQL'
+SET app.current_entity='all'; SET app.current_realm='owner';
+SELECT 'coverage: '||string_agg(kind||'='||n, ' ' ORDER BY kind)
+FROM (SELECT coalesce(r.kind,'uncategorised') kind, count(*) n
+        FROM (SELECT *, row_number() OVER (PARTITION BY bank_account_id,transaction_date,amount,description ORDER BY id) rn
+                FROM bank_transactions) d
+        LEFT JOIN bank_category_registry r ON r.category=d.category
+       WHERE d.rn=1 GROUP BY 1) t;
 SQL
