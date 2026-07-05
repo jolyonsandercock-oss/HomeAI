@@ -50,7 +50,13 @@ BEGIN
                  category_source     = 'rule:' || %L
             FROM bank_accounts ba
            WHERE ba.id = bt.bank_account_id
-             AND bt.category IS NULL
+             -- U294 follow-up #1 (2026-07-05): rules may also RECLAIM rows the
+             -- one-shot residual sweep parked as needs_review (confidence 0),
+             -- so the review queue burns down as rules improve. Only sweep-
+             -- sourced rows are eligible — human/review decisions are not.
+             AND (bt.category IS NULL
+                  OR (bt.category = 'needs_review'
+                      AND bt.category_source = 'u294:residual-sweep'))
              %s   -- description regex
              %s   -- type IN filter
              %s   -- amount comparator
