@@ -226,3 +226,73 @@ Big session. Security, COGS/KPIs, data backfills, comms restore.
 - 7f7f2b8 docs(plan): R0 close-the-loop implementation plan (9 tasks)
 - 358c6b1 fix(pipelines): 2026-07-02 incident triage — gmail SQL param, P6 repair, dead-letter re-drive, hermes bridge
 - 957b967 docs(spec): end-to-end refactor program design (approach A, observability first)
+
+### 2026-07-03 — commits
+- 3b90c20 fix(p2): u291 — invoice extraction dead under n8n filesystem binary mode
+- 5f81356 feat(models): W7800 benchmark decision record — tiers re-cut on evidence
+- 4effb29 fix(pdfplumber): pikepdf repair-retry when pdfium rejects a PDF render
+- d239ed1 chore(audit): re-anchor baseline (compose de-superuser edits; 2 fewer INV-PG-SUPERUSER findings)
+- 4eef4de sec(egress): TD-007 complete — Hermes DeepSeek traffic now via litellm/Presidio
+- 0c68284 fix(alerts): u290 — Diagnostics (daily) now resolves cleared Diag_* alerts
+- 2272106 sec(db): de-superuser postgres-exporter + google-fetch (2 of 7 superuser DSNs)
+- 8d5a80b perf(services): raise homeai-mcp + homeai-data-proxy pools 4->16
+- 69bbac8 perf(google-fetch): per-message pool acquire in poll-and-emit, gated /messages fan-out, pool 4->16
+- 212c5d5 perf(llm-router): 60s cache on model.tiers/ai.thresholds config reads
+- 5a18ec2 fix(start): refresh planner stats after boot (unclean-shutdown stats wipe)
+- ce2c809 chore(db): V289 drop search_vectors (760MB, zero readers, Jo-approved)
+- f47079c chore(audit): re-anchor invariant baseline after compose line drift
+- 300f5fc perf(calendar): u62 incremental sync via Google syncToken
+- 2f522ed feat(dashboard): AMD GPU sensing via amdgpu sysfs (dead since W7800 swap)
+- 53d4bec perf(dashboard): V288 apply_db_context() — one round trip for role+entity+realm
+- 1c16884 perf(bots): u66 single-spawn preamble via in-container Vault HTTP; u33 cadence comment fixed
+- 10a908c perf(parsers): run pdfplumber/markitdown CPU work off the event loop
+- 0fc6ea0 docs(perf): mark 2026-07-03 perf pass executed, record deviations + residuals
+- 317acd9 perf(crons): watermark touchoffice bridge, u29 dedup-before-fetch, u68 concurrent classify, u35 drop per-row fetchval
+- ce2e031 perf(dashboard): 45s TTL cache on polled endpoints, pool 4->16, off-loop GPU sensing, tsv-first email search
+- f0161d3 perf(monitoring): scrape postgres-exporter at 60s not 15s
+- c298666 sec(caddy): strip client Remote-* identity headers + JSON access log (F1 item 5)
+- 538a2b4 fix(links): kill /dashboard/ + hardcoded tailnet IPs, drop dead drift widget (F1 item 3)
+- f441cd5 feat(frontend): /app/ops health board + /app/reviews tracker + counterparty door (F1 items 1,2,4)
+- 66572ba Flag-fix 20260703: CoT statements, junk outliers, Caterbook category
+- c2c271d feat(r2): u281 drain v2 — attempt-tracked fair ordering + supplier few-shot (V286)
+- bd341e2 fix(r2-bench): mistral leg prompt template — str.format vs JSON braces KeyError
+- 3b32ee3 security(sentinel): re-anchor hermes baseline (Jo-reviewed 2026-07-03)
+- f66ea86 fix(walkthrough): poll litellm up to 90s after recreate instead of sleep 5
+- a8c1f7c feat(gateway): litellm loopback publish 127.0.0.1:8771 + Jo walkthrough script
+- f84a9ce chore(drift): capture live config drift from 2026-06-25 /app cutover
+- c54e7a4 feat(obligations): insurance renewals as reminders + readable labels + u121 finally scheduled (V285)
+- 02d7354 fix(dashboard): economics totals follow head_office truth; vendor CDN deps; m.html error states
+- e32e365 fix(observability): unconditional per-run heartbeats — u29 poll + ops-run wrapper
+- 4647165 docs(plan): frontend F1 plan — audience split, /app/ops board, /app/reviews (#1161), integrity fixes
+
+### 2026-07-04 — commits
+- 765c5f5 fix(finance): accurate fee categorisation — 14 -> 150 real fees (£953/12m)
+- 9c7e581 fix(finance): kill bank_fee catch-all — £2.3M phantom 'Fees paid' -> real
+- 848a8d8 fix(dashboard): pub occupancy uses true 10-unit count, not hardcoded 7
+- ed718f1 feat(dashboard): sender-rules review page under Tasks
+- a8578c2 feat(classifier): auto-derived data-driven invoice-sender denylist
+- c51951a feat(classifier): u293 — non-invoice sender denylist at the email layer
+- e51b16e perf(db): V290 index hygiene — kill 60s emails full-scan, reclaim ~213MB
+- fd98aa8 fix(p9): parameterize Report Ingestion write — pg-promise $N injection on document text
+
+### 2026-07-05 — commits
+U294 (bank line categorisation, T1-T6): registry+kind guards (V294) close the
+"never again uncategorised" gap; true NULL now 0 (was ~21k); own-account
+transfer pairing (447 rows), narrative + residual rule packs (V295/V296),
+daily categoriser cron, and an LLM tail classifier get deduped coverage to
+83.7% real categories + 16.3% honestly-labelled needs_review (bar was 15%,
+not gamed). Acceptance suite (scripts/u294-acceptance.sql) green except that
+one bar; category FK validated; consumer audit of 13 views found and fixed
+2 real misstatements (V297: v_uncategorised_summary, v_account_transfers_open).
+- c78fc53 feat(finance): U294 T6 — acceptance cross-foot suite green; FK validated; consumers audited
+- 314036a feat(finance): U294 T5 round 4 — V296 residual rule pack, LLM path retired
+- f61c7ba fix(finance): U294 T5 round 3 — gemma31b escalation + think:false + 3 new validators
+- 39e40b6 fix(finance): U294 T5 — hard validators (direction/kind, bank_fee cap) + no-guess prompt
+- 90aa7e2 feat(finance): U294 T5 — LLM tail classifier over residual clusters (registry-constrained)
+- a1b7441 feat(finance): U294 T4 — u58 categoriser heartbeat + registry + daily cron
+- 3758edd feat(finance): U294 T3 — narrative rule pack (YouLend/CoT/Principality/HMRC/+identified patterns)
+- 6e0159d fix(finance): U294 T2 — tighten Signal B to strict both-leg A/C phrases (v1 legmatch reverted)
+- 85877a8 feat(finance): U294 T2 — own-account transfer pairing (acct-no + leg-match signals)
+- 3857f9e fix(finance): V294 review fixes — drop V71 category CHECKs, rules FK, re-run-safe (U294 T1)
+- b86a27e feat(finance): V294 bank category registry + kind mapping + rule lint (U294 T1)
+- 6ddc0d8 docs(plan): U294 bank line categories — registry+kind guards, transfer pairing, rule pack, LLM tail
