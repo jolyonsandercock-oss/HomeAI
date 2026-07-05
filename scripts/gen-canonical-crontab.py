@@ -81,6 +81,7 @@ NAME_MAP = {  # script basename -> registry name (existing names verified in Ste
     # the same script under a different name.
     "u-revenue-recon-check.sh": "revenue_recon", "u62-tanda-sync.sh": "tanda_sync",
     "u133-tides.py": "tides_scrape", "system_auditor": "system_auditor",
+    "u296-statement-recon.py": "statement_recon",
 }
 
 def cadence_hours(schedule):

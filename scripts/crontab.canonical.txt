@@ -73,3 +73,4 @@
 50 5 * * * cd /home_ai && bash scripts/ops-run.sh sender_denylist_derive -- bash /home_ai/scripts/u294-derive-sender-denylist.sh >> /home_ai/logs/u294-sender-denylist.log 2>&1
 35 5 * * * cd /home_ai && bash scripts/ops-run.sh bank_tx_categorise -- bash scripts/u58-bank-tx-categorise.sh >> /home_ai/logs/u58-bank-tx-categorise.log 2>&1
 15 7 * * * cd /home_ai && bash scripts/ops-run.sh review_sweep_ingest -- python3 /home_ai/scripts/u297-review-sweep-ingest.py >> /home_ai/logs/u297-review-sweep.log 2>&1
+10 6 * * * cd /home_ai && bash scripts/ops-run.sh statement_recon -- env MODE=apply python3 scripts/u296-statement-recon.py >> /home_ai/logs/u296-statement-recon.cron.log 2>&1
