@@ -33,6 +33,7 @@ LISTING_URL = {
     ("tripadvisor", "restaurant"): "https://www.tripadvisor.co.uk/Restaurant_Review-g186245-d1536289",
     ("tripadvisor", "hotel"): "https://www.tripadvisor.co.uk/Hotel_Review-g186245-d677960",
     ("expedia", "hotel"): "https://www.expedia.co.uk/Tintagel-Hotels-The-Olde-Malthouse.h121330906.Hotel-Information",
+    ("booking_com", "hotel"): "https://www.booking.com/reviews/gb/hotel/ye-olde-malthouse-inn.en-gb.html",
 }
 
 
