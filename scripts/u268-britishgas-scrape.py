@@ -74,8 +74,19 @@ async def run():
                 total += await download_account(page, idx)
             except Exception as ex:
                 print(f"  account idx {idx} error: {str(ex)[:60]}")
-            await page.goto("https://business.britishgas.co.uk/business/app/organisations", wait_until="networkidle", timeout=30000)
-            await page.wait_for_timeout(3000)
+            # This is an SPA that never goes network-idle (background polling
+            # keeps the network busy indefinitely), so 'networkidle' here was
+            # timing out and — because this goto sat OUTSIDE any try/except —
+            # crashing the whole run with an unhandled exception, silently
+            # dropping every account after the first. Use 'domcontentloaded'
+            # (fires as soon as the shell HTML is parsed) plus an explicit
+            # settle wait, and never let this reload abort the account loop.
+            try:
+                await page.goto("https://business.britishgas.co.uk/business/app/organisations",
+                                 wait_until="domcontentloaded", timeout=30000)
+            except Exception as ex:
+                print(f"  organisations reload error (idx {idx}): {str(ex)[:60]}")
+            await page.wait_for_timeout(3500)
         print("TOTAL_DOWNLOADED:", total)
         await browser.close()
 
