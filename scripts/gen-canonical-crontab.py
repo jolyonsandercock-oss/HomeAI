@@ -74,6 +74,7 @@ NAME_MAP = {  # script basename -> registry name (existing names verified in Ste
     "u-invoice-categorise-sweep.sh": "invoice_categorise", "u-natwest-inbox-sweep.sh": "natwest_inbox_sweep",
     "u-drinks-classify-sweep.sh": "drinks_classify", "u-deadletter-hygiene.sh": "deadletter_hygiene",
     "u58-bank-tx-categorise.sh": "bank_tx_categorise",
+    "u297-review-sweep-ingest.py": "review_sweep_ingest",
     # FIX (see task-1-report.md): existing registry row for this script is named
     # 'revenue_recon' (not 'revenue_recon_check'); reuse it so ON CONFLICT(name)
     # lands on the existing row instead of minting a second registry entry for
