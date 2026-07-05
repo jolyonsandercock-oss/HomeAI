@@ -88,7 +88,7 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4-doc:latest")
 FETCH_DIR = "/home_ai/storage/invoices/fetched"
 HTTP_TIMEOUT = 60
-OLLAMA_TIMEOUT = 90
+OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "180"))  # cold model load can exceed 90s
 
 MODE = os.environ.get("MODE", "dry")
 LIMIT = int(os.environ.get("LIMIT", "150"))
@@ -305,16 +305,25 @@ FALLBACK_PROMPT = (
 
 
 def ollama_fallback(text):
+    """Returns a list of lines, or None on a MODEL-CALL failure (timeout/conn).
+    None is NOT the same as a genuine empty statement: callers treat None as a
+    transient error, so the statement stays UNPROCESSED and is retried on the
+    next daily run instead of being permanently marked done with 0 lines."""
     prompt = FALLBACK_PROMPT + "\n\n---\n" + text[:6000]
     body = json.dumps({"model": OLLAMA_MODEL, "prompt": prompt, "stream": False,
                         "think": False,  # gemma4 is a thinking model -> empty output without this
                         "format": "json", "options": {"temperature": 0}}).encode()
-    req = urllib.request.Request(OLLAMA_URL, data=body, headers={"Content-Type": "application/json"})
-    try:
-        resp = json.loads(urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT).read()).get("response", "")
-    except Exception as e:
-        print(f"    ollama fallback failed: {e}", flush=True)
-        return []
+    resp = None
+    for attempt in (1, 2):
+        req = urllib.request.Request(OLLAMA_URL, data=body, headers={"Content-Type": "application/json"})
+        try:
+            resp = json.loads(urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT).read()).get("response", "")
+            break
+        except Exception as e:
+            print(f"    ollama fallback attempt {attempt} failed: {e}", flush=True)
+            time.sleep(2)
+    if resp is None:
+        return None
     try:
         j = json.loads(resp)
     except Exception:
@@ -535,8 +544,15 @@ def main():
                 continue
 
             lines, method = parse_statement_lines(vdom, text)
-            parse_ok[method] = parse_ok.get(method, 0) + 1
             vkey = vendor_key(vdom, vname)
+
+            if lines is None:
+                # MODEL-CALL failure (ollama timeout/unreachable), not a real
+                # empty statement — leave UNPROCESSED so the next run retries.
+                print(f"  #{rid} {vkey:20} src={src:12} — model-call failed, will retry next run", flush=True)
+                errors += 1
+                continue
+            parse_ok[method] = parse_ok.get(method, 0) + 1
 
             if not lines:
                 print(f"  #{rid} {vkey:20} src={src:12} method={method:18} — 0 invoice lines found", flush=True)
