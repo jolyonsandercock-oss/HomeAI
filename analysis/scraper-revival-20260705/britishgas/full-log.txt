@@ -1,0 +1,124 @@
+=== live test-run: u268-britishgas-portal.sh 2026-06-22T10:37:16+01:00 ===
+OUTCOME: LOGGED_IN
+  account 601526: 15 download buttons
+  account 385518: 15 download buttons
+    dl 13 failed: Timeout 20000ms exceeded while waiting for event "download"
+
+TOTAL_DOWNLOADED: 29
+bg_385518_00_Invoice-14988002.pdf: 2026-05-26  £-29.34
+bg_385518_01_CreditNote-17783415.pdf: 2026-05-26  £-34.27
+bg_385518_02_Invoice-14651668.pdf: 2026-04-26  £34.27
+bg_385518_03_Invoice-14345019.pdf: 2026-03-27  £20.28
+bg_385518_04_Invoice-14044404.pdf: 2026-02-27  £-1.33
+bg_385518_05_CreditNote-16619445.pdf: 2026-02-27  £-69.65
+bg_385518_06_Invoice-13717492.pdf: 2026-01-27  £-33.51
+bg_385518_07_Invoice-13431593.pdf: 2025-12-28  £36.14
+bg_385518_08_Invoice-13115562.pdf: 2025-11-27  £29.55
+bg_385518_09_CreditNote-15460131.pdf: 2025-11-27  £-60.87
+bg_385518_10_Invoice-12801275.pdf: 2025-10-27  £28.38
+bg_385518_11_Invoice-12518340.pdf: 2025-09-28  £32.49
+bg_385518_12_Invoice-12216249.pdf: 2025-08-28  £38.09
+bg_385518_14_Invoice-12171372.pdf: 2025-08-26  £37.0
+bg_601526_00_Invoice-15107242.pdf: 2026-06-05  £2255.11
+bg_601526_01_Invoice-14767757.pdf: 2026-05-05  £2218.62
+bg_601526_02_Invoice-14445494.pdf: 2026-04-05  £2160.13
+bg_601526_03_Invoice-14145747.pdf: 2026-03-06  £12133.53
+bg_601526_04_CreditNote-16758808.pdf: 2026-03-06  £-4906.9
+bg_601526_05_Invoice-13839346.pdf: 2026-02-08  £2258.82
+bg_601526_06_Invoice-13535879.pdf: 2026-01-07  £554.7
+bg_601526_07_Invoice-13218222.pdf: 2025-12-06  £524.35
+bg_601526_08_Invoice-12909430.pdf: 2025-11-06  £451.21
+bg_601526_09_Invoice-12614068.pdf: 2025-10-07  £404.12
+bg_601526_10_Invoice-12299354.pdf: 2025-09-05  £355.08
+bg_601526_11_Invoice-11973479.pdf: 2025-08-05  £358.62
+bg_601526_12_Invoice-11680707.pdf: 2025-07-08  £2099.38
+bg_601526_13_CreditNote-13633378.pdf: 2025-07-08  £-369.59
+bg_601526_14_Invoice-11671507.pdf: 2025-07-07  £369.59
+
+INGESTED: 29
+EXIT_CODE=0
+Traceback (most recent call last):
+  File "/tmp/scrape.py", line 83, in <module>
+OUTCOME: LOGGED_IN
+  account 385518: 15 download buttons
+    dl 14 failed: Timeout 20000ms exceeded while waiting for event "download"
+
+    asyncio.run(run())
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/tmp/scrape.py", line 77, in run
+    await page.goto("https://business.britishgas.co.uk/business/app/organisations", wait_until="networkidle", timeout=30000)
+  File "/usr/local/lib/python3.12/dist-packages/playwright/async_api/_generated.py", line 8973, in goto
+    await self._impl_obj.goto(
+  File "/usr/local/lib/python3.12/dist-packages/playwright/_impl/_page.py", line 551, in goto
+    return await self._main_frame.goto(**locals_to_params(locals()))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/playwright/_impl/_frame.py", line 145, in goto
+    await self._channel.send("goto", locals_to_params(locals()))
+  File "/usr/local/lib/python3.12/dist-packages/playwright/_impl/_connection.py", line 61, in send
+    return await self._connection.wrap_api_call(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/playwright/_impl/_connection.py", line 528, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+playwright._impl._errors.TimeoutError: Page.goto: Timeout 30000ms exceeded.
+Call log:
+  - navigating to "https://business.britishgas.co.uk/business/app/organisations", waiting until "networkidle"
+
+OUTCOME: LOGGED_IN
+  account 601526: 15 download buttons
+  account 385518: 15 download buttons
+    dl 14 failed: Timeout 20000ms exceeded while waiting for event "download"
+
+TOTAL_DOWNLOADED: 29
+bg_385518_00_Invoice-14988002.pdf: 2026-05-26  £-29.34
+bg_385518_00_Invoice-15335840.pdf: 2026-06-26  £32.27
+bg_385518_01_CreditNote-17783415.pdf: 2026-05-26  £-34.27
+bg_385518_01_Invoice-14988002.pdf: 2026-05-26  £-29.34
+bg_385518_02_CreditNote-17783415.pdf: 2026-05-26  £-34.27
+bg_385518_02_Invoice-14651668.pdf: 2026-04-26  £34.27
+bg_385518_03_Invoice-14345019.pdf: 2026-03-27  £21.61
+bg_385518_03_Invoice-14651668.pdf: 2026-04-26  £34.27
+bg_385518_04_Invoice-14044404.pdf: 2026-02-27  £-1.33
+bg_385518_04_Invoice-14345019.pdf: 2026-03-27  £22.94
+bg_385518_05_CreditNote-16619445.pdf: 2026-02-27  £-69.65
+bg_385518_05_Invoice-14044404.pdf: 2026-02-27  £-1.33
+bg_385518_06_CreditNote-16619445.pdf: 2026-02-27  £-69.65
+bg_385518_06_Invoice-13717492.pdf: 2026-01-27  £-33.51
+bg_385518_07_Invoice-13431593.pdf: 2025-12-28  £6.59
+bg_385518_07_Invoice-13717492.pdf: 2026-01-27  £-33.51
+bg_385518_08_Invoice-13115562.pdf: 2025-11-27  £29.55
+bg_385518_08_Invoice-13431593.pdf: 2025-12-28  £36.14
+bg_385518_09_CreditNote-15460131.pdf: 2025-11-27  £-60.87
+bg_385518_09_Invoice-13115562.pdf: 2025-11-27  £29.55
+bg_385518_10_CreditNote-15460131.pdf: 2025-11-27  £-60.87
+bg_385518_10_Invoice-12801275.pdf: 2025-10-27  £28.38
+bg_385518_11_Invoice-12518340.pdf: 2025-09-28  £32.49
+bg_385518_11_Invoice-12801275.pdf: 2025-10-27  £28.38
+bg_385518_12_Invoice-12216249.pdf: 2025-08-28  £38.09
+bg_385518_12_Invoice-12518340.pdf: 2025-09-28  £32.49
+bg_385518_13_Invoice-12216249.pdf: 2025-08-28  £38.09
+bg_385518_14_Invoice-12171372.pdf: 2025-08-26  £37.0
+bg_601526_00_Invoice-15107242.pdf: 2026-06-05  £2255.11
+bg_601526_01_Invoice-14767757.pdf: 2026-05-05  £2218.62
+bg_601526_02_Invoice-14445494.pdf: 2026-04-05  £2160.13
+bg_601526_03_Invoice-14145747.pdf: 2026-03-06  £12133.53
+bg_601526_04_CreditNote-16758808.pdf: 2026-03-06  £-4906.9
+bg_601526_05_Invoice-13839346.pdf: 2026-02-08  £2258.82
+bg_601526_06_Invoice-13535879.pdf: 2026-01-07  £554.7
+bg_601526_07_Invoice-13218222.pdf: 2025-12-06  £524.35
+bg_601526_08_Invoice-12909430.pdf: 2025-11-06  £451.21
+bg_601526_09_Invoice-12614068.pdf: 2025-10-07  £404.12
+bg_601526_10_Invoice-12299354.pdf: 2025-09-05  £355.08
+bg_601526_11_Invoice-11973479.pdf: 2025-08-05  £358.62
+bg_601526_12_Invoice-11680707.pdf: 2025-07-08  £2099.38
+bg_601526_13_CreditNote-13633378.pdf: 2025-07-08  £-369.59
+bg_601526_14_Invoice-11671507.pdf: 2025-07-07  £369.59
+
+INGESTED: 43

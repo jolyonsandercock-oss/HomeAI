@@ -1,0 +1,9 @@
+                          vendor_name                          | invoice_date | gross_amount |          created_at           
+---------------------------------------------------------------+--------------+--------------+-------------------------------
+ British Gas                                                   | 2026-06-26   |        32.27 | 2026-07-05 18:03:23.414181+00
+ British Gas Customer Service <no-reply@ukb.britishgas.co.uk>  |              |              | 2026-07-04 05:50:05.097125+00
+ British Gas Customer Service <no-reply@ukb.britishgas.co.uk>  |              |              | 2026-07-01 05:50:04.169818+00
+ "service@britishgaslite.co.uk" <service@britishgaslite.co.uk> |              |              | 2026-06-28 05:50:04.235321+00
+ "service@britishgaslite.co.uk" <service@britishgaslite.co.uk> |              |              | 2026-06-27 05:50:03.341068+00
+(5 rows)
+
