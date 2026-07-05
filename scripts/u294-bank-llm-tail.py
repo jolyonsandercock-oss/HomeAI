@@ -2,7 +2,7 @@
 """u294-bank-llm-tail.py — classify residual uncategorised bank clusters.
 
 Reads the registry categories live (minus 'transfer' kind, which Tasks 2/3
-own deterministically) and asks qwen2.5:7b to pick ONE for each cluster of
+own deterministically) and asks the model to pick ONE for each cluster of
 same-shaped, same-sign, same-entity description lines. Idempotent: only
 ever touches rows still at category IS NULL, gated per-cluster by the same
 cluster-key expression used to build the cluster.
@@ -34,9 +34,12 @@ _CMD_TAG_RE = re.compile(
     r"^(SET|BEGIN|COMMIT|ROLLBACK|CREATE [A-Z ]+|DROP [A-Z ]+|ALTER [A-Z ]+|"
     r"TRUNCATE( TABLE)?|INSERT \d+ \d+|UPDATE \d+|DELETE \d+|SELECT \d+)$")
 
-MODEL = "qwen2.5:7b"
+# Round-3 escalation (plan-owner decision after two failed qwen2.5:7b gates):
+# heavy local tier for this one-off backfill — better abstention judgment.
+MODEL = "gemma4-qat31b:latest"
 OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
-CATEGORY_SOURCE = "llm:qwen7b:u294v1"
+CATEGORY_SOURCE = "llm:gemma31b:u294v1"
+CALL_TIMEOUT = 300
 
 LIMIT = None
 if "--limit" in sys.argv:
@@ -139,7 +142,23 @@ def build_prompt(cats: list[str], n: int, vol: str, samples: list[str],
     return "".join(parts)
 
 
-def validate(cand: str, kinds: dict, sign: int, max_abs: float):
+# bank boilerplate tokens that carry no counterparty/purpose signal
+_BOILERPLATE = {"AUTOMATED", "CREDIT", "PAYMENT", "CHEQUE", "ONLINE",
+                "TRANSACTION", "MOBILE", "VIA"}
+_OWN_NAME_RE = re.compile(
+    r"ATLANTIC ROAD|\bATR\b|SANDERCOCK|CAPNTAPSAVE|CAP N TAP", re.I)
+
+
+def has_informative_text(samples: list[str]) -> bool:
+    """True if any alphabetic token of length >=4, beyond bank boilerplate,
+    appears in the concatenated samples."""
+    for tok in re.findall(r"[A-Za-z]{4,}", " ".join(samples)):
+        if tok.upper() not in _BOILERPLATE:
+            return True
+    return False
+
+
+def validate(cand: str, kinds: dict, sign: int, max_abs: float, samples: list[str]):
     """Hard validators (code, not prompt hopes). Returns (category, violation|None).
 
     a. Direction: cost/tax kinds require negative clusters; income requires
@@ -147,8 +166,16 @@ def validate(cand: str, kinds: dict, sign: int, max_abs: float):
        positive and financing_repayment must be negative (enforced by name).
     b. bank_fee magnitude cap: genuine bank fees are small; a cluster whose
        largest |amount| exceeds £500 cannot be bank_fee (the -£195k CHAPS case).
+    c. no-informative-text: bare refs/cheque numbers carry zero classification
+       signal — no model answer is trustworthy (the '001829' £250k case).
+    d. own-entity-name credits: inbound money from our own names/facilities is
+       own-money-movement suspicion; income-kind answers forbidden (the
+       CAPNTAPSAVE £221k case).
+    e. income_other magnitude guard: large one-offs deserve human eyes.
     """
     kind = kinds.get(cand)
+    if not has_informative_text(samples):
+        return "needs_review", "no-informative-text"
     if kind in ("cost", "tax") and sign > 0:
         return "needs_review", f"direction:{cand}({kind})-on-credit"
     if kind == "income" and sign < 0:
@@ -159,18 +186,26 @@ def validate(cand: str, kinds: dict, sign: int, max_abs: float):
         return "needs_review", "direction:financing_repayment-on-credit"
     if cand == "bank_fee" and max_abs > 500:
         return "needs_review", f"magnitude:bank_fee-max-abs-{max_abs:.2f}>500"
+    if sign > 0 and kind == "income" and _OWN_NAME_RE.search(" ".join(samples)):
+        return "needs_review", f"own-name-credit:{cand}"
+    if cand == "income_other" and max_abs > 10000:
+        return "needs_review", f"magnitude:income_other-max-abs-{max_abs:.2f}>10000"
     return cand, None
 
 
 def classify(prompt: str) -> dict:
+    # think:false is mandatory for gemma4-qat31b: it's a thinking model and
+    # without it the whole num_predict budget burns in the (stripped) thinking
+    # channel — response comes back EMPTY, indistinguishable from abstention.
+    # Cost us a 40-cluster bogus partial run 2026-07-05; see task-5-report.
     req = urllib.request.Request(
         OLLAMA_URL, method="POST",
         data=json.dumps({
-            "model": MODEL, "prompt": prompt, "stream": False,
+            "model": MODEL, "prompt": prompt, "stream": False, "think": False,
             "options": {"temperature": 0, "num_predict": 120},
         }).encode(),
         headers={"Content-Type": "application/json"})
-    raw = json.loads(urllib.request.urlopen(req, timeout=120).read()).get("response", "").strip()
+    raw = json.loads(urllib.request.urlopen(req, timeout=CALL_TIMEOUT).read()).get("response", "").strip()
     if raw.startswith("```"):
         raw = raw.strip("`")
         raw = raw[4:] if raw.lower().startswith("json") else raw
@@ -204,10 +239,16 @@ def main():
     totals: dict[str, int] = {}
     total_updated = 0
     errors = 0
+    done = 0
+    consecutive_parse_fails = 0
 
     for row in clusters:
         if len(row) < 7:
             continue
+        done += 1
+        if done % 25 == 0:
+            print(f"{datetime.now().isoformat()} progress: {done}/{len(clusters)} clusters, "
+                  f"rows_updated={total_updated}, errors={errors}", flush=True)
         ckey, n_s, vol_s, samples_raw, min_amt, max_amt, entity_id = row[:7]
         samples = parse_pg_array(samples_raw)
         try:
@@ -230,11 +271,23 @@ def main():
             res = classify(prompt)
             cand = (res.get("category") or "").strip()
             if cand in allowed:
-                category, violation = validate(cand, kinds, sign, max_abs)
-            else:
+                category, violation = validate(cand, kinds, sign, max_abs, samples)
+                consecutive_parse_fails = 0
+            elif cand:
                 category = "needs_review"
-                if cand:
-                    violation = f"non-registry:{cand[:40]}"
+                violation = f"non-registry:{cand[:40]}"
+                consecutive_parse_fails = 0
+            else:
+                # empty/unparseable model output is NOT an abstention — flag it
+                category = "needs_review"
+                violation = "empty-or-unparseable-response"
+                errors += 1
+                consecutive_parse_fails += 1
+                if consecutive_parse_fails >= 10:
+                    print("FATAL: 10 consecutive empty/unparseable model responses "
+                          "— model/config problem, aborting before mass-writing "
+                          "bogus needs_review", flush=True)
+                    sys.exit(2)
         except Exception as e:
             errors += 1
             print(f"CLUSTER {ckey} n={n} vol={vol_s} ERROR {str(e)[:120]} -> needs_review")
@@ -263,7 +316,8 @@ def main():
         totals[category] = totals.get(category, 0) + rows_touched
 
         viol = f" VIOLATION={violation}" if violation else ""
-        print(f"CLUSTER {ckey} n={n} vol={vol_s} -> {category} (updated={rows_touched}){viol}")
+        print(f"CLUSTER {ckey} n={n} vol={vol_s} -> {category} (updated={rows_touched}){viol}",
+              flush=True)
         time.sleep(0.2)
 
     # Full run only: everything below the model gate (sum(abs(amount)) < 250
