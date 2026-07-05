@@ -204,6 +204,10 @@ def main():
          AND pdf_local_path IS NOT NULL
          AND coalesce(gross_amount,0)=0
          AND coalesce(is_statement,false)=false
+         -- stmt-sweep-20260705 guard: never vision-extract docs that LOOK like
+         -- supplier statements before they've been classified — a statement's
+         -- "total due" would land as an invoice gross and double-count costs.
+         AND coalesce(subject,'') || ' ' || coalesce(first_attachment_path,'') !~* '\\mstatement\\M'
          AND vision_attempts < {MAX_ATTEMPTS}
        ORDER BY last_vision_attempt ASC NULLS FIRST, received_at DESC
        LIMIT {LIMIT};""")
