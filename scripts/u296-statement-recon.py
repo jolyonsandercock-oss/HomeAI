@@ -145,7 +145,10 @@ def pdfplumber_extract(pdf_bytes: bytes, filename: str = "doc.pdf"):
 def fetch_pdf_via_gmail(account: str, msgid: str, row_id: int):
     """Same idiom as u284-pdf-fetch-backfill.sh: hop into homeai-bot-responder
     (only container with google-fetch DNS reachability), pull the first PDF
-    attachment, return raw bytes. Timeout-bounded, returns None on any error."""
+    attachment. Returns (raw_bytes|None, reason) — reason 'no-pdf-attachment'
+    means the message fetched fine but carries no PDF (e.g. the 2022 Bidfresh/
+    Sidetrade statements attach .xls): that is PERMANENT, not a fetch error,
+    and the caller retires the doc instead of retrying it every run."""
     py = (
         "import os, json, urllib.request, sys\n"
         "a, m = os.environ['ACCT'], os.environ['MSGID']\n"
@@ -172,25 +175,27 @@ def fetch_pdf_via_gmail(account: str, msgid: str, row_id: int):
              "homeai-bot-responder", "python3", "-"],
             input=py, capture_output=True, text=True, timeout=90)
     except Exception:
-        return None
+        return None, "fetch-error"
     out = (r.stdout or "").strip()
-    if not out or out in ("NOPDF", "NODATA") or out.startswith("ERR:"):
-        return None
+    if out == "NOPDF":
+        return None, "no-pdf-attachment"
+    if not out or out == "NODATA" or out.startswith("ERR:"):
+        return None, "fetch-error"
     try:
         raw = base64.urlsafe_b64decode(out + "=" * (-len(out) % 4))
     except Exception:
-        return None
+        return None, "fetch-error"
     os.makedirs(FETCH_DIR, exist_ok=True)
     path = f"{FETCH_DIR}/{row_id}.pdf"
     try:
         with open(path, "wb") as f:
             f.write(raw)
     except Exception:
-        return raw  # still usable even if we couldn't persist it
+        return raw, "ok"  # still usable even if we couldn't persist it
     if MODE == "apply":
         psql_exec(f"UPDATE vendor_invoice_inbox SET pdf_local_path='{esc(path)}', "
                   f"pdf_fetched_at=now() WHERE id={int(row_id)} AND pdf_local_path IS NULL;")
-    return raw
+    return raw, "ok"
 
 
 def get_statement_text(row: dict):
@@ -210,7 +215,7 @@ def get_statement_text(row: dict):
     if SKIP_FETCH:
         return None, "no-text-skip-fetch"
     if row.get("source_email_id"):
-        raw = fetch_pdf_via_gmail(row.get("account") or "admin", row["source_email_id"], row["id"])
+        raw, reason = fetch_pdf_via_gmail(row.get("account") or "admin", row["source_email_id"], row["id"])
         if raw:
             try:
                 text = pdfplumber_extract(raw, f"{row['id']}.pdf")
@@ -218,6 +223,8 @@ def get_statement_text(row: dict):
                     return text, "gmail_fetch"
             except Exception as e:
                 return None, f"pdfplumber-after-fetch:{e}"
+        if reason == "no-pdf-attachment":
+            return None, "no-pdf-attachment"
         return None, "gmail-fetch-failed"
     return None, "no-source"
 
@@ -551,6 +558,18 @@ def main():
                    "account": acct or "admin", "source_email_id": semail or None}
             text, src = get_statement_text(row)
             if not text:
+                if src == "no-pdf-attachment":
+                    # Permanent: the email has no PDF (xls/link-only statements).
+                    # Retire with a marker row so it's never re-picked; transient
+                    # fetch errors below still retry next run.
+                    print(f"  #{rid} {vdom or vname or '?':30} — NO PDF ATTACHMENT (retired)", flush=True)
+                    if MODE == "apply":
+                        psql_exec(f"DELETE FROM statement_recon_lines WHERE statement_id={rid};")
+                        psql_exec(f"""INSERT INTO statement_recon_lines
+                            (statement_id, vendor_key, invoice_ref, match_method)
+                            VALUES ({rid}, '{esc(vendor_key(vdom, vname))}', NULL, 'no-pdf');""")
+                    processed += 1
+                    continue
                 print(f"  #{rid} {vdom or vname or '?':30} — NO TEXT ({src})", flush=True)
                 errors += 1
                 continue
