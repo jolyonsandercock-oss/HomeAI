@@ -144,7 +144,31 @@ not the full history — so this augments the email feed, doesn't replace it.
 
 ---
 
-## Phase E — TouchOffice: DOM-scrape → JSON API (the bonus win)
+## Phase E — TouchOffice: DOM-scrape → API — SPIKED & PARKED 2026-07-10
+
+**Spike result (do not build as planned):** the widget endpoint
+`/apps/ajaxloader?call=fixedtotal` exists and returns the right table, BUT:
+- it returns an **HTML table fragment**, not JSON (only the config calls
+  `getUseConsolidatedWidgets` / `lang.json` are JSON);
+- **date and site are NOT parameters** — the real widget request is genuinely
+  `postdata=[]`; scoping comes entirely from session state set by the site
+  `<select>` change + the filter POST to `/`.
+- Two reconcile attempts against head_office 2026-07-09 both returned the wrong
+  slice (unfiltered "today", single till) — the session-establishment dance is
+  exactly what the current browser scraper does with its reload + scroll +
+  `data-loaded=true` waits. Calling the endpoint "headless" would mean
+  faithfully replaying that fragile sequence, so it is NOT the clean
+  parameterised API the Caterbook discovery was.
+
+**Verdict:** keep the browser scraper. The endpoint is real but session-coupled;
+no penny-exact reconcile achieved, so per the guard below nothing shipped.
+**Only worth revisiting** if (a) we capture the exact session-establishment
+requests and prove a pure-`httpx` session (cookie `icrtouch_connect_login_id`,
+login POST `/auth/login`) can drive it — which would at least drop the Chromium
+dependency — or (b) ICRTouch's dealer (branding "WESTERNO") grants the official
+TouchOffice Web API. Neither is a quick win; not scheduled.
+
+<details><summary>Original (pre-spike) plan — retained for the revisit</summary>
 
 **Why:** the browser scrape is the single slowest, most fragile job we run (5-min
 timeouts, lazy-load scrolls, per-widget table walks, transient DNS retries). The

@@ -44,6 +44,7 @@ EXCLUDE_SUBSTR = [
     "partition-maintenance",                           # replaced in Task 8
 ]
 NAME_MAP = {  # script basename -> registry name (existing names verified in Step 3)
+    "u310-gbp-reviews.sh": "gbp_reviews",  # cron added when Vault secret/gbp exists (Phase A)
     "u241-supervisor.sh": "supervisor", "u33-rejection-digest.sh": "rejection_digest",
     "u62-calendar-sync.sh": "calendar_sync", "u165-freshness-watcher.sh": "freshness_watcher_u165",
     "u33-touchoffice-realtime.sh": "touchoffice_realtime", "u54-pipeline-watchdog.sh": "pipeline_watchdog_u54",
