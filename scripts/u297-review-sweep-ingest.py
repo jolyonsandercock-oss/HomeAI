@@ -52,20 +52,69 @@ def esc(s):
     return (s or "").replace("'", "''")
 
 
+def load_snapshot_draft() -> dict | None:
+    """Primary delivery path since 2026-07-10: the cloud routine cannot push
+    git branches (4 consecutive silent failures), so it now leaves the JSON
+    snapshot as a Gmail DRAFT in Jo's account, subject 'review-sweep-snapshot'.
+    Read the newest one via google-fetch (hop through homeai-bot-responder —
+    the only container with google-fetch DNS reachability). Drafts accumulate
+    one per day; newest wins."""
+    py = (
+        "import json, urllib.request, urllib.parse, base64, sys\n"
+        "q = urllib.parse.urlencode({'account':'jo','q':'in:draft subject:review-sweep-snapshot','max_results':5})\n"
+        "msgs = json.loads(urllib.request.urlopen('http://google-fetch:8011/messages?'+q, timeout=30).read())\n"
+        "msgs = msgs.get('messages', msgs) or []\n"
+        "if not msgs: print('NODRAFT'); sys.exit(0)\n"
+        "newest = max(msgs, key=lambda m: int(m.get('internal_date') or 0))\n"
+        "full = json.loads(urllib.request.urlopen(f\"http://google-fetch:8011/message/jo/{newest['id']}\", timeout=30).read())\n"
+        "def body_text(p):\n"
+        "    if p.get('mimeType','').startswith('text/plain') and p.get('body',{}).get('data'):\n"
+        "        return base64.urlsafe_b64decode(p['body']['data'] + '=' * (-len(p['body']['data']) % 4)).decode('utf-8','replace')\n"
+        "    for c in p.get('parts',[]) or []:\n"
+        "        t = body_text(c)\n"
+        "        if t: return t\n"
+        "    return None\n"
+        "t = body_text(full.get('payload', full))\n"
+        "print(t if t else 'NOBODY')\n"
+    )
+    r = subprocess.run(["docker", "exec", "-i", "homeai-bot-responder", "python3", "-"],
+                       input=py, capture_output=True, text=True, timeout=90)
+    out = (r.stdout or "").strip()
+    if r.returncode != 0 or not out or out in ("NODRAFT", "NOBODY"):
+        print(f"draft path: {out or r.stderr.strip()[:120] or 'failed'}")
+        return None
+    # strip accidental markdown fences before parsing
+    if out.startswith("```"):
+        out = out.strip("`\n")
+        out = out[out.find("{"):]
+    try:
+        snap = json.loads(out[out.find("{"):])
+    except Exception as e:
+        print(f"draft path: body not parseable JSON ({e})")
+        return None
+    return snap
+
+
 def load_snapshot() -> dict:
     if len(sys.argv) > 2 and sys.argv[1] == "--file":
         return json.load(open(sys.argv[2]))
+    snap = load_snapshot_draft()
+    if snap is not None:
+        print("snapshot source: gmail draft")
+        return snap
+    # legacy fallback: the git branch relay (never worked from the cloud env,
+    # kept in case delivery moves back to git)
     f = subprocess.run(["git", "-C", REPO, "fetch", REMOTE, BRANCH],
                        capture_output=True, text=True, timeout=120)
     if f.returncode != 0:
-        # branch absent = routine hasn't produced a snapshot yet; not an error
-        print(f"no {BRANCH} branch on {REMOTE} yet ({f.stderr.strip().splitlines()[-1] if f.stderr.strip() else 'fetch failed'})")
+        print(f"no snapshot delivered yet (no draft, no {BRANCH} branch on {REMOTE})")
         print("OPS_ROWS=0")
         sys.exit(0)
     s = subprocess.run(["git", "-C", REPO, "show", f"FETCH_HEAD:{SNAPSHOT}"],
                        capture_output=True, text=True, timeout=30)
     if s.returncode != 0:
         sys.exit(f"snapshot file missing on branch: {s.stderr.strip()}")
+    print("snapshot source: git branch")
     return json.loads(s.stdout)
 
 
