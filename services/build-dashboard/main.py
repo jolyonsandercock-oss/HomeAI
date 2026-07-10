@@ -6782,3 +6782,233 @@ async def sender_rules_delete(body: dict = Body(...)):
         return {"ok": True, "counts": counts}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bank statement browser + manual recategorise (2026-07-10) — owner-only.
+#
+# Registered under /private/* — the existing owner-focused IA zone (see
+# private-today.html, private-family.html etc). Enforcement is at the API
+# layer, matching the only other owner-only data surface in this file
+# (/api/memory/*): every /api/bank/* endpoint 403s unless
+# _current_realm.get() == "owner", which REALM_ENFORCE=1 sets from Authelia's
+# Remote-Groups (or an explicit X-Realm override — see realm_middleware
+# above). The page route itself serves the static shell unconditionally, same
+# as every other /private/* page in this file — it holds no data itself, and
+# every fetch() it makes will 403 for a non-owner session.
+#
+# Dedup: this ledger has duplicate rows (same account/date/amount/description
+# imported twice — see feedback_bank_txn_duplicate_rows). Every read goes
+# through _BANK_DEDUP_CTE and filters to rn=1.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_BANK_DEDUP_CTE = """
+WITH d AS (
+  SELECT *, row_number() OVER (
+    PARTITION BY bank_account_id, transaction_date, amount, description
+    ORDER BY id
+  ) rn
+  FROM bank_transactions
+)
+"""
+
+def _bank_owner_guard():
+    if _current_realm.get() != "owner":
+        return JSONResponse({"error": "bank data is owner-only"}, status_code=403)
+    return None
+
+
+def _bank_where(account: int, month: str, category: str, q: str, needs_review: bool):
+    """Build the WHERE clause (rn=1 always) + positional args for the deduped
+    bank_transactions CTE. Raises ValueError on a malformed month."""
+    clauses = ["d.rn = 1"]
+    args: list = []
+    if account:
+        args.append(account)
+        clauses.append(f"d.bank_account_id = ${len(args)}")
+    if month:
+        y_s, _, m_s = month.partition("-")
+        y, m = int(y_s), int(m_s)
+        start = date(y, m, 1)
+        end = date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)
+        args.append(start)
+        clauses.append(f"d.transaction_date >= ${len(args)}")
+        args.append(end)
+        clauses.append(f"d.transaction_date < ${len(args)}")
+    if category:
+        args.append(category)
+        clauses.append(f"d.category = ${len(args)}")
+    if q:
+        args.append(f"%{q}%")
+        clauses.append(f"d.description ILIKE ${len(args)}")
+    if needs_review:
+        clauses.append("(d.category = 'needs_review' OR d.category IS NULL)")
+    return "WHERE " + " AND ".join(clauses), args
+
+
+@app.get("/private/bank")
+async def bank_page():
+    return FileResponse(str(STATIC / "bank.html"))
+
+
+@app.get("/api/bank/accounts")
+async def api_bank_accounts():
+    g = _bank_owner_guard()
+    if g: return g
+    rows = await db_all("SELECT id, account_name, entity_id FROM bank_accounts ORDER BY account_name")
+    return {"rows": [dict(r) for r in rows]}
+
+
+@app.get("/api/bank/categories")
+async def api_bank_categories():
+    g = _bank_owner_guard()
+    if g: return g
+    rows = await db_all("SELECT category, kind FROM bank_category_registry ORDER BY kind, category")
+    return {"rows": [dict(r) for r in rows]}
+
+
+@app.get("/api/bank/transactions")
+async def api_bank_transactions(
+        account: int = Query(0),
+        month: str = Query(""),
+        category: str = Query(""),
+        q: str = Query(""),
+        needs_review: bool = Query(True),
+        offset: int = Query(0, ge=0)):
+    g = _bank_owner_guard()
+    if g: return g
+    try:
+        where, args = _bank_where(account, month, category, q, needs_review)
+    except (ValueError, IndexError):
+        return JSONResponse({"error": "month must be YYYY-MM"}, status_code=400)
+
+    total_row = await db_one(f"{_BANK_DEDUP_CTE} SELECT count(*) AS n FROM d {where}", *args)
+    total = total_row["n"] if total_row else 0
+
+    lim_i, off_i = len(args) + 1, len(args) + 2
+    rows = await db_all(f"""
+        {_BANK_DEDUP_CTE}
+        SELECT d.id, d.transaction_date, d.description, d.amount, d.balance,
+               d.reference, d.category, d.category_confidence, d.category_source,
+               d.bank_account_id, d.entity_id,
+               ba.account_name, reg.kind
+          FROM d
+          LEFT JOIN bank_accounts ba ON ba.id = d.bank_account_id
+          LEFT JOIN bank_category_registry reg ON reg.category = d.category
+        {where}
+        ORDER BY d.transaction_date DESC, d.id DESC
+        LIMIT ${lim_i} OFFSET ${off_i}
+    """, *args, 200, offset)
+
+    out = []
+    for r in rows:
+        row = dict(r)
+        row["transaction_date"] = row["transaction_date"].isoformat() if row.get("transaction_date") else None
+        for k in ("amount", "balance", "category_confidence"):
+            row[k] = float(row[k]) if row.get(k) is not None else None
+        out.append(row)
+    return {"total": total, "offset": offset, "limit": 200, "rows": out}
+
+
+@app.get("/api/bank/summary")
+async def api_bank_summary(
+        account: int = Query(0),
+        month: str = Query(""),
+        category: str = Query(""),
+        q: str = Query(""),
+        needs_review: bool = Query(True)):
+    g = _bank_owner_guard()
+    if g: return g
+    try:
+        where, args = _bank_where(account, month, category, q, needs_review)
+    except (ValueError, IndexError):
+        return JSONResponse({"error": "month must be YYYY-MM"}, status_code=400)
+
+    rows = await db_all(f"""
+        {_BANK_DEDUP_CTE}
+        SELECT COALESCE(reg.kind, 'unknown') AS kind, count(*) AS n, sum(d.amount) AS total
+          FROM d
+          LEFT JOIN bank_category_registry reg ON reg.category = d.category
+        {where}
+        GROUP BY 1 ORDER BY 1
+    """, *args)
+    return {"rows": [{"kind": r["kind"], "n": r["n"],
+                       "total": float(r["total"]) if r["total"] is not None else 0.0} for r in rows]}
+
+
+@app.post("/api/bank/recategorise")
+async def api_bank_recategorise(body: dict = Body(...)):
+    g = _bank_owner_guard()
+    if g: return g
+    try:
+        txn_id = int(body.get("txn_id"))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "txn_id (int) required"}, status_code=400)
+    new_category = (body.get("category") or "").strip()
+    note = (body.get("note") or "").strip()[:2000] or None
+    if not new_category:
+        return JSONResponse({"error": "category required"}, status_code=400)
+
+    async with db_session() as c:
+        reg = await c.fetchrow("SELECT 1 FROM bank_category_registry WHERE category=$1", new_category)
+        if not reg:
+            return JSONResponse({"error": f"unknown category {new_category!r}"}, status_code=400)
+        old = await c.fetchrow("SELECT category FROM bank_transactions WHERE id=$1", txn_id)
+        if not old:
+            return JSONResponse({"error": "txn not found"}, status_code=404)
+        await c.execute("""
+            UPDATE bank_transactions
+               SET category=$1, category_confidence=1.0, category_source='jo:manual'
+             WHERE id=$2
+        """, new_category, txn_id)
+        await c.execute("""
+            INSERT INTO _bank_manual_log (txn_id, old_category, new_category, note)
+            VALUES ($1,$2,$3,$4)
+        """, txn_id, old["category"], new_category, note)
+    return {"ok": True, "txn_id": txn_id, "old_category": old["category"], "new_category": new_category}
+
+
+# NOTE: bot_instructions.source is CHECK-constrained to
+# ('email','telegram','manual') — the brief's suggested source value
+# 'dashboard-bank' would violate that constraint on every insert, so this
+# uses source='manual' and identifies dashboard-bank rows by the
+# (from_user, raw_subject) pair below instead. See bank-page-report.md.
+_BANK_DEF_FROM_USER = "jo-dashboard"
+_BANK_DEF_SUBJECT = "Bank category definition"
+
+@app.post("/api/bank/definition")
+async def api_bank_definition(body: dict = Body(...)):
+    g = _bank_owner_guard()
+    if g: return g
+    text = (body.get("text") or "").strip()
+    if not text:
+        return JSONResponse({"error": "text required"}, status_code=400)
+    async with db_session(entity="1", realm="owner") as c:
+        row = await c.fetchrow("""
+            INSERT INTO bot_instructions
+                (source, source_id, from_user, sender_email, received_at,
+                 raw_subject, raw_text, status, lane, entity_id, realm)
+            VALUES ('manual', NULL, $1, NULL, now(), $2, $3, 'pending', 'query', 1, 'owner')
+            RETURNING id, status
+        """, _BANK_DEF_FROM_USER, _BANK_DEF_SUBJECT, text[:4000])
+    return {"ok": True, "id": row["id"], "status": row["status"]}
+
+
+@app.get("/api/bank/definitions")
+async def api_bank_definitions():
+    g = _bank_owner_guard()
+    if g: return g
+    rows = await db_all("""
+        SELECT id, raw_text, status, received_at, resolved_at
+          FROM bot_instructions
+         WHERE source = 'manual' AND from_user = $1 AND raw_subject = $2
+         ORDER BY received_at DESC
+         LIMIT 10
+    """, _BANK_DEF_FROM_USER, _BANK_DEF_SUBJECT)
+    out = []
+    for r in rows:
+        row = dict(r)
+        row["received_at"] = row["received_at"].isoformat() if row.get("received_at") else None
+        row["resolved_at"] = row["resolved_at"].isoformat() if row.get("resolved_at") else None
+        out.append(row)
+    return {"rows": out}

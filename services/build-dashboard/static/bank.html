@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0a0a0b">
+<title>Bank — Home AI</title>
+<!--
+  2026-07-10 (U-bank-page). Owner-only. Deliberately does NOT load
+  /static/_components/realm-toggle.js — that script lets a page send a
+  client-supplied X-Realm header, which the server's realm middleware
+  trusts ahead of the Authelia-derived Remote-Groups header (see
+  main.py realm_middleware). For most pages that is fine (it is just a
+  Work/All view toggle on the SAME authenticated owner). For a page that
+  is exposing raw bank data end-to-end, we skip it and let the server
+  derive the realm purely from Remote-Groups, same as counterparty-review.html.
+  Every /api/bank/* call still 403s server-side unless that resolves to
+  "owner" — this is belt-and-braces, not the only gate.
+-->
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; color: #e2e8f0;
+    background: linear-gradient(180deg, #0f172a 0%, #020617 100%);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+  .card { background: rgba(15,23,42,0.7); border: 1px solid rgba(148,163,184,0.15); border-radius: 14px; padding: 12px; }
+  .muted { color: #94a3b8; }
+  .pos { color: #34d399; } .neg { color: #fb7185; }
+  header.top {
+    position: sticky; top: 0; z-index: 40; backdrop-filter: blur(10px);
+    background: rgba(2,6,23,0.85); border-bottom: 1px solid rgba(148,163,184,0.12);
+    padding: 10px 12px; display: flex; align-items: center; gap: 10px;
+  }
+  header.top h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header.top a.home { display: flex; align-items: center; gap: 6px; text-decoration: none; min-height: 44px; }
+  main { max-width: 720px; margin: 0 auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+
+  label.f { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #94a3b8; flex: 1; min-width: 120px; }
+  .filters-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  select, input[type=text], input[type=month], input[type=search], textarea {
+    background: #0f172a; border: 1px solid #334155; color: #e2e8f0; border-radius: 8px;
+    padding: 8px 10px; font-size: 14px; min-height: 40px; width: 100%;
+  }
+  textarea { min-height: 70px; resize: vertical; font-family: inherit; }
+  .toggle-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  input[type=checkbox] { width: 18px; height: 18px; }
+
+  .summary-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+  .chip { flex: 0 0 auto; padding: 8px 12px; border-radius: 10px; background: rgba(30,41,59,0.7); border: 1px solid rgba(148,163,184,0.2); font-size: 12px; min-width: 92px; }
+  .chip .k { text-transform: uppercase; letter-spacing: .04em; color: #94a3b8; font-size: 10px; }
+  .chip .n { font-size: 15px; font-weight: 600; margin-top: 2px; }
+  .kind-income { border-color: rgba(52,211,153,0.4); } .kind-income .n { color: #34d399; }
+  .kind-cost { border-color: rgba(251,113,133,0.4); } .kind-cost .n { color: #fb7185; }
+  .kind-transfer { border-color: rgba(96,165,250,0.4); } .kind-transfer .n { color: #60a5fa; }
+  .kind-financing { border-color: rgba(196,181,253,0.4); } .kind-financing .n { color: #c4b5fd; }
+  .kind-tax { border-color: rgba(251,191,36,0.4); } .kind-tax .n { color: #fbbf24; }
+  .kind-neutral, .kind-unknown { border-color: rgba(148,163,184,0.3); } .kind-neutral .n, .kind-unknown .n { color: #cbd5e1; }
+
+  .txn { border-bottom: 1px solid rgba(148,163,184,0.1); padding: 9px 2px; cursor: pointer; }
+  .txn:last-child { border-bottom: none; }
+  .txn-row1 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .txn-desc { font-size: 13.5px; color: #e2e8f0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .txn.open .txn-desc { white-space: normal; overflow: visible; }
+  .txn-amt { font-size: 14px; font-weight: 600; white-space: nowrap; }
+  .txn-row2 { display: flex; gap: 6px; align-items: center; margin-top: 3px; flex-wrap: wrap; }
+  .txn-date { font-size: 11px; color: #64748b; }
+  .txn-acct { font-size: 11px; color: #94a3b8; }
+  .badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid rgba(148,163,184,0.3); }
+  .conf { font-size: 10px; color: #64748b; }
+  .src { font-size: 10px; color: #64748b; font-family: "JetBrains Mono", ui-monospace, monospace; }
+
+  .detail { margin-top: 8px; padding: 10px; background: rgba(2,6,23,0.6); border-radius: 10px; font-size: 12.5px; }
+  .detail .kv { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; border-bottom: 1px dashed rgba(148,163,184,0.1); }
+  .detail .kv span:first-child { color: #64748b; }
+  .recat { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .recat-row { display: flex; gap: 6px; }
+  .recat-row select { flex: 1; }
+  button {
+    background: rgba(30,41,59,0.8); color: #e2e8f0; border: 1px solid rgba(148,163,184,0.25);
+    border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer; min-height: 40px;
+  }
+  button.primary { background: #059669; border-color: #059669; color: #fff; font-weight: 600; }
+  button.primary:disabled { background: #334155; border-color: #334155; color: #64748b; cursor: default; }
+  button:hover:not(:disabled) { filter: brightness(1.15); }
+  .status-msg { font-size: 12px; margin-top: 4px; min-height: 16px; }
+  .status-msg.ok { color: #34d399; } .status-msg.err { color: #fb7185; }
+
+  .defs-list .def-row { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(148,163,184,0.08); font-size: 12px; }
+  .defs-list .def-row:last-child { border-bottom: none; }
+  .def-text { flex: 1; color: #cbd5e1; }
+  .def-status { flex: 0 0 auto; }
+  .status-pending { color: #fbbf24; } .status-done { color: #34d399; }
+  .status-triaged, .status-rejected, .status-duplicate { color: #94a3b8; }
+
+  .loadmore { width: 100%; }
+  h2.sec { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #94a3b8; margin: 0 0 6px; }
+  [x-cloak] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <a class="home" href="/private/more"><span style="font-size:18px;line-height:1">⌂</span><span style="font-size:13px">Home AI</span></a>
+  <h1>Bank statements</h1>
+  <span id="loadState" class="muted mono" style="margin-left:auto;font-size:11px;"></span>
+</header>
+
+<main>
+
+  <section class="card">
+    <div class="filters-row">
+      <label class="f">Account
+        <select id="fAccount"><option value="">All accounts</option></select>
+      </label>
+      <label class="f">Month
+        <input type="month" id="fMonth">
+      </label>
+      <label class="f">Category
+        <select id="fCategory"><option value="">All categories</option></select>
+      </label>
+    </div>
+    <div class="filters-row" style="margin-top:8px;">
+      <label class="f">Search description
+        <input type="search" id="fSearch" placeholder="e.g. Dojo, Amazon…" autocomplete="off">
+      </label>
+    </div>
+    <div class="toggle-row" style="margin-top:8px;">
+      <input type="checkbox" id="fNeedsReview" checked>
+      <label for="fNeedsReview">Needs review only</label>
+    </div>
+  </section>
+
+  <section class="summary-strip" id="summaryStrip"></section>
+
+  <section class="card">
+    <h2 class="sec">Transactions <span id="txnCount" class="muted" style="text-transform:none;letter-spacing:0;"></span></h2>
+    <div id="txnList"></div>
+    <button class="loadmore" id="loadMoreBtn" style="display:none;margin-top:8px;">Load 200 more</button>
+    <p id="emptyMsg" class="muted" style="display:none;font-size:13px;">No transactions match these filters.</p>
+  </section>
+
+  <section class="card">
+    <h2 class="sec">Definition box</h2>
+    <p class="muted" style="font-size:12px;margin-top:0;">
+      Write a rule-of-thumb for how to categorise a pattern you're seeing
+      (e.g. "faster payments into the pub account are card terminal
+      settlements"). This queues an instruction for the next assistant
+      session to act on — it does not change any rows itself.
+    </p>
+    <textarea id="defText" placeholder="e.g. Payments from 'CLEARBREW' are the beer-line-cleaning contractor, category supplier_payment"></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px;">
+      <button class="primary" id="defSubmit">Queue definition</button>
+    </div>
+    <div id="defStatus" class="status-msg"></div>
+    <h2 class="sec" style="margin-top:14px;">Last 10 definitions</h2>
+    <div class="defs-list" id="defsList"></div>
+  </section>
+
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+async function jget(u){ const r = await fetch(u); if(!r.ok){ const e=await r.json().catch(()=>({error:r.status})); throw new Error(e.error||('HTTP '+r.status)); } return r.json(); }
+async function jpost(u,b){ const r = await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); const j = await r.json().catch(()=>({error:'bad response'})); if(!r.ok || j.error){ throw new Error(j.error || ('HTTP '+r.status)); } return j; }
+function escapeHtml(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmtMoney(v){ if(v==null) return '—'; const n=Number(v); return (n<0?'-£':'£')+Math.abs(n).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtPct(v){ if(v==null) return ''; return Math.round(v*100)+'%'; }
+
+let categories = [];
+let offset = 0;
+let total = 0;
+let rows = [];
+let openId = null;
+
+function currentFilters(){
+  return {
+    account: $('#fAccount').value,
+    month: $('#fMonth').value,
+    category: $('#fCategory').value,
+    q: $('#fSearch').value.trim(),
+    needs_review: $('#fNeedsReview').checked,
+  };
+}
+
+function qs(f, extra){
+  const p = new URLSearchParams();
+  if (f.account) p.set('account', f.account);
+  if (f.month) p.set('month', f.month);
+  if (f.category) p.set('category', f.category);
+  if (f.q) p.set('q', f.q);
+  p.set('needs_review', f.needs_review ? 'true' : 'false');
+  Object.entries(extra||{}).forEach(([k,v]) => p.set(k, v));
+  return p.toString();
+}
+
+async function loadFilterOptions(){
+  const [accts, cats] = await Promise.all([
+    jget('/api/bank/accounts'),
+    jget('/api/bank/categories'),
+  ]);
+  const aSel = $('#fAccount');
+  accts.rows.forEach(a => {
+    const o = document.createElement('option');
+    o.value = a.id; o.textContent = a.account_name;
+    aSel.appendChild(o);
+  });
+  categories = cats.rows;
+  const cSel = $('#fCategory');
+  categories.forEach(c => {
+    const o = document.createElement('option');
+    o.value = c.category; o.textContent = `${c.category} (${c.kind})`;
+    cSel.appendChild(o);
+  });
+}
+
+async function loadSummary(){
+  const f = currentFilters();
+  const d = await jget('/api/bank/summary?' + qs(f));
+  const strip = $('#summaryStrip');
+  if (!d.rows.length) { strip.innerHTML = '<div class="muted" style="font-size:12px;">no rows</div>'; return; }
+  strip.innerHTML = d.rows.map(r => `
+    <div class="chip kind-${r.kind}">
+      <div class="k">${escapeHtml(r.kind)}</div>
+      <div class="n">${fmtMoney(r.total)}</div>
+      <div class="muted" style="font-size:10px;">${r.n} rows</div>
+    </div>`).join('');
+}
+
+async function loadTxns(reset){
+  if (reset) { offset = 0; rows = []; openId = null; }
+  $('#loadState').textContent = 'loading…';
+  const f = currentFilters();
+  const d = await jget('/api/bank/transactions?' + qs(f, {offset}));
+  total = d.total;
+  rows = reset ? d.rows : rows.concat(d.rows);
+  offset = offset + d.rows.length;
+  renderTxns();
+  $('#loadState').textContent = '';
+}
+
+function kindOf(cat){
+  const c = categories.find(c => c.category === cat);
+  return c ? c.kind : 'unknown';
+}
+
+function renderTxns(){
+  const list = $('#txnList');
+  $('#txnCount').textContent = `${rows.length} of ${total}`;
+  $('#emptyMsg').style.display = rows.length ? 'none' : 'block';
+  $('#loadMoreBtn').style.display = (offset < total) ? 'block' : 'none';
+  list.innerHTML = rows.map(r => renderTxn(r)).join('');
+}
+
+function renderTxn(r){
+  const kind = r.kind || kindOf(r.category) || 'unknown';
+  const isOpen = openId === r.id;
+  const amtCls = r.amount < 0 ? 'neg' : 'pos';
+  return `
+    <div class="txn ${isOpen?'open':''}" data-id="${r.id}" onclick="toggleTxn(${r.id})">
+      <div class="txn-row1">
+        <div class="txn-desc">${escapeHtml(r.description)}</div>
+        <div class="txn-amt mono ${amtCls}">${fmtMoney(r.amount)}</div>
+      </div>
+      <div class="txn-row2">
+        <span class="txn-date mono">${r.transaction_date||'—'}</span>
+        <span class="txn-acct">${escapeHtml(r.account_name||('acct '+r.bank_account_id))}</span>
+        <span class="badge kind-${kind}">${escapeHtml(r.category||'—')}</span>
+        <span class="conf">${fmtPct(r.category_confidence)}</span>
+        <span class="src">${escapeHtml(r.category_source||'')}</span>
+      </div>
+      ${isOpen ? renderDetail(r) : ''}
+    </div>`;
+}
+
+function renderDetail(r){
+  const catOptions = categories.map(c =>
+    `<option value="${escapeHtml(c.category)}" ${c.category===r.category?'selected':''}>${escapeHtml(c.category)} (${escapeHtml(c.kind)})</option>`).join('');
+  return `
+    <div class="detail" onclick="event.stopPropagation()">
+      <div class="kv"><span>Full description</span><span style="text-align:right;max-width:65%;">${escapeHtml(r.description)}</span></div>
+      <div class="kv"><span>Txn id</span><span class="mono">${r.id}</span></div>
+      <div class="kv"><span>Date</span><span class="mono">${r.transaction_date||'—'}</span></div>
+      <div class="kv"><span>Amount</span><span class="mono">${fmtMoney(r.amount)}</span></div>
+      <div class="kv"><span>Balance</span><span class="mono">${fmtMoney(r.balance)}</span></div>
+      <div class="kv"><span>Reference</span><span>${escapeHtml(r.reference||'—')}</span></div>
+      <div class="kv"><span>Account</span><span>${escapeHtml(r.account_name||'')} (#${r.bank_account_id})</span></div>
+      <div class="kv"><span>Entity</span><span class="mono">${r.entity_id}</span></div>
+      <div class="kv"><span>Category source</span><span class="mono">${escapeHtml(r.category_source||'—')}</span></div>
+      <div class="kv"><span>Confidence</span><span class="mono">${fmtPct(r.category_confidence)}</span></div>
+
+      <div class="recat">
+        <label class="f" style="font-size:11px;">Recategorise
+          <select id="recat-cat-${r.id}">${catOptions}</select>
+        </label>
+        <label class="f" style="font-size:11px;">Note (optional)
+          <input type="text" id="recat-note-${r.id}" placeholder="why?">
+        </label>
+        <div class="recat-row">
+          <button class="primary" onclick="submitRecat(${r.id})">Save category</button>
+        </div>
+        <div class="status-msg" id="recat-status-${r.id}"></div>
+      </div>
+    </div>`;
+}
+
+function toggleTxn(id){
+  openId = (openId === id) ? null : id;
+  renderTxns();
+}
+
+async function submitRecat(id){
+  const sel = $('#recat-cat-'+id), note = $('#recat-note-'+id), status = $('#recat-status-'+id);
+  const category = sel.value;
+  status.textContent = 'saving…'; status.className = 'status-msg';
+  try {
+    await jpost('/api/bank/recategorise', {txn_id: id, category, note: note.value.trim()});
+    status.textContent = '✓ saved'; status.className = 'status-msg ok';
+    // Refresh so the summary + (if needs_review-only) the queue count stay honest.
+    await loadSummary();
+    await loadTxns(true);
+  } catch (e) {
+    status.textContent = '✗ ' + e.message; status.className = 'status-msg err';
+  }
+}
+
+async function loadDefinitions(){
+  const d = await jget('/api/bank/definitions');
+  const el = $('#defsList');
+  if (!d.rows.length) { el.innerHTML = '<div class="muted" style="font-size:12px;">none yet</div>'; return; }
+  el.innerHTML = d.rows.map(r => `
+    <div class="def-row">
+      <span class="def-text">${escapeHtml(r.raw_text)}</span>
+      <span class="def-status status-${escapeHtml(r.status)}">${escapeHtml(r.status)}</span>
+    </div>`).join('');
+}
+
+async function submitDefinition(){
+  const ta = $('#defText'), status = $('#defStatus');
+  const text = ta.value.trim();
+  if (!text) return;
+  status.textContent = 'saving…'; status.className = 'status-msg';
+  try {
+    await jpost('/api/bank/definition', {text});
+    status.textContent = '✓ queued for next session'; status.className = 'status-msg ok';
+    ta.value = '';
+    await loadDefinitions();
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  } catch (e) {
+    status.textContent = '✗ ' + e.message; status.className = 'status-msg err';
+  }
+}
+
+let searchDebounce = null;
+function onFilterChange(){
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => { loadSummary(); loadTxns(true); }, 250);
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  $('#defSubmit').addEventListener('click', submitDefinition);
+  $('#loadMoreBtn').addEventListener('click', () => loadTxns(false));
+  ['fAccount','fMonth','fCategory','fNeedsReview'].forEach(id => $('#'+id).addEventListener('change', onFilterChange));
+  $('#fSearch').addEventListener('input', onFilterChange);
+  try {
+    await loadFilterOptions();
+    await Promise.all([loadSummary(), loadTxns(true), loadDefinitions()]);
+  } catch (e) {
+    $('#loadState').textContent = 'error: ' + e.message;
+    $('#loadState').className = 'mono';
+    $('#loadState').style.color = '#fb7185';
+  }
+});
+</script>
+</body>
+</html>
