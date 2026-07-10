@@ -2,6 +2,7 @@
 name: pipeline-agent
 description: n8n workflow builder — creates and tests individual pipeline workflows
 tools: [Read, Write, Bash]
+model: sonnet
 ---
 You are an n8n workflow specialist for the Home AI system.
 Read /home_ai/SPEC.md Section 6.2 for pipeline specifications before building.

@@ -173,6 +173,23 @@ Three layers:
 - **`defuddle`** (skill-dir at `~/.claude/skills/defuddle/`) — clean-extracts web article content (~80% fewer tokens than raw HTML). Triggers on "defuddle", "extract article", "clean this page", etc. Used when Hermes drops reference URLs or when reading vendor docs.
 - **`postgres` MCP** — see "Postgres MCP" section above.
 
+## Subagent model policy (2026-07-10)
+
+Expensive orchestrator, cheap workers. The main session (Fable/Opus) coordinates;
+delegated work runs on the cheapest tier that can do the role:
+
+- **Scouts / searches** → haiku. The built-in `Explore` agent inherits the
+  main-session model (expensive); a user-level Haiku shadow exists at
+  `~/.claude/agents/Explore.md` — keep it.
+- **Mechanical execution** (complete spec in the dispatch, 1–2 files) → haiku
+  or sonnet. `db-agent`/`pipeline-agent`/`security-agent` are pinned
+  `model: sonnet` in their frontmatter.
+- **Judgment work** (subtle-diff review, architecture, final whole-branch
+  review) → main-session model, stated explicitly in the dispatch.
+- Override the pin per-dispatch for risky work (RLS, irreversible DDL).
+- Don't delegate small tasks at all — subagent context reprocessing costs more
+  than doing it inline.
+
 ## Pre-push hygiene
 
 `off-host-backup` remote = backup. Before pushing, entropy-scan the staged tree for accidentally-included bootstrap-written secrets (`feedback-homeai-pre-push-scan`). `.gitignore` already covers `data/playwright-state/` (live cookies), `scripts|security/*.bak.*`.
