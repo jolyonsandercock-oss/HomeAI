@@ -678,19 +678,30 @@ async def realm_middleware(request, call_next):
         _current_realm.set("owner")
         return await call_next(request)
 
-    # Two header sources, in order of trust:
-    #   1. X-Realm — explicit override (used for testing or manual injection)
-    #      Accepts UI vocabulary: 'work' | 'all' | 'family' | 'owner'.
-    #   2. Remote-Groups — Authelia forward_auth carries the authenticated
-    #      user's group list comma-separated; pick the first valid realm.
+    # Realm resolution (hardened 2026-07-10 — X-Realm privilege escalation).
+    # Caddy strips client-supplied Remote-* headers and Authelia injects the
+    # real ones, so Remote-Groups is trustworthy when present, and ABSENT only
+    # for in-network callers (which cannot be reached through Caddy without
+    # forward_auth). Rules:
+    #   - Remote-Groups contains 'admin' (Jo): X-Realm picks the view
+    #     ('work' | 'all' | 'personal' | legacy aliases), default owner.
+    #   - Remote-Groups is 'manager'/'staff' (Karl, staff): realm pinned to
+    #     'work'; a client-supplied X-Realm must never widen it. Before this
+    #     fix any authenticated session sending X-Realm: all got owner realm.
+    #   - No Remote-Groups (internal container-network callers, scripts):
+    #     legacy X-Realm behaviour unchanged.
     raw = (request.headers.get("X-Realm") or "").strip().lower()
-    realm = _UI_TO_DB_REALM.get(raw)
-    if not realm:
-        groups = (request.headers.get("Remote-Groups") or "").strip()
-        for g in (g.strip() for g in groups.split(",")):
-            if g in _UI_TO_DB_REALM:
-                realm = _UI_TO_DB_REALM[g]
-                break
+    groups_raw = (request.headers.get("Remote-Groups") or "").strip()
+    if groups_raw:
+        groups = {g.strip().lower() for g in groups_raw.split(",") if g.strip()}
+        if "admin" in groups:
+            realm = _UI_TO_DB_REALM.get(raw) or "owner"
+        elif groups & {"manager", "staff"}:
+            realm = "work"
+        else:
+            realm = None
+    else:
+        realm = _UI_TO_DB_REALM.get(raw)
     if not realm:
         return JSONResponse(
             {"error": "missing or invalid realm — no X-Realm and no valid Remote-Groups"},
