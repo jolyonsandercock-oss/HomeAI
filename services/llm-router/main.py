@@ -20,6 +20,12 @@ OLLAMA_HOST = os.environ["OLLAMA_HOST"]
 REDIS_HOST = os.environ["REDIS_HOST"]
 REDIS_PASSWORD = os.environ["REDIS_PASSWORD"]
 
+# Escalation shadow study (V311, 2026-07-16): serialise shadow gemma calls so
+# they never oversubscribe the single GPU (the 3x-concurrent contention that
+# caused ollama 500s during benchmarking). At most one shadow generation runs
+# at a time; escalations are ~18/day so this never queues meaningfully.
+_SHADOW_LOCK = asyncio.Lock()
+
 
 def _vault_get(path: str) -> dict:
     """Fetch a secret from Vault. Mirrors bot-responder's helper."""
@@ -244,6 +250,51 @@ async def _call_ollama(http: httpx.AsyncClient, model: str, prompt: str) -> tupl
         return text, prompt_tokens, completion_tokens, latency_ms
     except Exception as e:
         raise HTTPException(502, f"ollama error: {e}")
+
+
+async def _shadow_escalation(
+    state, trace_id, req, escalation_reason,
+    primary_tier, primary_model, hot_text, cloud_model, cloud_text,
+) -> None:
+    """Escalation shadow study (V311). Fire-and-forget: run the local heavy
+    model on the same prompt an escalation just sent to cloud, and log all
+    three answers to escalation_shadow. MUST never raise into or delay the
+    real response — every path is wrapped, and the gemma call is serialised
+    by _SHADOW_LOCK + a generous timeout so it can't storm the GPU."""
+    try:
+        model_tiers = await _get_model_tiers(state.pool)
+        shadow_model = model_tiers.get("heavy") or "gemma4-qat31b:latest"
+        shadow_text, s_lat, s_err = None, None, None
+        async with _SHADOW_LOCK:
+            start = time.time()
+            try:
+                r = await state.http.post(
+                    f"{OLLAMA_HOST}/api/generate",
+                    json={"model": shadow_model, "prompt": req.prompt, "stream": False},
+                    timeout=180.0,  # gemma-31b on long report prompts ~25-40s
+                )
+                r.raise_for_status()
+                shadow_text = r.json().get("response", "")
+            except Exception as e:
+                s_err = str(e)[:300]
+            s_lat = int((time.time() - start) * 1000)
+        excerpt = (req.prompt or "")[:500]
+        sha = hashlib.sha256((req.prompt or "").encode()).hexdigest()
+        async with state.pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO escalation_shadow
+                     (trace_id, task_type, primary_tier, primary_model,
+                      escalation_reason, prompt_excerpt, prompt_sha, hot_text,
+                      cloud_model, cloud_text, shadow_model, shadow_text,
+                      shadow_latency_ms, shadow_error)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)""",
+                trace_id, req.task_type, primary_tier, primary_model,
+                escalation_reason, excerpt, sha, hot_text,
+                cloud_model, cloud_text, shadow_model, shadow_text,
+                s_lat, s_err,
+            )
+    except Exception:
+        pass  # a shadow failure must be invisible to production
 
 
 async def _redact_via_presidio(
@@ -489,6 +540,10 @@ async def route(req: RouteRequest) -> RouteResponse:
 
     over_budget = escalated and req.allow_escalation and await _over_hard_budget(app.state.pool)
     if escalated and req.allow_escalation and not over_budget:
+        # capture the rejected primary answer + tier BEFORE cloud overwrites them
+        _shadow_hot_text = text
+        _shadow_primary_tier = tier
+        _shadow_primary_model = model_name
         model_to_use = "claude-haiku-4-5-20251001"
         try:
             text, prompt_tokens, completion_tokens, latency_ms = await _call_claude(
@@ -505,6 +560,15 @@ async def route(req: RouteRequest) -> RouteResponse:
             )
             raise
         tier = "claude"
+        # Escalation shadow study (V311): fire-and-forget local gemma-heavy on
+        # the same prompt; logs hot/cloud/shadow answers. Never awaited.
+        asyncio.create_task(
+            _shadow_escalation(
+                app.state, trace_id, req, escalation_reason,
+                _shadow_primary_tier, _shadow_primary_model,
+                _shadow_hot_text, model_to_use, text,
+            )
+        )
     elif over_budget:
         # Hard budget cap hit — keep the free local result instead of escalating.
         # This is the designed degradation: the caller (e.g. invoice ladder) still
